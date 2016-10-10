@@ -1,0 +1,97 @@
+Source: openqa
+Section: devel
+Priority: optional
+Maintainer: Hideki Yamane <henrich@debian.org>
+Build-Depends: debhelper (>= 10),
+               os-autoinst,
+               systemd,
+               ruby-sass,
+               phantomjs,
+               fdupes,
+               libmojolicious-perl (>= 5.60),
+               libtest-compile-perl,
+               libselenium-remote-driver-perl,
+               libmojolicious-plugin-assetpack-perl (>= 1.0),
+               libtimedate-perl,
+               libmojolicious-plugin-renderfile-perl,
+               libmojolicious-plugin-assetpack-perl,
+               libdbix-class-schema-config-perl,
+               libdbix-class-perl,
+               libdbix-class-optimisticlocking-perl,
+               libdbd-sqlite3-perl,
+               libdbix-class-perl (>= 0.082801),
+               libyaml-perl,
+               libconfig-inifiles-perl,
+               libsql-translator-perl,
+               libfile-copy-recursive-perl,
+               libdatetime-format-sqlite-perl,
+               libdatetime-format-sqlite-perl,
+               libaliased-perl,
+               libconfig-tiny-perl
+               libdbix-class-dynamicdefault-perl
+               libio-socket-inet6-perl,
+               libio-socket-ssl-perl,
+               libdata-dump-perl
+               libtext-markdown-perl
+               libnet-dbus-perl,
+               libipc-run-perl,
+               libarchive-extract-perl,
+               libcss-minifier-xs-perl,
+               libjavascript-minifier-xs-perl,
+Standards-Version: 3.9.8
+Homepage: http://open.qa
+Vcs-Git: https://anonscm.debian.org/collab-maint/openqa.git
+Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/openqa.git
+
+Package: openqa
+Architecture: all
+Depends: ${misc:Depends}, openqa-common, openqa-client
+Description: 
+ openQA is a testing framework that allows you to test GUI applications on one
+ hand and bootloader and kernel on the other. In both cases, it is difficult to
+ script tests and verify the output. Output can be a popup window or it can be
+ an error in early boot even before init is executed.
+
+Package: openqa-common
+Architecture: all
+Depends: ${misc:Depends},
+               libtimedate-perl,
+               libtimedate-perl,
+               libmojolicious-plugin-renderfile-perl,
+               libmojolicious-plugin-assetpack-perl,
+               libdbix-class-schema-config-perl,
+               libdbix-class-perl,
+               libdbix-class-optimisticlocking-perl,
+               libdbd-sqlite3-perl,
+               libdbix-class-perl (>= 0.082801),
+               libyaml-perl,
+               libconfig-inifiles-perl,
+               libsql-translator-perl,
+               libfile-copy-recursive-perl,
+               libdatetime-format-sqlite-perl,
+               libdatetime-format-sqlite-perl,
+               libaliased-perl,
+               libconfig-tiny-perl
+               libdbix-class-dynamicdefault-perl
+               libio-socket-inet6-perl,
+               libio-socket-ssl-perl,
+               libdata-dump-perl
+               libtext-markdown-perl
+               libnet-dbus-perl,
+               libipc-run-perl,
+               libarchive-extract-perl,
+               libcss-minifier-xs-perl,
+               libjavascript-minifier-xs-perl,
+Description: 
+
+Package: openqa-client
+Architecture: any
+Depends: ${misc:Depends},
+Description: 
+
+Package: openqa-worker
+Architecture: all
+Depends: ${misc:Depends}, openqa-client, os-autoinst,
+         libperl-sql-splitstatement,
+Recommends: qemu,
+Description: 
