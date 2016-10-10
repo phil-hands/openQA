@@ -56,7 +56,6 @@ Package: openqa-common
 Architecture: all
 Depends: ${misc:Depends},
                libtimedate-perl,
-               libtimedate-perl,
                libmojolicious-plugin-renderfile-perl,
                libmojolicious-plugin-assetpack-perl,
                libdbix-class-schema-config-perl,
