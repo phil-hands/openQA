@@ -1,0 +1,2 @@
+openqa-worker: description-is-pkg-name openQA worker   
+openqa: description-starts-with-package-name 
