@@ -18,13 +18,13 @@ Build-Depends: debhelper (>= 10),
                libmojolicious-plugin-renderfile-perl,
                libmojolicious-plugin-assetpack-perl (>= 1.36),
                libaliased-perl,
-               libconfig-tiny-perl
-               libdbix-class-dynamicdefault-perl
+               libconfig-tiny-perl,
+               libdbix-class-dynamicdefault-perl,
                libdbix-class-schema-config-perl,
                libdbix-class-optimisticlocking-perl,
                libio-socket-ssl-perl,
-               libdata-dump-perl
-               libtext-markdown-perl
+               libdata-dump-perl,
+               libtext-markdown-perl,
                libnet-dbus-perl,
                libipc-run-perl,
                libarchive-extract-perl,
@@ -184,13 +184,13 @@ Depends: ${misc:Depends},
          libmojolicious-plugin-renderfile-perl,
          libmojolicious-plugin-assetpack-perl (>= 1.36),
          libaliased-perl,
-         libconfig-tiny-perl
-         libdbix-class-dynamicdefault-perl
+         libconfig-tiny-perl,
+         libdbix-class-dynamicdefault-perl,
          libdbix-class-schema-config-perl,
          libdbix-class-optimisticlocking-perl,
          libio-socket-ssl-perl,
-         libdata-dump-perl
-         libtext-markdown-perl
+         libdata-dump-perl,
+         libtext-markdown-perl,
          libnet-dbus-perl,
          libipc-run-perl,
          libarchive-extract-perl,
