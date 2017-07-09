@@ -1,0 +1,2 @@
+# already added libjs-chosen, so false-positive
+source-is-missing public/javascripts/chosen.jquery.js line length is 292 characters (>256)
