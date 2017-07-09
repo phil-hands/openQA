@@ -219,7 +219,7 @@ Description: Client tools for remote openQA management
 
 Package: openqa-worker
 Architecture: all
-Pre-Depends: openQA-common (>= ${binary:Version}),
+Pre-Depends: openqa-common (>= ${binary:Version}),
 Depends: ${misc:Depends}, openqa-client (>= ${binary:Version}), os-autoinst (>= 4.4),
          libsql-splitstatement-perl,
 Recommends: qemu,
