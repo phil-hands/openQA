@@ -3,3 +3,5 @@
 
 %:
 	dh $@
+
+#NOTE should provide libjs-chosen for public/javascripts/chosen.jquery.js
