@@ -211,7 +211,7 @@ Architecture: any
 Depends: ${misc:Depends},
          libjson-perl,
          libconfig-inifiles-perl,
-         libdata-dump-perl
+         libdata-dump-perl,
          libmojolicious-perl (>= 7.24),
 Description: Client tools for remote openQA management
  Tools and support files for openQA client script. Client script is
