@@ -140,7 +140,7 @@ Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/openqa.git
 
 Package: openqa
 Architecture: all
-Depends: ${misc:Depends}, openqa-common (${binary:Version}), openqa-client (${binary:Version}),
+Depends: ${misc:Depends}, openqa-common (>= ${binary:Version}), openqa-client (>= ${binary:Version}),
          sqlite3, git, optipng, dbus,
          liburi-perl,
          liblwp-protocol-https-perl,
@@ -219,8 +219,8 @@ Description: Client tools for remote openQA management
 
 Package: openqa-worker
 Architecture: all
-Pre-Depends: openQA-common (${binary:Version}),
-Depends: ${misc:Depends}, openqa-client (${binary:Version}), os-autoinst (>= 4.4),
+Pre-Depends: openQA-common (>= ${binary:Version}),
+Depends: ${misc:Depends}, openqa-client (>= ${binary:Version}), os-autoinst (>= 4.4),
          libsql-splitstatement-perl,
 Recommends: qemu,
 Description: openQA worker
@@ -228,6 +228,7 @@ Description: openQA worker
 
 Package: openqa-doc
 Architecture: all
+Depends: ${misc:Depends},
 Description: openQA documentation
  Documentation material covering installation, configuration, basic test
  writing, etc. Covering both openQA and also os-autoinst test engine.
