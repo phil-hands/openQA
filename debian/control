@@ -228,6 +228,7 @@ Description: openQA worker
 
 Package: openqa-doc
 Architecture: all
+Section: doc
 Depends: ${misc:Depends},
 Description: openQA documentation
  Documentation material covering installation, configuration, basic test
