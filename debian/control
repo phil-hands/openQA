@@ -6,30 +6,22 @@ Build-Depends: debhelper (>= 10),
                os-autoinst,
                systemd,
                ruby-sass,
-               phantomjs,
                fdupes,
-               libmojolicious-perl (>= 5.60),
-               libtest-compile-perl,
-               libselenium-remote-driver-perl,
-               libmojolicious-plugin-assetpack-perl (>= 1.0),
-               libtimedate-perl,
-               libmojolicious-plugin-renderfile-perl,
-               libmojolicious-plugin-assetpack-perl,
-               libdbix-class-schema-config-perl,
-               libdbix-class-perl,
-               libdbix-class-optimisticlocking-perl,
+               libmojolicious-perl (>= 7.24),
+### for test&runtime
                libdbd-sqlite3-perl,
                libdbix-class-perl (>= 0.082801),
-               libyaml-perl,
                libconfig-inifiles-perl,
                libsql-translator-perl,
+               libdatetime-format-sqlite-perl,
                libfile-copy-recursive-perl,
-               libdatetime-format-sqlite-perl,
-               libdatetime-format-sqlite-perl,
+               libmojolicious-plugin-renderfile-perl,
+               libmojolicious-plugin-assetpack-perl (>= 1.36),
                libaliased-perl,
                libconfig-tiny-perl
                libdbix-class-dynamicdefault-perl
-               libio-socket-inet6-perl,
+               libdbix-class-schema-config-perl,
+               libdbix-class-optimisticlocking-perl,
                libio-socket-ssl-perl,
                libdata-dump-perl
                libtext-markdown-perl
@@ -38,6 +30,21 @@ Build-Depends: debhelper (>= 10),
                libarchive-extract-perl,
                libcss-minifier-xs-perl,
                libjavascript-minifier-xs-perl,
+               libmojo-rabbitmq-client,
+               libdatetime-format-sqlite-perl,
+               libtime-parsedate-perl,
+               libsort-versions-perl,
+               libbsd-resource-perl,
+perl(Net::OpenID::Consumer) 
+perl(DBIx::Class::Storage::Statistics) 
+### for testcases
+               perltidy,
+               phantomjs,
+               libselenium-remote-driver-perl,
+               libtest-compile-perl,
+               libperl-critic-perl,
+               libtest-mockobject-perl,
+               libtest-warnings-perl,
 Standards-Version: 4.0.0
 Homepage: http://open.qa
 Vcs-Git: https://anonscm.debian.org/collab-maint/openqa.git
@@ -45,34 +52,54 @@ Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/openqa.git
 
 Package: openqa
 Architecture: all
-Depends: ${misc:Depends}, openqa-common, openqa-client
-Description: 
+Depends: ${misc:Depends}, openqa-common (${}), openqa-client (${}),
+         sqlite3, git, optipng, dbus,
+         liburi-perl,
+         liblwp-protocol-https-perl,
+         libdbix-class-perl (>= 0.082801),
+         libsql-splitstatement-perl,
+perl(DBIx::Class::DeploymentHandler)
+Recommends: apparmor-profiles, apparmor-utils,
+            apache2, logrotate,
+            libdatetime-format-pg-perl,
+            libdbd-pg-perl,
+Description:  openQA web-frontend, scheduler and tools
  openQA is a testing framework that allows you to test GUI applications on one
  hand and bootloader and kernel on the other. In both cases, it is difficult to
  script tests and verify the output. Output can be a popup window or it can be
  an error in early boot even before init is executed.
+ .
+ openQA is an automated test tool that makes it possible to test the whole
+ installation process of an operating system. It uses virtual machines to
+ reproduce the process, check the output (both serial console and screen) in
+ every step and send the necessary keystrokes and commands to proceed to the
+ next. openQA can check whether the system can be installed, whether it works
+ properly in 'live' mode, whether applications work or whether the system
+ responds as expected to different installation options and commands.
+ .
+ Even more importantly, openQA can run several combinations of tests for every
+ revision of the operating system, reporting the errors detected for each
+ combination of hardware configuration, installation options and variant of the
+ operating system.
 
 Package: openqa-common
 Architecture: all
 Depends: ${misc:Depends},
-               libtimedate-perl,
-               libmojolicious-plugin-renderfile-perl,
-               libmojolicious-plugin-assetpack-perl,
-               libdbix-class-schema-config-perl,
-               libdbix-class-perl,
-               libdbix-class-optimisticlocking-perl,
+               libmojolicious-perl (>= 7.24),
+### for test&runtime
                libdbd-sqlite3-perl,
                libdbix-class-perl (>= 0.082801),
-               libyaml-perl,
                libconfig-inifiles-perl,
                libsql-translator-perl,
+               libdatetime-format-sqlite-perl,
                libfile-copy-recursive-perl,
-               libdatetime-format-sqlite-perl,
-               libdatetime-format-sqlite-perl,
+               libmojolicious-plugin-renderfile-perl,
+               libmojolicious-plugin-assetpack-perl (>= 1.36),
                libaliased-perl,
                libconfig-tiny-perl
                libdbix-class-dynamicdefault-perl
-               libio-socket-inet6-perl,
+               libdbix-class-schema-config-perl,
+               libdbix-class-optimisticlocking-perl,
                libio-socket-ssl-perl,
                libdata-dump-perl
                libtext-markdown-perl
@@ -81,16 +108,39 @@ Depends: ${misc:Depends},
                libarchive-extract-perl,
                libcss-minifier-xs-perl,
                libjavascript-minifier-xs-perl,
-Description: 
+               libmojo-rabbitmq-client,
+               libdatetime-format-sqlite-perl,
+               libtime-parsedate-perl,
+               libsort-versions-perl,
+               libbsd-resource-perl,
+perl(Net::OpenID::Consumer) 
+perl(DBIx::Class::Storage::Statistics) 
+Description: The openQA common tools for web-frontend and workers
+ This package contain shared resources for openQA web-frontend and 
+ openQA workers.
 
 Package: openqa-client
 Architecture: any
 Depends: ${misc:Depends},
-Description: 
+         libjson-perl,
+         libconfig-inifiles-perl,
+         libdata-dump-perl
+         libmojolicious-perl (>= 7.24),
+Description: Client tools for remote openQA management
+ Tools and support files for openQA client script. Client script is
+ a convenient helper for interacting with openQA webui REST API.
 
 Package: openqa-worker
 Architecture: all
-Depends: ${misc:Depends}, openqa-client, os-autoinst,
-         libperl-sql-splitstatement,
+Pre-Depends: openQA-common (${}),
+Depends: ${misc:Depends}, openqa-client (${}), os-autoinst (>= 4.4),
+         libsql-splitstatement-perl,
 Recommends: qemu,
-Description: 
+Description: The openQA worker
+ The openQA worker manages test engine (provided by os-autoinst package).
+
+Package: openqa-doc
+Architecture: all
+Description: The openQA documentation
+ Documentation material covering installation, configuration, basic test
+ writing, etc. Covering both openQA and also os-autoinst test engine.
