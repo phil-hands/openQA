@@ -1,7 +1,3 @@
-usr/sbin/rcopenqa-slirpvde
-usr/sbin/rcopenqa-vde_switch
-usr/sbin/rcopenqa-worker
-
 etc/openqa/client.conf
 etc/openqa/workers.ini
 # apparmor profile
