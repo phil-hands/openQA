@@ -1,0 +1,23 @@
+From: Hideki Yamane <henrich@debian.org>
+Date: Sat, 7 Oct 2017 20:26:19 +0900
+Subject: avoid bashism
+
+it causes failure with sh as dash (/bin/dash) in Debian/Ubuntu
+---
+ Makefile | 3 ++-
+ 1 file changed, 2 insertions(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 85e12d8..89342b9 100644
+--- a/Makefile
++++ b/Makefile
+@@ -31,7 +31,8 @@ install:
+ 
+ 	install -D -m 644 etc/logrotate.d/openqa "$(DESTDIR)"/etc/logrotate.d/openqa
+ #
+-	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/{system,system-generators}
++	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system,system-generators
++	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system-generators
+ 	install -d -m 755 "$(DESTDIR)"/usr/lib/tmpfiles.d
+ 	install -m 644 systemd/openqa-worker@.service "$(DESTDIR)"/usr/lib/systemd/system
+ 	install -m 644 systemd/openqa-worker.target "$(DESTDIR)"/usr/lib/systemd/system
