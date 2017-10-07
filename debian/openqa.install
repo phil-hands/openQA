@@ -1,12 +1,10 @@
 etc/openqa/openqa.ini
 etc/openqa/database.ini
 etc/dbus-1/system.d/org.opensuse.openqa.conf
-
 # apache vhost
 etc/apache2/vhosts.d/openqa.conf.template
 etc/apache2/vhosts.d/openqa-common.inc
 etc/apache2/vhosts.d/openqa-ssl.conf.template
-
 # apparmor profile
 etc/apparmor.d/usr.share.openqa.script.openqa
 # init
@@ -15,9 +13,11 @@ usr/lib/systemd/system/openqa-gru.service	lib/systemd/system/openqa-gru.service
 usr/lib/systemd/system/openqa-scheduler.service	lib/systemd/system/openqa-scheduler.service
 usr/lib/systemd/system/openqa-websockets.service	lib/systemd/system/openqa-websockets.service
 # web libs
+##
+# not in 4.3 but in lastest master branch...
+#usr/share/openqa/assets
 usr/share/openqa/templates
 usr/share/openqa/public
-usr/share/openqa/assets
 usr/share/openqa/dbicdh
 usr/share/openqa/script/check_dependencies
 usr/share/openqa/script/clean_needles
@@ -29,15 +29,8 @@ usr/share/openqa/script/openqa-scheduler
 usr/share/openqa/script/openqa-websockets
 usr/share/openqa/script/upgradedb
 usr/share/openqa/script/modify_needle
-# attention: never package subdirectories owned by a user other
-# than root as that opens a security hole!
+#
 var/lib/openqa/db
 var/lib/openqa/images
 var/lib/openqa/testresults
 var/lib/openqa/share/tests
-var/lib/openqa/share/factory
-# iso hdd repo must be geekotest writable to enable *_URL and HDD upload functionality
-var/lib/openqa/share/factory/iso
-var/lib/openqa/share/factory/hdd
-var/lib/openqa/share/factory/repo
-var/lib/openqa/share/factory/other

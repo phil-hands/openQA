@@ -4,4 +4,3 @@ usr/share/openqa/script/dump_templates
 usr/share/openqa/script/load_templates
 usr/share/openqa/lib/
 usr/share/openqa/lib/OpenQA/Client.pm
-usr/bin/openqa-client

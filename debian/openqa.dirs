@@ -1,6 +1,8 @@
-etc/apache2/vhosts.d
-etc/apparmor.d
 var/log/openqa
-var/lib/openqa/pool/1
-var/lib/openqa/cache
 usr/share/openqa/etc/openqa
+
+# iso hdd repo must be geekotest writable to enable *_URL and HDD upload functionality
+var/lib/openqa/share/factory/iso
+var/lib/openqa/share/factory/hdd
+var/lib/openqa/share/factory/repo
+var/lib/openqa/share/factory/other
