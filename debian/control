@@ -82,7 +82,7 @@ Build-Depends: debhelper (>= 10),
                libnamespace-clean-perl,
                libperl-critic-perl,
                libsql-splitstatement-perl,
-Standards-Version: 4.0.0
+Standards-Version: 4.1.1
 Homepage: http://open.qa
 Vcs-Git: https://anonscm.debian.org/collab-maint/openqa.git
 Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/openqa.git
