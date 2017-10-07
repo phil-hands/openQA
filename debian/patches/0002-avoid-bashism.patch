@@ -7,11 +7,9 @@ it causes failure with sh as dash (/bin/dash) in Debian/Ubuntu
  Makefile | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)
 
-diff --git a/Makefile b/Makefile
-index 85e12d8..89342b9 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -31,7 +31,8 @@ install:
+@@ -43,7 +43,8 @@
  
  	install -D -m 644 etc/logrotate.d/openqa "$(DESTDIR)"/etc/logrotate.d/openqa
  #
@@ -20,4 +18,4 @@ index 85e12d8..89342b9 100644
 +	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system-generators
  	install -d -m 755 "$(DESTDIR)"/usr/lib/tmpfiles.d
  	install -m 644 systemd/openqa-worker@.service "$(DESTDIR)"/usr/lib/systemd/system
- 	install -m 644 systemd/openqa-worker.target "$(DESTDIR)"/usr/lib/systemd/system
+ 	sed -e 's_^\(ExecStart=/usr/share/openqa/script/worker\) \(--instance %i\)$$_\1 --no-cleanup \2_' \
