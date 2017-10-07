@@ -1,5 +1,5 @@
-openqa (4.3-1) unstable; urgency=medium
+openqa (4.3+git20170928-1) unstable; urgency=medium
 
   * Initial release (Closes: #840253)
 
- -- Hideki Yamane <henrich@debian.org>  Mon, 10 Jul 2017 05:43:43 +0900
+ -- Hideki Yamane <henrich@debian.org>  Sat, 07 Oct 2017 22:19:33 +0900
