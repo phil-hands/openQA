@@ -2,6 +2,8 @@ Source: openqa
 Section: devel
 Priority: optional
 Maintainer: Hideki Yamane <henrich@debian.org>
+Uploaders: Adam Majer <adamm@debian.org>,
+           Andrew Lee (李健秋) <ajqlee@debian.org>,
 Build-Depends: debhelper (>= 10),
                os-autoinst,
                systemd,
