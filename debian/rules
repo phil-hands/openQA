@@ -7,13 +7,26 @@
 override_dh_fixperms:
 	dh_fixperms
 	# for common: adjust owner, need priviledge
-	chown root.root -R $(CURDIR)/tmp/{usr/share/openqa/lib,var/lib/openqa/share,var/lib/openqa/factory,var/lib/openqa/script,var/lib/openqa/tests}
+	for dir in usr/share/openqa/lib \
+                   var/lib/openqa/share \
+                   var/lib/openqa/factory \
+                   var/lib/openqa/script \
+                   var/lib/openqa/tests ;\
+	do chown root.root -R $(CURDIR)/debian/openqa-common/$$dir; done
 	# for client: adjust owner, need priviledge
-	chown root.root -R $(CURDIR)/tmp/{usr/share/openqa/script/client, usr/share/openqa/script/clone_job.pl,usr/share/openqa/script/dump_templates,usr/share/openqa/script/load_templates,usr/share/openqa/lib,usr/share/openqa/lib/OpenQA/Client.pm,usr/bin/openqa-client}
+	for dir in usr/share/openqa/script/client \
+                   usr/share/openqa/script/clone_job.pl \
+                   usr/share/openqa/script/dump_templates \
+                   usr/share/openqa/script/load_templates \
+                   usr/share/openqa/lib ;\
+	do chown root.root -R $(CURDIR)/debian/openqa-client/$$dir; done
 	# for worker:
-	chown openqa-worker.root $(CURDIR)/tmp/{etc/openqa/client.conf,var/lib/openqa/cache,var/lib/openqa/pool/1}
-	chmod 0400 $(CURDIR)/tmp/etc/openqa/client.conf
-	chown roor.root $(CURDIR)/etc/openqa/workers.ini
+	for dir in etc/openqa/client.conf \
+                   var/lib/openqa/cache \
+                   var/lib/openqa/pool/1 \
+                   etc/openqa/workers.ini ;\
+	do chown root.root $(CURDIR)/debian/openqa-worker/$$dir; done
+	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
 
 override_dh_auto_test:
 	true
