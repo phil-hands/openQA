@@ -13,9 +13,7 @@ usr/lib/systemd/system/openqa-gru.service	lib/systemd/system/openqa-gru.service
 usr/lib/systemd/system/openqa-scheduler.service	lib/systemd/system/openqa-scheduler.service
 usr/lib/systemd/system/openqa-websockets.service	lib/systemd/system/openqa-websockets.service
 # web libs
-##
-# not in 4.3 but in lastest master branch...
-#usr/share/openqa/assets
+usr/share/openqa/assets
 usr/share/openqa/templates
 usr/share/openqa/public
 usr/share/openqa/dbicdh
