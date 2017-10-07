@@ -3,12 +3,12 @@ etc/openqa/workers.ini
 # apparmor profile
 etc/apparmor.d/usr.share.openqa.script.worker
 # init
-lib/systemd/system-generators/*
-lib/systemd/system/openqa-worker.target
-lib/systemd/system/openqa-worker@.service
-lib/systemd/system/openqa-worker-no-cleanup@.service
-lib/systemd/system/openqa-slirpvde.service
-lib/systemd/system/openqa-vde_switch.service
+usr/lib/systemd/system-generators		lib/systemd/system-generators
+usr/lib/systemd/system/openqa-worker.target	lib/systemd/system/openqa-worker.target
+usr/lib/systemd/system/openqa-worker@.service	lib/systemd/system/openqa-worker@.service
+usr/lib/systemd/system/openqa-slirpvde.service	lib/systemd/system/openqa-slirpvde.service
+usr/lib/systemd/system/openqa-worker-no-cleanup@.service	lib/systemd/system/openqa-worker-no-cleanup@.service
+usr/lib/systemd/system/openqa-vde_switch.service		lib/systemd/system/openqa-vde_switch.service
 ## not sure...
 %{_tmpfilesdir}/openqa.conf
 # worker libs

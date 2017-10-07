@@ -1,13 +1,8 @@
-etc/openqa
-%config(noreplace) %attr(-,geekotest,root) %{_sysconfdir}/openqa/openqa.ini
-%config(noreplace) %attr(-,geekotest,root) %{_sysconfdir}/openqa/database.ini
-usr/share/openqa
-usr/share/openqa/etc
-usr/share/openqa/etc/openqa
+etc/openqa/openqa.ini
+etc/openqa/database.ini
 usr/share/openqa/etc/openqa/openqa.ini
 usr/share/openqa/etc/openqa/database.ini
-etc/logrotate.d
-%config(noreplace) %{_sysconfdir}/dbus-1/system.d/org.opensuse.openqa.conf
+etc/dbus-1/system.d/org.opensuse.openqa.conf
 
 # apache vhost
 etc/apache2/vhosts.d/openqa.conf.template
@@ -17,11 +12,10 @@ etc/apache2/vhosts.d/openqa-ssl.conf.template
 # apparmor profile
 etc/apparmor.d/usr.share.openqa.script.openqa
 # init
-%{_unitdir}
-%{_unitdir}/openqa-webui.service
-%{_unitdir}/openqa-gru.service
-%{_unitdir}/openqa-scheduler.service
-%{_unitdir}/openqa-websockets.service
+usr/lib/systemd/openqa-webui.service	lib/systemd/openqa-webui.service
+usr/lib/systemd/openqa-gru.service	lib/systemd/openqa-gru.service
+usr/lib/systemd/openqa-scheduler.service	lib/systemd/openqa-scheduler.service
+usr/lib/systemd/openqa-websockets.service	lib/systemd/openqa-websockets.service
 # web libs
 usr/share/openqa
 usr/share/openqa/templates
@@ -38,8 +32,6 @@ usr/share/openqa/script/openqa-scheduler
 usr/share/openqa/script/openqa-websockets
 usr/share/openqa/script/upgradedb
 usr/share/openqa/script/modify_needle
-# TODO: define final user
-%defattr(-,geekotest,root)
 # attention: never package subdirectories owned by a user other
 # than root as that opens a security hole!
 var/lib/openqa/db
@@ -52,5 +44,3 @@ var/lib/openqa/share/factory/iso
 var/lib/openqa/share/factory/hdd
 var/lib/openqa/share/factory/repo
 var/lib/openqa/share/factory/other
-%ghost var/lib/openqa/db/db.sqlite
-%ghost var/log/openqa
