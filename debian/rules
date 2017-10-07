@@ -4,4 +4,18 @@
 %:
 	dh $@
 
+override_dh_fixperms:
+	dh_fixperms
+	# for common: adjust owner, need priviledge
+	chown root.root -R $(CURDIR)/tmp/{usr/share/openqa/lib,var/lib/openqa/share,var/lib/openqa/factory,var/lib/openqa/script,var/lib/openqa/tests}
+	# for client: adjust owner, need priviledge
+	chown root.root -R $(CURDIR)/tmp/{usr/share/openqa/script/client, usr/share/openqa/script/clone_job.pl,usr/share/openqa/script/dump_templates,usr/share/openqa/script/load_templates,usr/share/openqa/lib,usr/share/openqa/lib/OpenQA/Client.pm,usr/bin/openqa-client}
+	# for worker:
+	chown openqa-worker.root $(CURDIR)/tmp/{etc/openqa/client.conf,var/lib/openqa/cache,var/lib/openqa/pool/1}
+	chmod 0400 $(CURDIR)/tmp/etc/openqa/client.conf
+	chown roor.root $(CURDIR)/etc/openqa/workers.ini
+
+override_dh_installchangelogs:
+	dh_installchangelogs openQA.changes
+
 #NOTE should provide libjs-chosen for public/javascripts/chosen.jquery.js

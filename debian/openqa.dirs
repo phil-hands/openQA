@@ -1,0 +1,6 @@
+etc/apache2/vhosts.d
+etc/apparmor.d
+var/log/openqa
+var/lib/openqa/pool/1
+var/lib/openqa/cache
+usr/share/openqa/etc/openqa

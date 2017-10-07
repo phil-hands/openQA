@@ -1,0 +1,7 @@
+usr/sbin/service        usr/sbin/rcopenqa-webui
+usr/sbin/service        usr/sbin/rcopenqa-gru
+usr/sbin/service        usr/sbin/rcopenqa-worker
+usr/sbin/service        usr/sbin/rcopenqa-scheduler
+usr/sbin/service        usr/sbin/rcopenqa-websockets
+usr/sbin/service        usr/sbin/rcopenqa-slirpvde
+usr/sbin/service        usr/sbin/rcopenqa-vde_switch

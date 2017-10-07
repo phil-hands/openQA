@@ -1,0 +1,5 @@
+usr/share/openqa/lib
+var/lib/openqa/share
+var/lib/openqa/factory
+var/lib/openqa/script
+var/lib/openqa/tests

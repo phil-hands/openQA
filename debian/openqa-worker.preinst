@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -e
+
+case "$1" in
+install|upgrade)
+
+if ! getent passwd _openqa-worker >/dev/null; then
+  useradd -r -g nogroup -c "openQA worker" \
+    -d /var/lib/empty _openqa-worker
+  # might fail for non-kvm workers (qemu package owns the group)
+  usermod _openqa-worker -a -G kvm || :
+
+#DEBHELPER#
+exit 0
