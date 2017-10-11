@@ -7,9 +7,11 @@ it causes failure with sh as dash (/bin/dash) in Debian/Ubuntu
  Makefile | 3 ++-
  1 file changed, 2 insertions(+), 1 deletion(-)
 
+diff --git a/Makefile b/Makefile
+index 1830b41..7272f58 100644
 --- a/Makefile
 +++ b/Makefile
-@@ -43,7 +43,8 @@
+@@ -43,7 +43,8 @@ install:
  
  	install -D -m 644 etc/logrotate.d/openqa "$(DESTDIR)"/etc/logrotate.d/openqa
  #

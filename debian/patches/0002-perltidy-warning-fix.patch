@@ -1,0 +1,21 @@
+From: Hideki Yamane <henrich@debian.org>
+Date: Wed, 11 Oct 2017 21:57:47 +0900
+Subject: perltidy warning fix
+
+---
+ lib/OpenQA/Worker/Commands.pm | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/lib/OpenQA/Worker/Commands.pm b/lib/OpenQA/Worker/Commands.pm
+index d574fb7..8dd0b40 100644
+--- a/lib/OpenQA/Worker/Commands.pm
++++ b/lib/OpenQA/Worker/Commands.pm
+@@ -20,7 +20,7 @@ use warnings;
+ use OpenQA::Utils qw(log_error log_warning log_debug);
+ use OpenQA::Worker::Common;
+ use OpenQA::Worker::Jobs;
+-use POSIX qw(:sys_wait_h);
++use POSIX q(:sys_wait_h);
+ use OpenQA::Worker::Engines::isotovideo;
+ 
+ ## WEBSOCKET commands
