@@ -29,6 +29,6 @@ override_dh_fixperms:
 	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
 
 override_dh_auto_test:
-	true
+	FULLSTACK=1 dh_auto_test
 
 #NOTE should provide libjs-chosen for public/javascripts/chosen.jquery.js
