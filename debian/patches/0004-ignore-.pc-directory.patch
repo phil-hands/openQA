@@ -1,0 +1,24 @@
+From: Hideki Yamane <henrich@debian.org>
+Date: Thu, 12 Oct 2017 21:48:14 +0900
+Subject: ignore .pc directory
+
+Debian patches use "quilt" patch system and it saves files pre-patched
+files under .pc directory. Accidentaly prove works for directory and
+tidy check fails.
+---
+ script/tidy | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/script/tidy b/script/tidy
+index 7dabf6c..b452fe6 100755
+--- a/script/tidy
++++ b/script/tidy
+@@ -22,7 +22,7 @@ test -e script/openqa || exit 1
+ 
+ find -name '*.tdy' -delete
+ 
+-find . \( -name '*.p[lm]' -o -name '*.t' \) -print0 | xargs -0 perltidy --pro=.../.perltidyrc
++find . ! -path '*/.pc/*' \( -name '*.p[lm]' -o -name '*.t' \) -print0 | xargs -0 perltidy --pro=.../.perltidyrc
+ 
+ find script/{check_dependencies,client,initdb,openqa,worker,upgradedb,load_templates,dump_templates,clean_needles,openqa-scheduler,openqa-websockets} -print0 | xargs -0 perltidy $TIDY_ARGS
+ 
