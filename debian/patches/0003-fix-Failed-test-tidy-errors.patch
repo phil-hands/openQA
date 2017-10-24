@@ -9,38 +9,9 @@ Subject: fix "Failed test 'tidy'" errors
  t/ui/12-needle-edit.t                   | 2 +-
  4 files changed, 7 insertions(+), 8 deletions(-)
 
-diff --git a/lib/OpenQA/Schema/Result/Screenshots.pm b/lib/OpenQA/Schema/Result/Screenshots.pm
-index 7e21107..3b40ffd 100644
---- a/lib/OpenQA/Schema/Result/Screenshots.pm
-+++ b/lib/OpenQA/Schema/Result/Screenshots.pm
-@@ -115,8 +115,7 @@ sub scan_images {
-             $app->db->resultset('Screenshots')->populate(\@part);
-             @part = ();
-         }
--        catch {
--        };
-+        catch {};
-         # if populate fails, resort to insert - this runs as GRU task and some images
-         # might already be in, but the filename is unique
-         shift @part;    # columns
-diff --git a/t/24-worker.t b/t/24-worker.t
-index f1daf11..85a057d 100644
---- a/t/24-worker.t
-+++ b/t/24-worker.t
-@@ -42,7 +42,7 @@ like(
-             {HOSTS => ['http://any_host']},
-             {
-                 host => 'http://any_host',
--            })
-+            });
-     },
-     qr/API key.*needed/,
-     'auth required'
-diff --git a/t/api/02-iso.t b/t/api/02-iso.t
-index fa8b4c6..9bce242 100644
 --- a/t/api/02-iso.t
 +++ b/t/api/02-iso.t
-@@ -273,7 +273,7 @@ subtest 'jobs belonging to important builds are not cancelled by new iso post' =
+@@ -276,7 +276,7 @@
      $ret = $t->get_ok('/api/v1/jobs?state=scheduled');
      my @jobs = @{$ret->tx->res->json->{jobs}};
      lj;
@@ -49,7 +20,7 @@ index fa8b4c6..9bce242 100644
      is(scalar @jobs, 21, 'only the important jobs, jobs from the current build and the important build are scheduled');
      # now test with a VERSION-BUILD format tag
      $tag = 'tag:13.1-0093:important';
-@@ -283,8 +283,8 @@ subtest 'jobs belonging to important builds are not cancelled by new iso post' =
+@@ -286,8 +286,8 @@
      $ret  = $t->get_ok('/api/v1/jobs?state=scheduled');
      @jobs = @{$ret->tx->res->json->{jobs}};
      lj;
@@ -60,7 +31,7 @@ index fa8b4c6..9bce242 100644
      is(scalar @jobs, 31, 'only the important jobs, jobs from the current build and the important builds are scheduled');
  };
  
-@@ -294,7 +294,7 @@ subtest 'build obsoletion/depriorization' => sub {
+@@ -297,7 +297,7 @@
      $ret = $t->get_ok('/api/v1/jobs?state=scheduled')->status_is(200);
      my @jobs = @{$ret->tx->res->json->{jobs}};
      lj;
@@ -69,16 +40,3 @@ index fa8b4c6..9bce242 100644
      is(scalar @jobs, 31, 'current build and the important build are scheduled');
      $res  = schedule_iso({%iso, BUILD => '0096', '_NOOBSOLETEBUILD' => 1});
      $ret  = $t->get_ok('/api/v1/jobs?state=scheduled')->status_is(200);
-diff --git a/t/ui/12-needle-edit.t b/t/ui/12-needle-edit.t
-index b64b66f..e7abbdd 100644
---- a/t/ui/12-needle-edit.t
-+++ b/t/ui/12-needle-edit.t
-@@ -428,7 +428,7 @@ subtest '(created) needles can be accessed over API' => sub {
-       ->status_is(200, 'needle accessible')->content_type_is('image/png');
-     @warnings = warnings {
-         $t->get_ok('/needles/opensuse/test-newneedle.png?jsonfile=/try/to/break_out.json')
--          ->status_is(403, 'access to files outside the test directory not granted')
-+          ->status_is(403, 'access to files outside the test directory not granted');
-     };
-     map { like($_, qr/is not in a subdir of/, 'expected warning') } @warnings;
- 
