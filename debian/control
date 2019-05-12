@@ -177,6 +177,7 @@ Depends: ${misc:Depends},
          libconfig-inifiles-perl,
          libdata-dump-perl,
          libmojolicious-perl (>= 7.24),
+	 openqa-common (>= ${binary:Version}),
 Description: client tools for remote openQA management
  Tools and support files for openQA client script. Client script is
  a convenient helper for interacting with openQA webui REST API.

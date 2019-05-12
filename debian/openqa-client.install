@@ -2,5 +2,3 @@ usr/share/openqa/script/client
 usr/share/openqa/script/clone_job.pl
 usr/share/openqa/script/dump_templates
 usr/share/openqa/script/load_templates
-usr/share/openqa/lib/
-usr/share/openqa/lib/OpenQA/Client.pm
