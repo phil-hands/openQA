@@ -4,6 +4,12 @@
 %:
 	dh $@
 
+override_dh_install:
+	dh_install
+	# make #! lines Debian Perl Policy compliant
+	find $(CURDIR)/debian/openqa/usr/share/openqa -type f -print0 | \
+		xargs -r0 sed -i -e '1s|^#!/usr/bin/env perl|#!/usr/bin/perl|'
+
 override_dh_fixperms:
 	dh_fixperms
 	# for common: adjust owner, need priviledge
