@@ -8,10 +8,10 @@ etc/apache2/vhosts.d/openqa-ssl.conf.template
 # apparmor profile
 etc/apparmor.d/usr.share.openqa.script.openqa
 # init
-usr/lib/systemd/system/openqa-webui.service	lib/systemd/system/openqa-webui.service
-usr/lib/systemd/system/openqa-gru.service	lib/systemd/system/openqa-gru.service
-usr/lib/systemd/system/openqa-scheduler.service	lib/systemd/system/openqa-scheduler.service
-usr/lib/systemd/system/openqa-websockets.service	lib/systemd/system/openqa-websockets.service
+usr/lib/systemd/system/openqa-webui.service	lib/systemd/system
+usr/lib/systemd/system/openqa-gru.service	lib/systemd/system
+usr/lib/systemd/system/openqa-scheduler.service	lib/systemd/system
+usr/lib/systemd/system/openqa-websockets.service	lib/systemd/system
 # web libs
 usr/share/openqa/assets
 usr/share/openqa/templates
