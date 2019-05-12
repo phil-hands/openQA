@@ -10,6 +10,10 @@ if ! getent passwd _openqa-worker >/dev/null; then
     -d /var/lib/empty _openqa-worker
   # might fail for non-kvm workers (qemu package owns the group)
   usermod _openqa-worker -a -G kvm || :
+fi
+
+;;
+esac
 
 #DEBHELPER#
 exit 0
