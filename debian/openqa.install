@@ -27,7 +27,6 @@ usr/share/openqa/script/openqa-scheduler
 usr/share/openqa/script/openqa-websockets
 usr/share/openqa/script/upgradedb
 usr/share/openqa/script/modify_needle
-usr/share/openqa/script/openqa-resource-allocator
 #
 var/lib/openqa/db
 var/lib/openqa/images
