@@ -17,20 +17,23 @@ override_dh_fixperms:
                    var/lib/openqa/share \
                    var/lib/openqa/factory \
                    var/lib/openqa/script \
-                   var/lib/openqa/tests ;\
+                   var/lib/openqa/tests \
+		   usr/share/openqa/lib \
+		;\
 	do chown root.root -R $(CURDIR)/debian/openqa-common/$$dir; done
 	# for client: adjust owner, need priviledge
 	for dir in usr/share/openqa/script/client \
                    usr/share/openqa/script/clone_job.pl \
                    usr/share/openqa/script/dump_templates \
                    usr/share/openqa/script/load_templates \
-                   usr/share/openqa/lib ;\
+		;\
 	do chown root.root -R $(CURDIR)/debian/openqa-client/$$dir; done
 	# for worker:
 	for dir in etc/openqa/client.conf \
                    var/lib/openqa/cache \
                    var/lib/openqa/pool/1 \
-                   etc/openqa/workers.ini ;\
+                   etc/openqa/workers.ini \
+		;\
 	do chown root.root $(CURDIR)/debian/openqa-worker/$$dir; done
 	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
 

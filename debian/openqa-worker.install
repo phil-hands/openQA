@@ -11,6 +11,6 @@ usr/lib/systemd/system/openqa-slirpvde.service	lib/systemd/system
 #usr/lib/systemd/system/openqa-worker-no-cleanup@.service	lib/systemd/system
 usr/lib/systemd/system/openqa-vde_switch.service		lib/systemd/system
 ## not sure...
-usr/lib/tmpfiles.d/openqa.conf	etc/openqa.conf
+usr/lib/tmpfiles.d/openqa.conf	usr/lib/tmpfiles.d
 # worker libs
 usr/share/openqa/script/worker

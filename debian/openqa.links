@@ -1,5 +1,5 @@
-etc/openqa/openqa.ini	usr/share/openqa/etc/openqa/openqa.ini
-etc/openqa/database.ini	usr/share/openqa/etc/openqa/database.ini
+#etc/openqa/openqa.ini	usr/share/openqa/etc/openqa/openqa.ini
+#etc/openqa/database.ini	usr/share/openqa/etc/openqa/database.ini
 
 usr/sbin/service        usr/sbin/rcopenqa-gru
 usr/sbin/service        usr/sbin/rcopenqa-scheduler
