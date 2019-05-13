@@ -12,6 +12,7 @@ usr/lib/systemd/system/openqa-webui.service	lib/systemd/system
 usr/lib/systemd/system/openqa-gru.service	lib/systemd/system
 usr/lib/systemd/system/openqa-scheduler.service	lib/systemd/system
 usr/lib/systemd/system/openqa-websockets.service	lib/systemd/system
+usr/lib/systemd/system/openqa-livehandler.service	lib/systemd/system
 # web libs
 usr/share/openqa/assets
 usr/share/openqa/templates
@@ -23,6 +24,7 @@ usr/share/openqa/script/create_admin
 usr/share/openqa/script/fetchneedles
 usr/share/openqa/script/initdb
 usr/share/openqa/script/openqa
+usr/share/openqa/script/openqa-livehandler
 usr/share/openqa/script/openqa-scheduler
 usr/share/openqa/script/openqa-websockets
 usr/share/openqa/script/upgradedb
