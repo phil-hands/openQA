@@ -11,6 +11,7 @@ etc/apparmor.d/usr.share.openqa.script.openqa
 usr/lib/systemd/system/openqa-webui.service	lib/systemd/system
 usr/lib/systemd/system/openqa-gru.service	lib/systemd/system
 usr/lib/systemd/system/openqa-scheduler.service	lib/systemd/system
+usr/lib/systemd/system/openqa-setup-db.service	lib/systemd/system
 usr/lib/systemd/system/openqa-websockets.service	lib/systemd/system
 usr/lib/systemd/system/openqa-livehandler.service	lib/systemd/system
 # web libs
