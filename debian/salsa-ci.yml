@@ -3,4 +3,4 @@ include:
   - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/pipeline-jobs.yml
 
 before_script:
-  - echo 'deb http://ftp.hands.com/hands-deb/ sid main' > /etc/apt/sources.list.d/hands-deb.list
+  - echo 'deb [ trusted=yes ] http://ftp.hands.com/hands-deb/ sid main' > /etc/apt/sources.list.d/hands-deb.list
