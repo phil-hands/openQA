@@ -10,7 +10,7 @@ case "$1" in
         install -D -m 644 -o geekotest /dev/null /var/log/openqa || :
     fi
 
-    if [ $1 -eq 1 ]; then
+    if false && [ $1 -eq 1 ]; then   # this test is stupid:  $1 == configure  at this point
         echo "### copy and edit /etc/apache2/vhosts.d/openqa.conf.template!"
         echo "### run sudo /usr/share/openqa/script/fetchneedles"
     else
