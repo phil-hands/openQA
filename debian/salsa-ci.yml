@@ -4,5 +4,6 @@ include:
 
 before_script:
   - curl -o libminion-backend-sqlite-perl.deb https://salsa.debian.org/philh/libminion-backend-sqlite-perl/-/jobs/193433/artifacts/raw/debian/output/libminion-backend-sqlite-perl_4.002-1_all.deb
-  - dpkg -i libminion-backend-sqlite-perl.deb
+  - dpkg --unpack libminion-backend-sqlite-perl.deb
+  - apt -f install
   - echo 'deb [ trusted=yes ] http://ftp.hands.com/hands-deb/ sid main' > /etc/apt/sources.list.d/hands-deb.list
