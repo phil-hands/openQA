@@ -3,6 +3,6 @@ include:
   - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/pipeline-jobs.yml
 
 before_script:
-  - wget --progress=dot:mega https://salsa.debian.org/philh/libminion-backend-sqlite-perl/-/jobs/193433/artifacts/file/debian/output/libminion-backend-sqlite-perl_4.002-1_all.deb -O libminion-backend-sqlite-perl.deb
+  - curl -o libminion-backend-sqlite-perl.deb https://salsa.debian.org/philh/libminion-backend-sqlite-perl/-/jobs/193433/artifacts/file/debian/output/libminion-backend-sqlite-perl_4.002-1_all.deb
   - dpkg -i libminion-backend-sqlite-perl.deb
   - echo 'deb [ trusted=yes ] http://ftp.hands.com/hands-deb/ sid main' > /etc/apt/sources.list.d/hands-deb.list
