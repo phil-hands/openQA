@@ -1,7 +1,10 @@
-#etc/openqa/openqa.ini	usr/share/openqa/etc/openqa/openqa.ini
-#etc/openqa/database.ini	usr/share/openqa/etc/openqa/database.ini
+etc/openqa/openqa.ini	usr/share/openqa/etc/openqa/openqa.ini
+etc/openqa/database.ini	usr/share/openqa/etc/openqa/database.ini
 
 usr/sbin/service        usr/sbin/rcopenqa-gru
 usr/sbin/service        usr/sbin/rcopenqa-scheduler
 usr/sbin/service        usr/sbin/rcopenqa-websockets
 usr/sbin/service        usr/sbin/rcopenqa-webui
+usr/sbin/service        usr/sbin/rcopenqa-livehandler
+
+usr/share/openqa/script/setup-db usr/bin/openqa-setup-db

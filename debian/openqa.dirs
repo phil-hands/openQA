@@ -6,3 +6,5 @@ var/lib/openqa/share/factory/iso
 var/lib/openqa/share/factory/hdd
 var/lib/openqa/share/factory/repo
 var/lib/openqa/share/factory/other
+
+var/lib/openqa/webui/cache
