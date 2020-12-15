@@ -4,40 +4,80 @@
 %:
 	dh $@
 
+override_dh_auto_install:
+	dh_auto_install -- SHELL="/bin/bash"
+
 override_dh_install:
 	dh_install
 	# make #! lines Debian Perl Policy compliant
-	find $(CURDIR)/debian/openqa/usr/share/openqa -type f -print0 | \
+	find $(CURDIR)/debian/openqa*/usr/share/openqa -type f -print0 | \
 		xargs -r0 sed -i -e '1s|^#!/usr/bin/env perl|#!/usr/bin/perl|'
+	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
+		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa.conf.template
+	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
+		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa-ssl.conf.template
 
 override_dh_fixperms:
 	dh_fixperms
 	# for common: adjust owner, need priviledge
 	for dir in usr/share/openqa/lib \
-                   var/lib/openqa/share \
-                   var/lib/openqa/factory \
-                   var/lib/openqa/script \
-                   var/lib/openqa/tests \
-		   usr/share/openqa/lib \
+		var/lib/openqa/share \
+		var/lib/openqa/factory \
+		var/lib/openqa/script \
+		var/lib/openqa/tests \
+		usr/share/openqa/lib \
 		;\
 	do chown root.root -R $(CURDIR)/debian/openqa-common/$$dir; done
 	# for client: adjust owner, need priviledge
 	for dir in usr/share/openqa/script/client \
-                   usr/share/openqa/script/clone_job.pl \
-                   usr/share/openqa/script/dump_templates \
-                   usr/share/openqa/script/load_templates \
+		usr/share/openqa/script/clone_job.pl \
+		usr/share/openqa/script/dump_templates \
+		usr/share/openqa/script/load_templates \
 		;\
 	do chown root.root -R $(CURDIR)/debian/openqa-client/$$dir; done
 	# for worker:
 	for dir in etc/openqa/client.conf \
-                   var/lib/openqa/cache \
-                   var/lib/openqa/pool/1 \
-                   etc/openqa/workers.ini \
+		var/lib/openqa/cache \
+		var/lib/openqa/pool/1 \
+		etc/openqa/workers.ini \
 		;\
 	do chown root.root $(CURDIR)/debian/openqa-worker/$$dir; done
 	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
+	chmod -x $(CURDIR)/debian/openqa/etc/logrotate.d/openqa
 
 override_dh_auto_test:
-	FULLSTACK=1 dh_auto_test
+	# From the spec file :
+
+	# we don't really need the tidy test
+	rm -f t/00-tidy.t
+	# Skip tests not working currently, or flaky, and Selenium tests
+	# https://progress.opensuse.org/issues/19652
+	# 01-test-utilities.t: https://progress.opensuse.org/issues/73162
+	# 17-labels_carry_over.t: https://progress.opensuse.org/issues/60209
+	# api/14-plugin_obs_rsync_async.t: https://progress.opensuse.org/issues/68836
+	rm -f \
+		t/01-test-utilities.t \
+		t/17-labels_carry_over.t \
+		t/25-cache-service.t \
+		t/api/14-plugin_obs_rsync_async.t \
+		t/ui/*.t
+
+	# On debian we can't run test connecting to internet
+	rm -f ./t/40-script_openqa-clone-custom-git-refspec.t \
+		./t/40-openqa-clone-job.t
+	# Not enough permission for unshare use
+	rm -f ./t/32-openqa_client-script.t
+
+	-export CI=1; export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
+		PATH=$$PATH:$$(ls -d /usr/lib/postgresql/*/bin) FULLSTACK=1 \
+		dh_auto_test -- \
+		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
 
 #NOTE should provide libjs-chosen for public/javascripts/chosen.jquery.js
+
+override_dh_auto_clean:
+	rm -fr t/data/openqa/testresults/ .sass-cache/ assets/cache
+	rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
+	rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
+	rm -fr $(CURDIR)/debian/DB
+	dh_auto_clean
