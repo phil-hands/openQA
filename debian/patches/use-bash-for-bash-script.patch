@@ -1,0 +1,14 @@
+Description: Use bash for bashisms
+This script uses ${a[@]: -1} and on Debian /bin/sh is dash which does not
+understand that syntax.
+Author: Frédéric Bonnard <frediz@debian.org>
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/tools/retry
++++ b/tools/retry
+@@ -1,4 +1,4 @@
+-#!/bin/sh -e
++#!/bin/bash -e
+ # shellcheck disable=SC2048,SC2086
+ 
+ RETRY="${RETRY:-3}"

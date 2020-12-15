@@ -1,0 +1,16 @@
+Description: Add dash to apparmor profile
+On Debian, /bin/dash may be used too.
+Author: Frédéric Bonnard <frediz@debian.org>
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -26,7 +26,7 @@
+ 
+   network netbeui raw,
+ 
+-  /{usr/,}bin/bash rix,
++  /{usr/,}bin/{b,d}ash rix,
+   /{usr/,}bin/pkill rix,
+   /dev/ r,
+   /dev/bus/usb/ r,

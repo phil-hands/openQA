@@ -1,0 +1,39 @@
+Description: Replace deprecated calls
+ Mojolicious::Routes::Route::route is DEPRECATED in favor of Mojolicious::Routes::Route::any
+Author: Frédéric Bonnard <frediz@debian.org>
+---
+This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
+--- a/lib/OpenQA/LiveHandler.pm
++++ b/lib/OpenQA/LiveHandler.pm
+@@ -57,17 +57,17 @@
+ 
+     # register root routes: use same paths as the regular web UI but prefix everything with /liveviewhandler
+     $r->get('/' => {json => {name => $self->defaults('appname')}});
+-    my $test_r = $r->route('/liveviewhandler/tests/:testid', testid => qr/\d+/);
++    my $test_r = $r->any('/liveviewhandler/tests/:testid', testid => qr/\d+/);
+     my $api_ro = $r->under('/liveviewhandler/api/v1')->to('Auth#auth_operator');
+ 
+     # register websocket routes
+     my $developer_auth = $test_r->under('/developer')->to('Session#ensure_operator');
+-    my $developer_r    = $developer_auth->route('/');
++    my $developer_r    = $developer_auth->any('/');
+     $developer_r->websocket('/ws-proxy')->name('developer_ws_proxy')->to('live_view_handler#ws_proxy');
+     $test_r->websocket('/developer/ws-proxy/status')->name('status_ws_proxy')->to('live_view_handler#proxy_status');
+ 
+     # register API routes
+-    my $job_r = $api_ro->route('/jobs/:testid', testid => qr/\d+/);
++    my $job_r = $api_ro->any('/jobs/:testid', testid => qr/\d+/);
+     $job_r->post('/upload_progress')->name('developer_post_upload_progress')
+       ->to('live_view_handler#post_upload_progress');
+ 
+--- a/templates/webapi/not_found.html.ep
++++ b/templates/webapi/not_found.html.ep
+@@ -23,7 +23,7 @@
+             % $pattern = "+$pattern" if $depth;
+             <pre><%= '  ' x $depth %><%= $pattern %></pre>
+         </td>
+-        <td><%= uc(join ',', @{$route->via || []}) || '*' %></td>
++        <td><%= uc(join ',', @{$route->methods || []}) || '*' %></td>
+         <td>
+             % my $api_description = stash('api_description') // {};
+             % if (my $description = $api_description->{$route->name}) {
