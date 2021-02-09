@@ -1,8 +1,8 @@
-openqa (4.5.1557137795.c3e5e592-1) UNRELEASED; urgency=medium
+openqa (4.6.1612882822.3535603-1) UNRELEASED; urgency=medium
 
   * update to github/master version (since releases are no longer done)
 
- -- Philip Hands <phil@hands.com>  Tue, 07 May 2019 22:37:05 +0200
+ -- Philip Hands <phil@hands.com>  Tue, 09 Feb 2021 23:56:24 +0100
 
 openqa (4.3+git20171026-1) unstable; urgency=medium
 
