@@ -103,6 +103,9 @@ Build-Depends: debhelper (>= 10),
                libyaml-pp-perl,
                python3-future,
                python3-requests,
+               yamllint,
+               libfilesys-df-perl,
+               libfile-map-perl,
 Standards-Version: 4.1.1
 Homepage: http://open.qa
 Vcs-Git: https://salsa.debian.org/debian/openqa.git
