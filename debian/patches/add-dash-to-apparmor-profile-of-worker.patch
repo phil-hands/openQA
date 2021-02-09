@@ -1,5 +1,5 @@
 Description: Add dash to apparmor profile
-On Debian, /bin/dash may be used too.
+ On Debian, /bin/dash may be used too.
 Author: Frédéric Bonnard <frediz@debian.org>
 ---
 This patch header follows DEP-3: http://dep.debian.net/deps/dep3/
