@@ -1,9 +1,20 @@
+# Copyright (C) 2014-2020 SUSE LLC
 #
-# Stolen from https://github.com/tempire/MojoExample
-# TODO: Contact author to make sure that's OK
+# This program is free software; you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation; either version 2 of the License, or
+# (at your option) any later version.
 #
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License along
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Test::Database;
+use Test::Most;
 use Mojo::Base -base;
 
 use Date::Format;    # To allow fixtures with relative dates
@@ -11,16 +22,17 @@ use DateTime;        # To allow fixtures using InflateColumn::DateTime
 use Carp;
 use Cwd qw( abs_path getcwd );
 use OpenQA::Schema;
-use OpenQA::Utils;
+use OpenQA::Log 'log_info';
+use OpenQA::Utils 'random_string';
 use Mojo::File 'path';
-use db_helpers 'rndstr';
+use Try::Tiny;
+
 has fixture_path => 't/fixtures';
 
-use Test::More;
-plan skip_all => 'set TEST_PG to e.g. DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
+plan skip_all => 'set TEST_PG to e.g. "DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
 
 sub generate_schema_name {
-    return 'tmp_' . rndstr();
+    return 'tmp_' . random_string();
 }
 
 sub create {
@@ -31,23 +43,30 @@ sub create {
 
     # create a new schema or use an existing one
     unless (defined $options{skip_schema}) {
-        my $schema_name = $options{schema_name} // generate_schema_name();
-        log_info("using database schema \"$schema_name\"\n");
+        my $storage     = $schema->storage;
+        my $dbh         = $storage->dbh;
+        my $schema_name = $options{schema_name} // generate_schema_name;
+        log_info("using database schema \"$schema_name\"");
+
+        if ($options{drop_schema}) {
+            $dbh->do('set client_min_messages to WARNING;');
+            $dbh->do("drop schema if exists $schema_name cascade;");
+        }
         $schema->search_path_for_tests($schema_name);
-        $schema->storage->dbh->do("create schema \"$schema_name\"");
-        $schema->storage->dbh->do("SET search_path TO \"$schema_name\"");
+        $dbh->do("create schema \"$schema_name\"");
+        $dbh->do("SET search_path TO \"$schema_name\"");
         # handle reconnects
-        $schema->storage->on_connect_do("SET search_path TO \"$schema_name\"");
+        $storage->on_connect_do("SET search_path TO \"$schema_name\"");
     }
 
-    OpenQA::Schema::deployment_check($schema);
-    $self->insert_fixtures($schema) unless $options{skip_fixtures};
+    $schema->deploy;
+    $self->insert_fixtures($schema, $options{fixtures_glob}) unless $options{skip_fixtures};
 
     return $schema;
 }
 
 sub insert_fixtures {
-    my ($self, $schema) = @_;
+    my ($self, $schema, $fixtures_glob) = @_;
 
     # Store working dir
     my $cwd = getcwd;
@@ -55,7 +74,8 @@ sub insert_fixtures {
     chdir $self->fixture_path;
     my %ids;
 
-    foreach my $fixture (glob "*.pl") {
+    $fixtures_glob //= '*.pl';
+    foreach my $fixture (glob "$fixtures_glob") {
 
         my $info = eval path($fixture)->slurp;    ## no critic
         chdir $cwd, croak "Could not insert fixture $fixture: $@" if $@;
@@ -75,8 +95,13 @@ sub insert_fixtures {
         for (my $i = 0; $i < @$info; $i++) {
             my $class = $info->[$i];
             my $ri    = $info->[++$i];
-            my $row   = $schema->resultset($class)->create($ri);
-            $ids{$row->result_source->from} = $ri->{id} if $ri->{id};
+            try {
+                my $row = $schema->resultset($class)->create($ri);
+                $ids{$row->result_source->from} = $ri->{id} if $ri->{id};
+            }
+            catch {
+                croak "Could not insert fixture " . path($fixture)->to_rel($cwd) . ": $_";
+            };
         }
     }
 
@@ -129,4 +154,3 @@ Insert fixtures into database
 Disconnect from database handle
 
 =cut
-# vim: set sw=4 et:

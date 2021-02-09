@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,15 +14,11 @@
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Auth::OpenID;
+use Mojo::Base -base;
 
-use strict;
-use warnings;
-
+use OpenQA::Log qw(log_error);
 use LWP::UserAgent;
 use Net::OpenID::Consumer;
-use Exporter 'import';
-
-our @EXPORT_OK = qw(auth_login auth_response);
 
 sub auth_login {
     my ($self) = @_;
@@ -37,9 +33,11 @@ sub auth_login {
         consumer_secret => $self->app->config->{_openid_secret},
     );
 
-    my ($claimed_id, $check_url);
-    $claimed_id = $csr->claimed_identity($self->config->{openid}->{provider});
-    return unless ($claimed_id);
+    my $claimed_id = $csr->claimed_identity($self->config->{openid}->{provider});
+    if (!defined $claimed_id) {
+        log_error("Claiming OpenID identity for URL '$url' failed: " . $csr->err);
+        return;
+    }
     $claimed_id->set_extension_args(
         'http://openid.net/extensions/sreg/1.1',
         {
@@ -60,39 +58,23 @@ sub auth_login {
         },
     );
 
-    $check_url = $claimed_id->check_url(
+    my $check_url = $claimed_id->check_url(
         delayed_return => 1,
         return_to      => qq{$url/response},
         trust_root     => qq{$url/},
     );
-
-    if ($check_url) {
-        return (redirect => $check_url, error => 0);
-    }
-    return (error => $csr->err);
+    return (redirect => $check_url, error => 0) if $check_url;
+    return (error    => $csr->err);
 }
 
 sub auth_response {
     my ($self) = @_;
 
-    # FIXME: Mojo6 hack, remove after version bump
-    my %params;
-    if ($self->req->query_params->can('params')) {
-        %params = @{$self->req->query_params->params};
-    }
-    else {
-        %params = @{$self->req->query_params->pairs};
-    }
-
-    my $url = $self->app->config->{global}->{base_url} || $self->req->url->base;
-
-    if ($self->app->config->{openid}->{httpsonly} && $url !~ /^https:\/\//) {
-        return (error => 'Got response on http but https is forced. MOJO_REVERSE_PROXY not set?');
-    }
-
-    while (my ($k, $v) = each %params) {
-        $params{$k} = URI::Escape::uri_unescape($v);
-    }
+    my %params = @{$self->req->params->pairs};
+    my $url    = $self->app->config->{global}->{base_url} || $self->req->url->base;
+    return (error => 'Got response on http but https is forced. MOJO_REVERSE_PROXY not set?')
+      if ($self->app->config->{openid}->{httpsonly} && $url !~ /^https:\/\//);
+    %params = map { $_ => URI::Escape::uri_unescape($params{$_}) } keys %params;
 
     my $csr = Net::OpenID::Consumer->new(
         debug           => sub { $self->app->log->debug("Net::OpenID::Consumer: " . join(' ', @_)); },
@@ -160,7 +142,7 @@ sub auth_response {
         },
     );
 
-    return (error => 0);
+    return (redirect => 'index', error => 0);
 }
 
 1;

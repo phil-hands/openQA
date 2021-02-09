@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2015 SUSE Linux GmbH
+# Copyright (C) 2015-2019 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -61,9 +61,11 @@ lorem ipsum ...
 
 =cut
 
+use strict;
+use warnings;
+
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
-use strict;
 use File::Basename qw(dirname);
 use Try::Tiny;
 use Data::Dump 'dd';
@@ -89,26 +91,25 @@ sub usage($) {
 
 GetOptions(\%options, "apibase=s", "apikey=s", "apisecret=s", "clean", "host=s", "update", "help|h",) or usage(1);
 
-usage(1) if $options{help} || $#ARGV;
+usage(0) if $options{help};
+usage(1) if $#ARGV;
 
-my $datafile = shift @ARGV;
-die "Data file not found\n" unless $datafile && -r $datafile;
+# Slurp file specified as an argument or STDIN in case of "-"
+my $datafile = join("", <>);
+die "Data file not found\n" unless length $datafile;
 
 my $info;
 
-if ($datafile =~ /\.json$/) {
-    local $/;
-    open(my $fh, '<', $datafile);
-    $info = Cpanel::JSON::XS->new->relaxed->decode(<$fh>);
-    close $fh;
+try {
+    $info = Cpanel::JSON::XS->new->relaxed->decode($datafile);
     dd $info;
 }
-else {
-    $info = do $datafile;
+catch {
+    $info = eval $datafile;
     if (my $error = $@) {
         die "Error in data file: $error\n";
     }
-}
+};
 
 $options{'host'}    ||= 'localhost';
 $options{'apibase'} ||= '/api/v1';
@@ -125,20 +126,43 @@ else {
 
 my $client = OpenQA::Client->new(apikey => $options{'apikey'}, apisecret => $options{'apisecret'}, api => $url->host);
 
-my @tables = (qw(Machines TestSuites Products JobTemplates));
+my @tables = (qw(Machines TestSuites Products JobTemplates JobGroups));
 
 sub print_error {
     my ($res) = @_;
-    printf STDERR "ERROR: %s - %s\n", $res->code // 'unknown error code', $res->message // 'no error message';
-    if ($res->body) {
-        dd($res->json || $res->body);
+    if (my $err = $res->error) {
+        if (my $json = $res->json) {
+            if (my $json_err = $json->{error}) {
+                die "$err->{message}: " . join("\n", @{$json_err})
+                  if ref $json_err eq 'ARRAY';
+                die "$err->{message}: $json_err";
+            }
+        }
+        die "ERROR: $err->{code} - $err->{message}" if $err->{code};
     }
+    die "unknown error code - host $url->{host} unreachable?";
 }
 
 sub post_entry {
     my ($table, $entry) = @_;
 
     my %param;
+
+    if ($table eq 'JobGroups') {
+        # Create the group first
+        my $job_groups_url = $url->clone->path($options{'apibase'} . '/job_groups');
+        my $res            = $client->post($job_groups_url, form => {name => $entry->{group_name}})->res;
+        print_error $res unless $res->is_success;
+
+        # Post the job template YAML
+        my $job_templates_url = $url->clone->path($options{'apibase'} . '/job_templates_scheduling');
+        $res
+          = $client->post($job_templates_url,
+            form => {name => $entry->{group_name}, template => $entry->{template}, schema => 'JobTemplates-01.yaml'})
+          ->res;
+        print_error $res unless $res->is_success;
+        return 1;
+    }
 
     if ($table eq 'JobTemplates') {
         unless (defined($entry->{prio})) {
@@ -182,52 +206,46 @@ sub post_entry {
         }
     }
 
+    my $table_url = $url->clone->path($options{'apibase'} . '/' . decamelize($table));
     if (!$options{'clean'}) {    # with --clean the entry should not exist at this point, no need to check
-        my $res = $client->get($url->path($options{'apibase'} . '/' . decamelize($table))->query(%param))->res;
-        if ($res->code == 200 && @{$res->json->{$table}} == 1 && $res->json->{$table}[0]{id}) {
+        my $res = $client->get($table_url->clone, form => \%param)->res;
+        if ($res->is_success && @{$res->json->{$table}} > 0 && $res->json->{$table}[0]{id}) {
             if ($options{'update'} && $table ne 'JobTemplates')
             {                    # there is nothing to update in JobTemplates, the entry just exists or not
-                my $id = $res->json->{$table}[0]{id};
-                my $res
-                  = $client->put($url->path($options{'apibase'} . '/' . decamelize($table) . "/$id")->query(%param))
-                  ->res;
-                if ($res->code != 200) {
-                    print_error($res);
-                    return 0;
-                }
+                my $id           = $res->json->{$table}[0]{id};
+                my $table_url_id = $url->clone->path($options{'apibase'} . '/' . decamelize($table) . "/$id");
+                my $res          = $client->put($table_url_id, form => \%param)->res;
+                print_error $res unless $res->is_success;
                 return 1;
             }
             else {
-                return 0;        # already exists
+                return 0;    # already exists
             }
         }
     }
 
-    my $res = $client->post($url->path($options{'apibase'} . '/' . decamelize($table))->query(%param))->res;
-
-    if ($res->code != 200) {
-        print_error($res);
-        return 0;
-    }
+    my $res = $client->post($table_url, form => \%param)->res;
+    print_error $res unless $res->is_success;
     return 1;
 }
 
 if ($options{'clean'}) {
     for my $table (@tables) {
-        my $res = $client->get($url->path($options{'apibase'} . '/' . decamelize($table)))->res;
-        if ($res->code == 200) {
+        # we can't clean job groups as they're not deletable unless empty
+        next if ($table eq "JobGroups");
+        my $table_url = $url->clone->path($options{'apibase'} . '/' . decamelize($table));
+        my $res       = $client->get($table_url)->res;
+        if ($res->is_success) {
             my $result = $res->json;
             for my $i (0 .. $#{$result->{$table}}) {
-                my $id = $result->{$table}->[$i]->{id};
-                $res = $client->delete($url->path($options{'apibase'} . '/' . decamelize($table) . "/$id"))->res;
-                last if $res->code != 200;
+                my $id           = $result->{$table}->[$i]->{id};
+                my $table_url_id = $url->clone->path($options{'apibase'} . '/' . decamelize($table) . "/$id");
+                $res = $client->delete($table_url_id)->res;
+                last unless $res->is_success;
             }
         }
 
-        if ($res->code != 200) {
-            print_error($res);
-            exit(1);
-        }
+        print_error $res unless $res->is_success;
     }
 }
 

@@ -1,9 +1,5 @@
 @import "openqa_theme.scss";
 
-#dependencygraph_status {
-    text-align: center;
-}
-
 #dependencygraph {
     display: block;
     margin: auto;
@@ -61,6 +57,7 @@
             &:last-child {
                 background-color: #efefef;
                 width: 80px;
+                min-width: 80px;
                 max-width: 80px;
                 text-align: center;
             }
@@ -68,13 +65,13 @@
             &.passed {
                 background-color: $color-ok;
             }
-            &.failed {
+            &.failed, &.parallel_failed {
                 background-color: $color-result-failed;
             }
             &.softfailed {
                 background-color: $color-softfailed;
             }
-            &.incomplete {
+            &.incomplete, &.timeout_exceeded {
                 color: white;
                 background-color: $color-incomplete;
             }
@@ -85,7 +82,7 @@
                 color: white;
                 background-color: $color-state-scheduled;
             }
-            &.cancelled {
+            &.cancelled, &.user_cancelled {
                 background-color: $color-state-cancelled;
             }
             &.assigned, &.running, &.uploading {

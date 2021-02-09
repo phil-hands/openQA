@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2016 SUSE LLC
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,29 +11,21 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use File::Spec;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
-use Mojo::File;
+use Test::Warnings ':report_warnings';
+use Mojo::File 'path';
+use OpenQA::Test::TimeLimit '8';
 use OpenQA::Test::Case;
-use OpenQA::Scheduler;
-
-# create Test DBus bus and service for fake WebSockets and Scheduler call
-my $sh = OpenQA::Scheduler->new;
 
 my $test_case = OpenQA::Test::Case->new;
-$test_case->init_data;
+$test_case->init_data(fixures_glob => '01-jobs.t');
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
@@ -57,21 +49,15 @@ $t->get_ok('/tests/99938/file/video.ogv')->status_is(200)->content_type_is('vide
 
 $t->get_ok('/tests/99938/file/serial0.txt')->status_is(200)->content_type_is('text/plain;charset=UTF-8');
 
-$t->get_ok('/tests/99938/file/y2logs.tar.bz2')->status_is(200);
+$t->get_ok('/tests/99938/file/y2logs.tar.bz2')->status_is(200)->content_type_is('application/x-bzip2');
 
 $t->get_ok('/tests/99938/file/ulogs/y2logs.tar.bz2')->status_is(404);
 
-sub write_file {
-    my ($path, $content) = @_;
-    local $/;    # enable 'slurp' mode
-    open my $fh, ">", $path;
-    print $fh $content;
-    close $fh;
-}
-
 subtest 'needle download' => sub {
     # clean leftovers from previous run
-    my $needle_dir = Mojo::File->new('t/data/openqa/share/tests/opensuse/needles');
+    my $needle_path     = 't/data/openqa/share/tests/opensuse/needles';
+    my $abs_needle_path = File::Spec->rel2abs($needle_path);
+    my $needle_dir      = Mojo::File->new($needle_path);
     $needle_dir->remove_tree();
 
     $t->get_ok('/needles/opensuse/inst-timezone-text.png')->status_is(404, '404 if image not present');
@@ -79,39 +65,62 @@ subtest 'needle download' => sub {
     $t->get_ok('/needles/1/json')->status_is(404, '404 if json not present');
 
     # create fake json file and image
-
     $needle_dir->make_path();
     my $json
       = '{"area" : [{"height": 217, "type": "match", "width": 384, "xpos": 0, "ypos": 0},{"height": 60, "type": "exclude", "width": 160, "xpos": 175, "ypos": 45}], "tags": ["inst-timezone"]}';
-    write_file("$needle_dir/inst-timezone-text.png",  "png\n");
-    write_file("$needle_dir/inst-timezone-text.json", $json);
+    path("$needle_dir/inst-timezone-text.png")->spurt("png\n");
+    path("$needle_dir/inst-timezone-text.json")->spurt($json);
+
+    # and another, in a subdirectory, to test that
+    my $needle_subdir = Mojo::File->new('t/data/openqa/share/tests/opensuse/needles/subdirectory');
+    $needle_subdir->make_path();
+    my $json2
+      = '{"area" : [{"height": 217, "type": "match", "width": 384, "xpos": 0, "ypos": 0},{"height": 60, "type": "exclude", "width": 160, "xpos": 175, "ypos": 45}], "tags": ["inst-subdirectory"]}';
+    path("$needle_subdir/inst-subdirectory.png")->spurt("png\n");
+    path("$needle_subdir/inst-subdirectory.json")->spurt($json2);
 
     $t->get_ok('/needles/opensuse/inst-timezone-text.png')->status_is(200)->content_type_is('image/png')
       ->content_is("png\n");
     $t->get_ok('/needles/1/image')->status_is(200)->content_type_is('image/png')->content_is("png\n");
     $t->get_ok('/needles/1/json')->status_is(200)->content_type_is('application/json;charset=UTF-8')->content_is($json);
+
+    # arguably this should work and be tested, but does not work now because
+    # of how we do routing:
+    #$t->get_ok('/needles/opensuse/subdirectory/inst-subdirectory.png')
+
+    # currently you can only find a needle in a subdirectory by passing the
+    # jsonfile query parameter like this:
+    $t->get_ok("/needles/opensuse/inst-subdirectory.png?jsonfile=$needle_path/subdirectory/inst-subdirectory.json")
+      ->status_is(200)->content_type_is('image/png')->content_is("png\n");
+    # also test with jsonfile as absolute path (as usual in production)
+    $t->get_ok("/needles/opensuse/inst-subdirectory.png?jsonfile=$abs_needle_path/subdirectory/inst-subdirectory.json")
+      ->status_is(200)->content_type_is('image/png')->content_is("png\n");
+
+  # getting needle image and json by ID also does not work for needles
+  # in subdirectories, but arguably should do and should be tested:
+  #$t->get_ok('/needles/2/image')->status_is(200)->content_type_is('image/png')->content_is("png\n");
+  #$t->get_ok('/needles/2/json')->status_is(200)->content_type_is('application/json;charset=UTF-8')->content_is($json2);
 };
 
 
 # check the download links
-my $req = $t->get_ok('/tests/99946')->status_is(200);
-$req->element_exists('#downloads #asset_1');
-$req->element_exists('#downloads #asset_5');
-my $res = OpenQA::Test::Case::trim_whitespace($req->tx->res->dom->at('#downloads #asset_1')->text);
-is($res, "openSUSE-13.1-DVD-i586-Build0091-Media.iso");
-is($req->tx->res->dom->at('#downloads #asset_1')->{href},
-    '/tests/99946/asset/iso/openSUSE-13.1-DVD-i586-Build0091-Media.iso');
-$res = OpenQA::Test::Case::trim_whitespace($req->tx->res->dom->at('#downloads #asset_5')->text);
-is($res,                                                  "openSUSE-13.1-x86_64.hda");
-is($req->tx->res->dom->at('#downloads #asset_5')->{href}, '/tests/99946/asset/hdd/openSUSE-13.1-x86_64.hda');
+$t->get_ok('/tests/99946/downloads_ajax')->status_is(200)->element_exists('#asset_1')->element_exists('#asset_5');
+my $res = OpenQA::Test::Case::trim_whitespace($t->tx->res->dom->at('#asset_1')->text);
+is($res,                                     'openSUSE-13.1-DVD-i586-Build0091-Media.iso');
+is($t->tx->res->dom->at('#asset_1')->{href}, '/tests/99946/asset/iso/openSUSE-13.1-DVD-i586-Build0091-Media.iso');
+$res = OpenQA::Test::Case::trim_whitespace($t->tx->res->dom->at('#asset_5')->text);
+is($res,                                     'openSUSE-13.1-x86_64.hda');
+is($t->tx->res->dom->at('#asset_5')->{href}, '/tests/99946/asset/hdd/openSUSE-13.1-x86_64.hda');
+$t->get_ok('/tests/99938/downloads_ajax')->status_is(200)
+  ->element_exists('a[href=/tests/99938/video?filename=video.ogv]', 'link to video player contains filename');
 
 # downloads are currently redirects
-$req = $t->get_ok('/tests/99946/asset/1')->status_is(302)
+$t->get_ok('/tests/99946/asset/1')->status_is(302)
   ->header_like(Location => qr/(?:http:\/\/localhost:\d+)?\/assets\/iso\/openSUSE-13.1-DVD-i586-Build0091-Media.iso/);
-$req = $t->get_ok('/tests/99946/asset/iso/openSUSE-13.1-DVD-i586-Build0091-Media.iso')->status_is(302)
+$t->get_ok('/tests/99946/asset/iso/openSUSE-13.1-DVD-i586-Build0091-Media.iso')->status_is(302)
   ->header_like(Location => qr/(?:http:\/\/localhost:\d+)?\/assets\/iso\/openSUSE-13.1-DVD-i586-Build0091-Media.iso/);
 
-$req = $t->get_ok('/tests/99946/asset/5')->status_is(302)
+$t->get_ok('/tests/99946/asset/5')->status_is(302)
   ->header_like(Location => qr/(?:http:\/\/localhost:\d+)?\/assets\/hdd\/fixed\/openSUSE-13.1-x86_64.hda/);
 
 # verify error on invalid downloads
@@ -124,16 +133,11 @@ $t->get_ok('/tests/99961/asset/repo/testrepo/README/../README')->status_is(400)
 
 # download_asset is handled by apache normally, but make sure it works - important for fullstack test
 $t->get_ok('/assets/repo/testrepo/README')->status_is(200);
-$t->get_ok('/assets/iso/openSUSE-13.1-DVD-i586-Build0091-Media.iso')->status_is(200);
-
-
-# TODO: also test repos
-
-
-SKIP: {
-    skip "FIXME: allow to download only assets related to a test", 1;
-
-    $req = $t->get_ok('/tests/99946/asset/2')->status_is(400);
-}
+$t->get_ok('/assets/iso/openSUSE-13.1-DVD-i586-Build0091-Media.iso')->status_is(200)
+  ->content_type_is('application/octet-stream');
+$t->get_ok('/assets/iso/../iso/openSUSE-13.1-DVD-i586-Build0091-Media.iso')->status_is(404);
+# created with `qemu-img create -f qcow2 t/data/openqa/share/factory/hdd/foo.qcow2 0`
+$t->get_ok('/assets/hdd/foo.qcow2')->status_is(200)->content_type_is('application/octet-stream');
+$t->get_ok('/assets/repo/testrepo/doesnotexist')->status_is(404);
 
 done_testing();

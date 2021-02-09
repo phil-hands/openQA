@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2019 SUSE LLC
+# Copyright (C) 2012-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,110 +21,108 @@ use Carp;
 use Cwd 'abs_path';
 use IPC::Run();
 use Mojo::URL;
-use Mojo::Util 'url_unescape';
 use Regexp::Common 'URI';
 use Try::Tiny;
 use Mojo::File 'path';
 use IO::Handle;
 use IO::Socket::IP;
-use Time::HiRes 'gettimeofday';
 use POSIX 'strftime';
 use Scalar::Util 'blessed';
 use Mojo::Log;
 use Scalar::Util qw(blessed reftype);
 use Exporter 'import';
+use OpenQA::App;
+use OpenQA::Constants qw(VIDEO_FILE_NAME_START VIDEO_FILE_NAME_REGEX);
+use OpenQA::Log qw(log_info log_debug log_warning log_error);
+
+# avoid boilerplate "$VAR1 = " in dumper output
+$Data::Dumper::Terse = 1;
 
 our $VERSION = sprintf "%d.%03d", q$Revision: 1.12 $ =~ /(\d+)/g;
 our @EXPORT  = qw(
-  $prj
-  $basedir
-  $prjdir
-  $resultdir
-  &data_name
-  &needle_info
-  &needledir
-  &productdir
-  &testcasedir
-  &is_in_tests
-  &log_debug
-  &log_warning
-  &log_info
-  &log_error
-  &log_fatal
-  add_log_channel
-  append_channel_to_defaults
-  remove_log_channel
-  remove_channel_from_defaults
-  log_format_callback
-  get_channel_handle
-  &save_base64_png
-  &run_cmd_with_log
-  &run_cmd_with_log_return_error
-  &set_to_latest_git_master
-  &commit_git
-  &parse_assets_from_settings
-  &find_bugref
-  &find_bugrefs
-  &bugurl
-  &bugref_to_href
-  &href_to_bugref
-  &url_to_href
-  &render_escaped_refs
-  &asset_type_from_setting
-  &check_download_url
-  &check_download_whitelist
-  &create_downloads_list
-  &human_readable_size
-  &locate_asset
-  &job_groups_and_parents
-  &find_job
-  &detect_current_version
+  locate_needle
+  needledir
+  productdir
+  testcasedir
+  is_in_tests
+  save_base64_png
+  run_cmd_with_log
+  run_cmd_with_log_return_error
+  parse_assets_from_settings
+  find_bugref
+  find_bugrefs
+  bugref_regex
+  bugurl
+  bugref_to_href
+  href_to_bugref
+  url_to_href
+  find_bug_number
+  render_escaped_refs
+  asset_type_from_setting
+  check_download_url
+  check_download_passlist
+  get_url_short
+  create_downloads_list
+  human_readable_size
+  locate_asset
+  detect_current_version
   wait_with_progress
-  mark_job_linked
   parse_tags_from_comments
   path_to_class
   loaded_modules
   loaded_plugins
   hashwalker
-  wakeup_scheduler
   read_test_modules
-  exists_worker
   feature_scaling
   logistic_map_steps
   logistic_map
   rand_range
   in_range
   walker
-  &ensure_timestamp_appended
+  ensure_timestamp_appended
   set_listen_address
+  service_port
+  change_sec_to_word
+  find_video_files
+  fix_top_level_help
 );
 
-our @EXPORT_OK = qw(determine_web_ui_web_socket_url get_ws_status_only_url);
+our @EXPORT_OK = qw(
+  prjdir
+  sharedir
+  resultdir
+  assetdir
+  imagesdir
+  base_host
+  determine_web_ui_web_socket_url
+  get_ws_status_only_url
+  random_string
+  random_hex
+);
 
+# override OPENQA_BASEDIR for tests
 if ($0 =~ /\.t$/) {
     # This should result in the 't' directory, even if $0 is in a subdirectory
     my ($tdirname) = $0 =~ qr/((.*\/t\/|^t\/)).+$/;
     $ENV{OPENQA_BASEDIR} ||= $tdirname . 'data';
 }
 
-#use lib "/usr/share/openqa/cgi-bin/modules";
 use File::Basename;
 use File::Spec;
 use File::Spec::Functions qw(catfile catdir);
 use Fcntl;
 use Mojo::JSON qw(encode_json decode_json);
 use Mojo::Util 'xml_escape';
-our $basedir   = $ENV{OPENQA_BASEDIR} || "/var/lib";
-our $prj       = "openqa";
-our $prjdir    = "$basedir/$prj";
-our $sharedir  = "$prjdir/share";
-our $resultdir = "$prjdir/testresults";
-our $assetdir  = "$sharedir/factory";
-our $imagesdir = "$prjdir/images";
-our $hostname  = $ENV{SERVER_NAME};
-our $app;
-my %channels     = ();
-my %log_defaults = (LOG_TO_STANDARD_CHANNEL => 1, CHANNELS => []);
+
+sub prjdir { ($ENV{OPENQA_BASEDIR} || '/var/lib') . '/openqa' }
+
+sub sharedir { $ENV{OPENQA_SHAREDIR} || (prjdir() . '/share') }
+
+sub resultdir { prjdir() . '/testresults' }
+
+sub assetdir { sharedir() . '/factory' }
+
+sub imagesdir { prjdir() . '/images' }
 
 # the desired new folder structure is
 # $testcasedir/<testrepository>
@@ -147,9 +145,11 @@ sub productdir {
 
 sub testcasedir {
     my ($distri, $version, $rootfortests) = @_;
+    my $prjdir = prjdir();
     for my $dir (catdir($prjdir, 'share', 'tests'), catdir($prjdir, 'tests')) {
         $rootfortests ||= $dir if -d $dir;
     }
+    $distri //= '';
     # TODO actually "distri" is misused here. It should rather be something
     # like the name of the repository with all tests
     my $dir = catdir($rootfortests, $distri);
@@ -162,15 +162,9 @@ sub is_in_tests {
 
     $file = File::Spec->rel2abs($file);
     # at least tests use a relative $prjdir, so it needs to be converted to absolute path as well
-    my $abs_projdir = File::Spec->rel2abs($prjdir);
+    my $abs_projdir = File::Spec->rel2abs(prjdir());
     return index($file, catdir($abs_projdir, 'share', 'tests')) == 0
       || index($file, catdir($abs_projdir, 'tests')) == 0;
-}
-
-# Call this when $prjdir is changed to re-evaluate all dependent directories
-sub change_sharedir {
-    $sharedir = shift;
-    $assetdir = "$sharedir/factory";
 }
 
 sub needledir {
@@ -178,55 +172,20 @@ sub needledir {
     return productdir($distri, $version) . '/needles';
 }
 
-sub log_warning;
+sub locate_needle {
+    my ($relative_needle_path, $needles_dir) = @_;
 
-sub needle_info {
-    my ($name, $distri, $version, $fn) = @_;
-    local $/;
+    my $absolute_filename = catdir($needles_dir, $relative_needle_path);
+    my $needle_exists     = -f $absolute_filename;
 
-    my $needledir = needledir($distri, $version);
-
-    if (!$fn) {
-        $fn = "$needledir/$name.json";
+    if (!$needle_exists) {
+        $absolute_filename = catdir(sharedir(), $relative_needle_path);
+        $needle_exists     = -f $absolute_filename;
     }
-    elsif (!-f $fn) {
-        $fn        = catfile($sharedir, $fn);
-        $needledir = dirname($fn);
-    }
-    else {
-        $needledir = dirname($fn);
-    }
+    return $absolute_filename if $needle_exists;
 
-    my $JF;
-    unless (open($JF, '<', $fn)) {
-        log_warning("$fn: $!");
-        return;
-    }
-
-    my $needle;
-    try {
-        $needle = decode_json(<$JF>);
-    }
-    catch {
-        log_warning("failed to parse $fn: $_");
-        # technically not required, $needle should remain undefined. Being superstitious human I add:
-        undef $needle;
-    }
-    finally {
-        close($JF);
-    };
-    return unless $needle;
-
-    my $png_fname = basename($fn, '.json') . '.png';
-    my $pngfile   = File::Spec->catpath('', $needledir, $png_fname);
-
-    $needle->{needledir} = $needledir;
-    $needle->{image}     = $pngfile;
-    $needle->{json}      = $fn;
-    $needle->{name}      = $name;
-    $needle->{distri}    = $distri;
-    $needle->{version}   = $version;
-    return $needle;
+    log_error("Needle file $relative_needle_path not found within $needles_dir.");
+    return undef;
 }
 
 # Adds a timestamp to a string (eg. needle name) or replace the already present timestamp
@@ -240,180 +199,7 @@ sub ensure_timestamp_appended {
     return "$str-$today";
 }
 
-# logging helpers - _log_msg wrappers
-
-# log_debug("message"[, param1=>val1, param2=>val2]);
-# please check the _log_msg function for a brief description of the accepted params
-# examples:
-#  log_debug("message");
-#  log_debug("message", channels=>'channel1')
-#  log_debug("message", channels=>'channel1', standard=>0)
-sub log_debug {
-    _log_msg('debug', @_);
-}
-
-# log_info("message"[, param1=>val1, param2=>val2]);
-sub log_info {
-
-    _log_msg('info', @_);
-}
-
-# log_warning("message"[, param1=>val1, param2=>val2]);
-sub log_warning {
-    _log_msg('warn', @_);
-}
-
-# log_error("message"[, param1=>val1, param2=>val2]);
-sub log_error {
-    _log_msg('error', @_);
-}
-
-# log_fatal("message"[, param1=>val1, param2=>val2]);
-sub log_fatal {
-    _log_msg('fatal', @_);
-    die $_[0];
-}
-
-sub _current_log_level {
-    # FIXME: avoid use of $app here
-    return defined $app && $app->can('log') && $app->log->can('level') && $app->log->level;
-}
-
-# The %options parameter is used to control which destinations the message should go.
-# Accepted parameters: channels, standard.
-#  - channels. Scalar or a arrayref containing the name of the channels to log to.
-#  - standard. Boolean to indicate if it should use the *defaults* to log.
-#
-# If any of parameters above don't exist, this function will log to the defaults (by
-# default it is $app). The standard option need to be set to true. Please check the function
-# add_log_channel to learn on how to set a channel as default.
-sub _log_msg {
-    my ($level, $msg, %options) = @_;
-
-    # use default options
-    if (!%options) {
-        return _log_msg(
-            $level, $msg,
-            channels => $log_defaults{CHANNELS},
-            standard => $log_defaults{LOG_TO_STANDARD_CHANNEL});
-    }
-
-    # prepend process ID on debug level
-    if (_current_log_level eq 'debug') {
-        $msg = "[pid:$$] $msg";
-    }
-
-    # log to channels
-    my $wrote_to_at_least_one_channel = 0;
-    if (my $channels = $options{channels}) {
-        for my $channel (ref($channels) eq 'ARRAY' ? @$channels : $channels) {
-            $wrote_to_at_least_one_channel |= _log_to_channel_by_name($level, $msg, $channel);
-        }
-    }
-
-    # log to standard (as fallback or when explicitely requested)
-    if (!$wrote_to_at_least_one_channel || ($options{standard} // $log_defaults{LOG_TO_STANDARD_CHANNEL})) {
-        # use Mojolicious app if available and otherwise just STDERR/STDOUT
-        _log_via_mojo_app($level, $msg) or _log_to_stderr_or_stdout($level, $msg);
-    }
-}
-
-sub _log_to_channel_by_name {
-    my ($level, $msg, $channel_name) = @_;
-
-    return 0 unless ($channel_name);
-    my $channel = $channels{$channel_name} or return 0;
-    return _try_logging_to_channel($level, $msg, $channel);
-}
-
-sub _log_via_mojo_app {
-    my ($level, $msg) = @_;
-
-    return 0 unless ($app && $app->log);
-    return _try_logging_to_channel($level, $msg, $app->log);
-}
-
-sub _try_logging_to_channel {
-    my ($level, $msg, $channel) = @_;
-
-    eval { $channel->$level($msg); };
-    return ($@ ? 0 : 1);
-}
-
-sub _log_to_stderr_or_stdout {
-    my ($level, $msg) = @_;
-    if ($level =~ /warn|error|fatal/) {
-        STDERR->printflush("[@{[uc $level]}] $msg\n");
-    }
-    else {
-        STDOUT->printflush("[@{[uc $level]}] $msg\n");
-    }
-}
-
-# When a developer wants to log constantly to a channel he can either constantly pass the parameter
-# 'channels' in the log_* functions, or when creating the channel, pass the parameter 'default'.
-# This parameter can have two values:
-# - "append". This value will append the channel to the defaults, so the simple call to the log_*
-#   functions will try to log to the channels set as default.
-# - "set". This value will replace all the defaults with the channel being created.
-#
-# All the parameters set in %options are passed to the Mojo::Log constructor.
-sub add_log_channel {
-    my ($channel, %options) = @_;
-    if ($options{default}) {
-        if ($options{default} eq 'append') {
-            push @{$log_defaults{CHANNELS}}, $channel;
-        }
-        elsif ($options{default} eq 'set') {
-            $log_defaults{CHANNELS}                = [$channel];
-            $log_defaults{LOG_TO_STANDARD_CHANNEL} = 0;
-        }
-        delete $options{default};
-    }
-    $channels{$channel} = Mojo::Log->new(%options);
-
-    $channels{$channel}->format(\&log_format_callback);
-}
-
-# The default format for logging
-sub log_format_callback {
-    my ($time, $level, @lines) = @_;
-    # Unfortunately $time doesn't have the precision we want. So we need to use Time::HiRes
-    $time = gettimeofday;
-    return
-      sprintf(strftime("[%FT%T.%%04d %Z] [$level] ", localtime($time)), 1000 * ($time - int($time)))
-      . join("\n", @lines, '');
-}
-
-sub append_channel_to_defaults {
-    my ($channel) = @_;
-    push @{$log_defaults{CHANNELS}}, $channel if $channels{$channel};
-}
-
-# Removes a channel from defaults.
-sub remove_channel_from_defaults {
-    my ($channel) = @_;
-    $log_defaults{CHANNELS} = [grep { $_ ne $channel } @{$log_defaults{CHANNELS}}];
-    $log_defaults{LOG_TO_STANDARD_CHANNEL} = 1 if !@{$log_defaults{CHANNELS}};
-}
-
-sub remove_log_channel {
-    my ($channel) = @_;
-    remove_channel_from_defaults($channel);
-    delete $channels{$channel} if $channel;
-}
-
-sub get_channel_handle {
-    my ($channel) = @_;
-    if ($channel) {
-        return $channels{$channel}->handle if $channels{$channel};
-    }
-    elsif ($app) {
-        return $app->log->handle;
-    }
-}
-
-sub save_base64_png($$$) {
+sub save_base64_png {
     my ($dir, $newfile, $png) = @_;
     return unless $newfile;
     # sanitize
@@ -438,6 +224,8 @@ sub image_md5_filename {
         # stored this way in the database
         return catfile($prefix1, $prefix2, "$md5.png");
     }
+
+    my $imagesdir = imagesdir();
     return (
         catfile($imagesdir, $prefix1, $prefix2, "$md5.png"),
         catfile($imagesdir, $prefix1, $prefix2, '.thumbs', "$md5.png"));
@@ -455,12 +243,12 @@ sub get_ws_status_only_url {
     return "liveviewhandler/tests/$job_id/developer/ws-proxy/status";
 }
 
-sub run_cmd_with_log($) {
+sub run_cmd_with_log {
     my ($cmd) = @_;
     return run_cmd_with_log_return_error($cmd)->{status};
 }
 
-sub run_cmd_with_log_return_error($) {
+sub run_cmd_with_log_return_error {
     my ($cmd) = @_;
 
     log_info('Running cmd: ' . join(' ', @$cmd));
@@ -490,76 +278,6 @@ sub run_cmd_with_log_return_error($) {
             stderr      => "an internal error occured",
         };
     };
-}
-
-sub _prepare_git_command {
-    my ($args) = @_;
-
-    my $dir = $args->{dir};
-    if ($dir !~ /^\//) {
-        my $absolute_path = abs_path($dir);
-        $dir = $absolute_path if ($absolute_path);
-    }
-    return ('git', '-C', $dir);
-}
-
-sub _format_git_error {
-    my ($git_result, $error_message) = @_;
-
-    if ($git_result->{stderr}) {
-        $error_message .= ': ' . $git_result->{stderr};
-    }
-    return $error_message;
-}
-
-sub set_to_latest_git_master {
-    my ($args) = @_;
-
-    my $git_config = $app->config->{'scm git'};
-    return undef unless $git_config;
-
-    my @git = _prepare_git_command($args);
-
-    if (my $update_remote = $git_config->{update_remote}) {
-        my $res = run_cmd_with_log_return_error([@git, 'remote', 'update', $update_remote]);
-        return _format_git_error($res, 'Unable to fetch from origin master') unless $res->{status};
-    }
-
-    if (my $update_branch = $git_config->{update_branch}) {
-        my $res = run_cmd_with_log_return_error([@git, 'rebase', $update_branch]);
-        return _format_git_error($res, 'Unable to reset repository to origin/master') unless $res->{status};
-    }
-
-    return undef;
-}
-
-sub commit_git {
-    my ($args) = @_;
-
-    my @git = _prepare_git_command($args);
-    my @files;
-
-    # stage changes
-    for my $cmd (qw(add rm)) {
-        next unless $args->{$cmd};
-        push(@files, @{$args->{$cmd}});
-        my $res = run_cmd_with_log_return_error([@git, $cmd, @{$args->{$cmd}}]);
-        return _format_git_error($res, "Unable to $cmd via Git") unless $res->{status};
-    }
-
-    # commit changes
-    my $message = $args->{message};
-    my $user    = $args->{user};
-    my $author  = sprintf('--author=%s <%s>', $user->fullname, $user->email);
-    my $res     = run_cmd_with_log_return_error([@git, 'commit', '-q', '-m', $message, $author, @files]);
-    return _format_git_error($res, 'Unable to commit via Git') unless $res->{status};
-
-    # push changes
-    if (($app->config->{'scm git'}->{do_push} || '') eq 'yes') {
-        $res = run_cmd_with_log_return_error([@git, 'push']);
-        return _format_git_error($res, 'Unable to push Git commit') unless $res->{status};
-    }
-    return undef;
 }
 
 sub asset_type_from_setting {
@@ -605,7 +323,7 @@ sub _relative_or_absolute {
     my ($path, $relative) = @_;
 
     return $path if $relative;
-    return catfile($assetdir, $path);
+    return catfile(assetdir(), $path);
 }
 
 # find the actual disk location of a given asset. Supported arguments are
@@ -650,11 +368,13 @@ my %bugurls = (
     $bugrefs{jsc}                                  => 'jsc',
 );
 
+my $MARKER_REFS = join('|', keys %bugrefs);
+my $MARKER_URLS = join('|', keys %bugurls);
+
 sub bugref_regex {
-    my $marker  = join('|', keys %bugrefs);
     my $repo_re = qr{[a-zA-Z/-]+};
     # <marker>[#<project/repo>]#<id>
-    return qr{(?<![\(\[\"\>])(?<match>(?<marker>$marker)\#?(?<repo>$repo_re)?\#(?<id>([A-Z]+-)?\d+))(?![\w\"])};
+    return qr{(?<![\(\[\"\>])(?<match>(?<marker>$MARKER_REFS)\#?(?<repo>$repo_re)?\#(?<id>([A-Z]+-)?\d+))(?![\w\"])};
 }
 
 sub find_bugref {
@@ -695,7 +415,7 @@ sub bugref_to_href {
 
 sub href_to_bugref {
     my ($text) = @_;
-    my $regex = join('|', keys %bugurls) =~ s/\?/\\\?/gr;
+    my $regex = $MARKER_URLS =~ s/\?/\\\?/gr;
     # <repo> is optional, e.g. for github. For github issues and pull are
     # interchangeable, see comment in 'bugurl', too
     $regex = qr{(?<!["\(\[])(?<url_root>$regex)((?<repo>.*)/(issues|pull)/)?(?<id>([A-Z]+-)?\d+)(?![\w])};
@@ -714,18 +434,23 @@ sub render_escaped_refs {
     return bugref_to_href(url_to_href(xml_escape($text)));
 }
 
+sub find_bug_number {
+    my ($text) = @_;
+    return $text =~ /\S+\-((?:$MARKER_REFS)\d+)\-\S+/ ? $1 : undef;
+}
+
 sub check_download_url {
-    # Passed a URL and the download_domains whitelist from openqa.ini.
-    # Checks if the host of the URL is in the whitelist. Returns an
-    # array: (1, host) if there is a whitelist and the host is not in
-    # it, (2, host) if there is no whitelist, and () if we pass. This
-    # is used by check_download_whitelist below (and so indirectly by
+    # Passed a URL and the download_domains passlist from openqa.ini.
+    # Checks if the host of the URL is in the passlist. Returns an
+    # array: (1, host) if there is a passlist and the host is not in
+    # it, (2, host) if there is no passlist, and () if we pass. This
+    # is used by check_download_passlist below (and so indirectly by
     # the Iso controller) and directly by the download_asset() Gru
     # task subroutine.
-    my ($url, $whitelist) = @_;
+    my ($url, $passlist) = @_;
     my @okdomains;
-    if (defined $whitelist) {
-        @okdomains = split(/ /, $whitelist);
+    if (defined $passlist) {
+        @okdomains = split(/ /, $passlist);
     }
     my $host = Mojo::URL->new($url)->host;
     unless (@okdomains) {
@@ -744,29 +469,29 @@ sub check_download_url {
     }
 }
 
-sub check_download_whitelist {
+sub check_download_passlist {
     # Passed the params hash ref for a job and the download_domains
-    # whitelist read from openqa.ini. Checks that all params ending
+    # passlist read from openqa.ini. Checks that all params ending
     # in _URL (i.e. requesting asset download) specify URLs that are
-    # whitelisted. It's provided here so that we can run the check
+    # passlisted. It's provided here so that we can run the check
     # twice, once to return immediately and conveniently from the Iso
     # controller, once again directly in the Gru asset download sub
     # just in case someone somehow manages to bypass the API and
     # create a gru task directly. On failure, returns an array of 4
-    # items: the first is 1 if there was a whitelist at all or 2 if
+    # items: the first is 1 if there was a passlist at all or 2 if
     # there was not, the second is the name of the param for which the
     # check failed, the third is the URL, and the fourth is the host.
     # On success, returns an empty array.
 
-    my ($params, $whitelist) = @_;
+    my ($params, $passlist) = @_;
     my @okdomains;
-    if (defined $whitelist) {
-        @okdomains = split(/ /, $whitelist);
+    if (defined $passlist) {
+        @okdomains = split(/ /, $passlist);
     }
     for my $param (keys %$params) {
         next unless ($param =~ /_URL$/);
         my $url   = $$params{$param};
-        my @check = check_download_url($url, $whitelist);
+        my @check = check_download_url($url, $passlist);
         next unless (@check);
         # if we get here, we got a failure
         return ($check[0], $param, $url, $check[1]);
@@ -775,51 +500,42 @@ sub check_download_whitelist {
     return ();
 }
 
+sub get_url_short {
+    # Given a setting name, if it ends with _URL or _DECOMPRESS_URL
+    # return the name with that string stripped, and a flag indicating
+    # whether decompression will be needed. If it doesn't, returns
+    # empty string and 0.
+    my ($arg) = @_;
+    return ('', 0) unless ($arg =~ /_URL$/);
+    my $short;
+    my $do_extract = 0;
+    if ($arg =~ /_DECOMPRESS_URL$/) {
+        $short      = substr($arg, 0, -15);
+        $do_extract = 1;
+    }
+    else {
+        $short = substr($arg, 0, -4);
+    }
+    return ($short, $do_extract);
+}
+
 sub create_downloads_list {
     my ($args) = @_;
     my %downloads = ();
     for my $arg (keys %$args) {
-        next unless ($arg =~ /_URL$/);
-        # As this comes in from an API call, URL will be URI-encoded
-        # This obviously creates a vuln if untrusted users can POST
-        $args->{$arg} = url_unescape($args->{$arg});
-        my $url        = $args->{$arg};
-        my $do_extract = 0;
-        my $short;
-        my $filename;
-        # if $args{FOO_URL} or $args{FOO_DECOMPRESS_URL} is set but $args{FOO}
-        # is not, we will set $args{FOO} (the filename of the downloaded asset)
-        # to the URL filename. This has to happen *before*
-        # generate_jobs so the jobs have FOO set
-        if ($arg =~ /_DECOMPRESS_URL$/) {
-            $do_extract = 1;
-            $short      = substr($arg, 0, -15);    # remove whole _DECOMPRESS_URL substring
-        }
-        else {
-            $short = substr($arg, 0, -4);          # remove _URL substring
-        }
-        if (!$args->{$short}) {
-            $filename = Mojo::URL->new($url)->path->parts->[-1];
-            if ($do_extract) {
-                # if user wants to extract downloaded file, final filename
-                # will have last extension removed
-                $filename = fileparse($filename, qr/\.[^.]*/);
-            }
-            $args->{$short} = $filename;
-            if (!$args->{$short}) {
-                OpenQA::Utils::log_warning("Unable to get filename from $url. Ignoring $arg");
-                delete $args->{$short} unless $args->{$short};
-                next;
-            }
-        }
-        else {
-            $filename = $args->{$short};
+        my $url = $args->{$arg};
+        my ($short, $do_extract) = get_url_short($arg);
+        next unless ($short);
+        my $filename = $args->{$short};
+        unless ($filename) {
+            log_debug("No target filename set for $url. Ignoring $arg");
+            next;
         }
         # We're only going to allow downloading of asset types. We also
         # need this to determine the download location later
         my $assettype = asset_type_from_setting($short, $args->{$short});
         unless ($assettype) {
-            OpenQA::Utils::log_debug("_URL downloading only allowed for asset types! $short is not an asset type");
+            log_debug("_URL downloading only allowed for asset types! $short is not an asset type");
             next;
         }
         # Find where we should download the file to
@@ -832,33 +548,6 @@ sub create_downloads_list {
         }
     }
     return \%downloads;
-}
-
-sub wakeup_scheduler {
-    my $ipc = OpenQA::IPC->ipc;
-
-    my $con = $ipc->{bus}->get_connection;
-
-    # ugly work around for Net::DBus::Test not being able to handle us using low level API
-    return if ref($con) eq 'Net::DBus::Test::MockConnection';
-
-    my $msg = $con->make_method_call_message(
-        "org.opensuse.openqa.Scheduler",
-        "/Scheduler", "org.opensuse.openqa.Scheduler",
-        "wakeup_scheduler"
-    );
-    # do not wait for a reply - avoid deadlocks. this way we can even call it
-    # from within the scheduler without having to worry about reentering
-    $con->send($msg);
-}
-
-sub exists_worker($$) {
-    my $schema   = shift;
-    my $workerid = shift;
-    die "invalid worker id\n" unless $workerid;
-    my $rs = $schema->resultset("Workers")->find($workerid);
-    die "invalid worker id $workerid\n" unless $rs;
-    return $rs;
 }
 
 sub _round_a_bit {
@@ -894,115 +583,6 @@ sub human_readable_size {
     return $p . _round_a_bit($size) . "GiB";
 }
 
-# query group parents and job groups and let the database sort it for us - and merge it afterwards
-sub job_groups_and_parents {
-    my $schema = $app->schema;
-    my @parents
-      = $schema->resultset('JobGroupParents')->search({}, {order_by => [{-asc => 'sort_order'}, {-asc => 'name'}]})
-      ->all;
-    my @groups_without_parent = $schema->resultset('JobGroups')
-      ->search({parent_id => undef}, {order_by => [{-asc => 'sort_order'}, {-asc => 'name'}]})->all;
-    my @res;
-    my $first_parent = shift @parents;
-    my $first_group  = shift @groups_without_parent;
-    while ($first_parent || $first_group) {
-        my $pick_parent
-          = $first_parent && (!$first_group || ($first_group->sort_order // 0) > ($first_parent->sort_order // 0));
-        if ($pick_parent) {
-            push(@res, $first_parent);
-            $first_parent = shift @parents;
-        }
-        else {
-            push(@res, $first_group);
-            $first_group = shift @groups_without_parent;
-        }
-    }
-    return \@res;
-}
-
-sub find_job {
-    my ($controller, $job_id) = @_;
-
-    my $job = $controller->app->schema->resultset('Jobs')->find(int($job_id));
-    if (!$job) {
-        $controller->render(json => {error => 'Job does not exist'}, status => 404);
-        return;
-    }
-
-    return $job;
-}
-
-# returns the search args for the job overview according to the parameter of the specified controller
-sub compose_job_overview_search_args {
-    my ($controller) = @_;
-    my %search_args;
-
-    # add simple query params to search args
-    for my $arg (qw(distri version flavor build test)) {
-        my $params      = $controller->every_param($arg) or next;
-        my $param_count = scalar @$params;
-        if ($param_count == 1) {
-            $search_args{$arg} = $params->[0];
-        }
-        elsif ($param_count > 1) {
-            $search_args{$arg} = {-in => $params};
-        }
-    }
-    if (my $modules = param_hash($controller, 'modules')) {
-        $search_args{modules} = [keys %$modules];
-    }
-    if ($controller->param('modules_result')) {
-        $search_args{modules_result} = $controller->every_param('modules_result');
-    }
-    # add group query params to search args
-    # (By 'every_param' we make sure to use multiple values for groupid and
-    # group at the same time as a logical or, i.e. all specified groups are
-    # returned.)
-    my $schema = $controller->schema;
-    my @groups;
-    if ($controller->param('groupid') or $controller->param('group')) {
-        my @group_id_search   = map { {id   => $_} } @{$controller->every_param('groupid')};
-        my @group_name_search = map { {name => $_} } @{$controller->every_param('group')};
-        my @search_terms = (@group_id_search, @group_name_search);
-        @groups = $schema->resultset('JobGroups')->search(\@search_terms)->all;
-    }
-
-    # determine build number
-    if (!$search_args{build}) {
-        # yield the latest build of the first group if (multiple) groups but not build specified
-        # note: the search arg 'groupid' is ignored by complex_query() because we later assign 'groupids'
-        $search_args{groupid} = $groups[0]->id if (@groups);
-
-        $search_args{build} = $schema->resultset('Jobs')->latest_build(%search_args);
-
-        # print debug output
-        if (@groups == 0) {
-            $controller->app->log->debug(
-                'No build and no group specified, will lookup build based on the other parameters');
-        }
-        elsif (@groups == 1) {
-            $controller->app->log->debug('Only one group but no build specified, searching for build');
-        }
-        else {
-            $controller->app->log->info('More than one group but no build specified, selecting build of first group');
-        }
-    }
-
-    # exclude jobs which are already cloned by setting scope for OpenQA::Jobs::complex_query()
-    $search_args{scope} = 'current';
-
-    # allow filtering by job ID
-    my $ids = $controller->every_param('id');
-    $search_args{id} = $ids if ($ids && @$ids);
-    # note: filter for results, states and failed modules are applied after the initial search
-    #       so old jobs are not revealed by applying those filters
-
-    # allow filtering by group ID or group name
-    $search_args{groupids} = [map { $_->id } @groups] if (@groups);
-
-    return (\%search_args, \@groups);
-}
-
 sub read_test_modules {
     my ($job) = @_;
 
@@ -1013,7 +593,7 @@ sub read_test_modules {
     my $has_parser_text_results = 0;
     my @modlist;
 
-    for my $module (OpenQA::Schema::Result::JobModules::job_modules($job)) {
+    for my $module ($job->modules_with_job_prefetched->all) {
         my $name = $module->name();
         # add link to $testresultdir/$name*.png via png CGI
         my @details;
@@ -1021,23 +601,13 @@ sub read_test_modules {
         my $num                           = 1;
         my $has_module_parser_text_result = 0;
 
-        for my $step (@{$module->details}) {
+        my $module_results = $module->results;
+        for my $step (@{$module_results->{details}}) {
             my $text   = $step->{text};
             my $source = $step->{_source};
 
-            $step->{num}           = $num++;
-            $step->{display_title} = ($text ? $step->{title} : $step->{name}) // '';
-            if ($text) {
-                my $file = path($job->result_dir(), $text);
-                if (-e $file) {
-                    log_debug("Reading information from " . encode_json($step));
-                    $step->{text_data} = $file->slurp;
-                }
-                else {
-                    log_debug("Cannot read file: $file");
-                }
-            }
-
+            $step->{num}                   = $num++;
+            $step->{display_title}         = ($text ? $step->{title} : $step->{name}) // '';
             $step->{is_parser_text_result} = 0;
             if ($source && $source eq 'parser' && $text && $step->{text_data}) {
                 $step->{is_parser_text_result} = 1;
@@ -1062,6 +632,7 @@ sub read_test_modules {
                 fatal                  => $module->fatal,
                 always_rollback        => $module->always_rollback,
                 has_parser_text_result => $has_module_parser_text_result,
+                execution_time         => change_sec_to_word($module_results->{execution_time}),
             });
 
         if (!$category || $category ne $module->category) {
@@ -1089,36 +660,6 @@ sub wait_with_progress {
     } while ($interval > $tics);
 
     print "\n";
-}
-
-sub mark_job_linked {
-    my ($jobid, $referer_url) = @_;
-
-    my $referer = Mojo::URL->new($referer_url)->host;
-    my $schema  = $app->schema;
-    if ($referer && grep { $referer eq $_ } @{$app->config->{global}->{recognized_referers}}) {
-        my $job = $schema->resultset('Jobs')->find({id => $jobid});
-        return unless $job;
-        my $found    = 0;
-        my $comments = $job->comments;
-        while (my $comment = $comments->next) {
-            if ($comment->label eq 'linked') {
-                $found = 1;
-                last;
-            }
-        }
-        unless ($found) {
-            my $user = $schema->resultset('Users')->search({username => 'system'})->first;
-            $comments->create(
-                {
-                    text    => "label:linked Job mentioned in $referer_url",
-                    user_id => $user->id
-                });
-        }
-    }
-    elsif ($referer) {
-        log_debug("Unrecognized referer '$referer'");
-    }
 }
 
 # parse comments of the specified (parent) group and store all mentioned builds in $res (hashref)
@@ -1155,8 +696,8 @@ sub detect_current_version {
     # Get application version
     my $current_version = undef;
     my $changelog_file  = path($path, 'public', 'Changelog');
-    my $head_file       = path($path, '.git', 'refs', 'heads', 'master');
-    my $refs_file       = path($path, '.git', 'packed-refs');
+    my $head_file       = path($path, '.git',   'refs', 'heads', 'master');
+    my $refs_file       = path($path, '.git',   'packed-refs');
 
     if (-e $changelog_file) {
         my $changelog = $changelog_file->slurp;
@@ -1204,7 +745,8 @@ sub loaded_plugins {
 sub hashwalker {
     my ($hash, $callback, $keys) = @_;
     $keys = [] if !$keys;
-    while (my ($key, $value) = each %$hash) {
+    foreach my $key (sort keys %$hash) {
+        my $value = $hash->{$key};
         push @$keys, $key;
         if (ref($value) eq 'HASH') {
             hashwalker($value, $callback, $keys);
@@ -1272,36 +814,53 @@ sub logistic_map_steps {
     $_[2];
 }
 sub rand_range { $_[0] + rand($_[1] - $_[0]) }
-sub in_range { $_[0] >= $_[1] && $_[0] <= $_[2] ? 1 : 0 }
+sub in_range   { $_[0] >= $_[1] && $_[0] <= $_[2] ? 1 : 0 }
 
 sub set_listen_address {
-    my ($port) = @_;
+    my $port = shift;
 
-    if ($ENV{MOJO_LISTEN}) {
-        return;
-    }
-
+    return if $ENV{MOJO_LISTEN};
     my @listen_addresses = ("http://127.0.0.1:$port");
-    if (IO::Socket::IP->new(Listen => 5, LocalAddr => '::1')) {
-        push(@listen_addresses, "http://[::1]:$port");
-    }
 
-    $ENV{MOJO_LISTEN} = join(',', @listen_addresses);
+    # Check for IPv6
+    push @listen_addresses, "http://[::1]:$port" if IO::Socket::IP->new(Listen => 5, LocalAddr => '::1');
+
+    $ENV{MOJO_LISTEN} = join ',', @listen_addresses;
 }
 
-sub param_hash {
-    my ($controller, $param_name) = @_;
+sub service_port {
+    my $service = shift;
 
-    my $params = $controller->every_param($param_name) or return;
-    my %hash;
-    for my $param (@$params) {
-        # ignore empty params
-        next unless $param;
-        # allow passing multiple values by separating them with comma
-        $hash{$_} = 1 for split(',', $param);
-    }
-    return unless (%hash);
-    return \%hash;
+    my $base = $ENV{OPENQA_BASE_PORT} ||= 9526;
+
+    my $offsets = {
+        webui         => 0,
+        websocket     => 1,
+        livehandler   => 2,
+        scheduler     => 3,
+        cache_service => 4
+    };
+    croak "Unknown service: $service" unless exists $offsets->{$service};
+    return $base + $offsets->{$service};
+}
+
+sub random_string {
+    my ($length, $chars) = @_;
+    $length //= 16;
+    $chars  //= ['a' .. 'z', 'A' .. 'Z', '0' .. '9', '_'];
+    return join('', map { $chars->[rand @$chars] } 1 .. $length);
+}
+
+sub random_hex {
+    my ($length) = @_;
+    $length //= 16;
+    my $toread = $length / 2 + $length % 2;
+    # uncoverable branch true
+    open(my $fd, '<:raw:bytes', '/dev/urandom') || croak "can't open /dev/urandom: $!";
+    # uncoverable branch true
+    read($fd, my $bytes, $toread) || croak "can't read random byte: $!";
+    close $fd;
+    return uc substr(unpack('H*', $bytes), 0, $length);
 }
 
 sub any_array_item_contained_by_hash {
@@ -1313,5 +872,31 @@ sub any_array_item_contained_by_hash {
     return 0;
 }
 
+sub base_host { Mojo::URL->new($_[0])->host || $_[0] }
+
+sub change_sec_to_word {
+    my ($second) = @_;
+    return undef unless ($second);
+    return undef if ($second !~ /^[[:digit:]]+$/);
+    my %time_numbers = (
+        d => 86400,
+        h => 3600,
+        m => 60,
+        s => 1
+    );
+    my $time_word = '';
+    for my $key (qw(d h m s)) {
+        $time_word = $time_word . int($second / $time_numbers{$key}) . $key . ' '
+          if (int($second / $time_numbers{$key}));
+        $second = int($second % $time_numbers{$key});
+    }
+    $time_word =~ s/\s$//g;
+    return $time_word;
+}
+
+sub find_video_files { path(shift)->list_tree->grep(VIDEO_FILE_NAME_REGEX) }
+
+# workaround https://github.com/mojolicious/mojo/issues/1629
+sub fix_top_level_help { @ARGV = () if ($ARGV[0] // '') =~ qr/^(-h|(--)?help)$/ }
+
 1;
-# vim: set sw=4 et:

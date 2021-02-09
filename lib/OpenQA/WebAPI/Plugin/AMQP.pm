@@ -1,4 +1,4 @@
-# Copyright (C) 2016-2019 SUSE LLC
+# Copyright (C) 2016-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,16 +16,14 @@
 package OpenQA::WebAPI::Plugin::AMQP;
 use Mojo::Base 'Mojolicious::Plugin';
 
-use Mojo::JSON;    # booleans
-use Cpanel::JSON::XS ();
 use Mojo::IOLoop;
-use OpenQA::Utils;
+use OpenQA::Log 'log_debug';
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Events;
 use Mojo::RabbitMQ::Client::Publisher;
 
-my @job_events     = qw(job_create job_delete job_cancel job_duplicate job_restart job_update_result job_done);
+my @job_events     = qw(job_create job_delete job_cancel job_restart job_update_result job_done);
 my @comment_events = qw(comment_create comment_update comment_delete);
 
 sub new {
@@ -61,30 +59,32 @@ sub log_event {
     $event =~ s/_/\./;
     $event =~ s/_/\./;
 
-    my $topic = $self->{config}->{amqp}{topic_prefix} . '.' . $event;
-
-    # convert data to JSON, with reliable key ordering (helps the tests)
-    $event_data = Cpanel::JSON::XS->new->canonical(1)->allow_blessed(1)->ascii(1)->encode($event_data);
+    my $prefix = $self->{config}->{amqp}{topic_prefix};
+    my $topic  = $prefix ? $prefix . '.' . $event : $event;
 
     # seperate function for tests
     $self->publish_amqp($topic, $event_data);
 }
 
 sub publish_amqp {
-    my ($self, $topic, $event_data) = @_;
+    my ($self, $topic, $event_data, $headers) = @_;
+    $headers //= {};
+    die "publish_amqp headers must be a hashref!" unless (ref($headers) eq 'HASH');
 
     log_debug("Sending AMQP event: $topic");
     my $publisher = Mojo::RabbitMQ::Client::Publisher->new(
         url => $self->{config}->{amqp}{url} . "?exchange=" . $self->{config}->{amqp}{exchange});
 
-    $publisher->publish_p($event_data, routing_key => $topic)->then(
+    # A hard reference to the publisher object needs to be kept until the event
+    # has been published asynchronously, or it gets destroyed too early
+    $publisher->publish_p($event_data, $headers, routing_key => $topic)->then(
         sub {
             log_debug "$topic published";
         }
     )->catch(
         sub {
             die "Publishing $topic failed";
-        });
+        })->finally(sub { undef $publisher });
 }
 
 sub on_job_event {

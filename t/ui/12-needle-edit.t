@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2014-2019 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,36 +12,37 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
+use Encode 'encode_utf8';
 use Test::Mojo;
-use Test::Warnings ':all';
+use Test::Warnings qw(:all :report_warnings);
+use OpenQA::Test::TimeLimit '20';
 use OpenQA::Test::Case;
 use Cwd 'abs_path';
+use Mojo::File;
 use Mojo::JSON 'decode_json';
 use File::Path qw(make_path remove_tree);
 use Date::Format 'time2str';
 use POSIX 'strftime';
-use OpenQA::Scheduler;
-
-# create Test DBus bus and service for fake WebSockets and Scheduler call
-my $sh = OpenQA::Scheduler->new;
 
 my $test_case   = OpenQA::Test::Case->new;
 my $schema_name = OpenQA::Test::Database->generate_schema_name;
-my $schema      = $test_case->init_data(schema_name => $schema_name);
+my $schema      = $test_case->init_data(
+    schema_name   => $schema_name,
+    fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl 04-products.pl 05-job_modules.pl'
+);
 
 use OpenQA::SeleniumTest;
+
+sub decode_utf8_json {
+    my ($json_string) = @_;
+    return decode_json(encode_utf8($json_string));
+}
 
 sub create_running_job_for_needle_editor {
     $schema->resultset('Jobs')->create(
@@ -51,7 +51,7 @@ sub create_running_job_for_needle_editor {
             result      => 'none',
             state       => 'running',
             priority    => 35,
-            t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 600, 'UTC'),
+            t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 600,  'UTC'),
             t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
             t_finished  => undef,
             TEST        => 'kde',
@@ -60,7 +60,6 @@ sub create_running_job_for_needle_editor {
             FLAVOR      => 'DVD',
             MACHINE     => '64bit',
             VERSION     => '13.1',
-            backend     => 'qemu',
             result_dir  => '00099963-opensuse-13.1-DVD-x86_64-Build0091-kde',
             jobs_assets => [{asset_id => 2},],
             modules     => [
@@ -86,11 +85,9 @@ sub create_running_job_for_needle_editor {
         });
 }
 
-my $driver = call_driver(\&create_running_job_for_needle_editor, {with_gru => 1});
-unless ($driver) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
-}
+create_running_job_for_needle_editor;
+
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver({with_gru => 1});
 
 my $elem;
 my $decode_textarea;
@@ -105,13 +102,8 @@ my $default_json
   = '{"area" : [{"height" : 217,"type" : "match","width" : 384,"xpos" : 0,"ypos" : 0},{"height" : 60,"type" : "exclude","width" : 160,"xpos" : 175,"ypos" : 45}],"tags" : ["ENV-VIDEOMODE-text","inst-timezone"]}';
 
 # create a fake json
-my $filen = "$dir/inst-timezone-text.json";
-{
-    local $/;    #Enable 'slurp' mode
-    open my $fh, ">", $filen;
-    print $fh $default_json;
-    close $fh;
-}
+my $needle_json_file = Mojo::File->new($dir, 'inst-timezone-text.json');
+$needle_json_file->spurt($default_json);
 
 sub goto_editor_for_installer_timezone {
     $driver->get('/tests/99946');
@@ -130,7 +122,7 @@ sub goto_editor_for_installer_timezone {
     $driver->find_element('.step_actions .create_new_needle')->click();
 }
 
-sub add_needle_tag(;$) {
+sub add_needle_tag {
     my $tagname = shift || 'test-newtag';
     $elem = $driver->find_element_by_id('newtag');
     $elem->send_keys($tagname);
@@ -142,15 +134,17 @@ sub add_needle_tag(;$) {
 
 sub add_workaround_property() {
     $driver->find_element_by_id('property_workaround')->click();
+    $driver->find_element_by_id('input_workaround_desc')->send_keys('bsc#123456 - this is a täst');
     wait_for_ajax;
-    is($driver->find_element_by_id('property_workaround')->is_selected(), 1, "workaround property selected");
+    is($driver->find_element_by_id('property_workaround')->is_selected(),    1, 'workaround property selected');
+    is($driver->find_element_by_id('input_workaround_desc')->is_displayed(), 1, 'workaround description displayed');
 }
 
 sub create_needle {
     my ($xoffset, $yoffset) = @_;
 
     my $pre_offset = 10;    # we need this value as first position the cursor moved on
-    my $elem = $driver->find_element_by_id('needleeditor_canvas');
+    my $elem       = $driver->find_element_by_id('needleeditor_canvas');
     $driver->mouse_move_to_location(
         element => $elem,
         xoffset => $decode_textarea->{area}[0]->{xpos} + $pre_offset,
@@ -166,27 +160,31 @@ sub create_needle {
     wait_for_ajax;
 }
 
-sub change_needle_value($$) {
+sub change_needle_value {
     my ($xoffset, $yoffset) = @_;
 
-    decode_json($driver->find_element_by_id('needleeditor_textarea')->get_value());
+    my $elem                = $driver->find_element_by_id('needleeditor_textarea');
+    my $decode_new_textarea = decode_utf8_json($elem->get_value());
+    ok($decode_new_textarea->{area},       'json has area');
+    ok($decode_new_textarea->{properties}, 'json has properties');
+    ok($decode_new_textarea->{tags},       'json has tags');
+
     create_needle($xoffset, $yoffset);
 
     # check the value of textarea again
-    my $elem                = $driver->find_element_by_id('needleeditor_textarea');
-    my $decode_new_textarea = decode_json($elem->get_value());
+    $decode_new_textarea = decode_utf8_json($elem->get_value());
     is($decode_new_textarea->{area}[0]->{xpos},        $xoffset, 'new xpos correct');
     is($decode_new_textarea->{area}[0]->{ypos},        $yoffset, 'new ypos correct');
     is($decode_new_textarea->{area}[0]->{click_point}, undef,    'initially no click_point');
 
     # test match type
-    $decode_new_textarea = decode_json($elem->get_value());
+    $decode_new_textarea = decode_utf8_json($elem->get_value());
     is($decode_new_textarea->{area}[0]->{type}, "match", "type is match");
     $driver->double_click;    # the match type change to exclude
-    $decode_new_textarea = decode_json($elem->get_value());
+    $decode_new_textarea = decode_utf8_json($elem->get_value());
     is($decode_new_textarea->{area}[0]->{type}, "exclude", "type is exclude");
     $driver->double_click;    # the match type change to ocr
-    $decode_new_textarea = decode_json($elem->get_value());
+    $decode_new_textarea = decode_utf8_json($elem->get_value());
     is($decode_new_textarea->{area}[0]->{type}, "ocr", "type is ocr");
     $driver->double_click;    # the match type change back to match
 
@@ -204,12 +202,12 @@ sub change_needle_value($$) {
     is($driver->find_element_by_xpath('//input[@id="match"]')->get_value(), "99", "set match level to 99");
     $driver->find_element_by_id('set_match')->click();
     is($driver->find_element_by_id('change-match-form')->is_hidden(), 1, "match level form closed");
-    $decode_new_textarea = decode_json($elem->get_value());
+    $decode_new_textarea = decode_utf8_json($elem->get_value());
     is($decode_new_textarea->{area}[0]->{match}, 99, "match level is 99 now");
 
     # test adding click point
     $driver->find_element_by_id('toggle-click-coordinates')->click();
-    $decode_new_textarea = decode_json($elem->get_value());
+    $decode_new_textarea = decode_utf8_json($elem->get_value());
     my $area = $decode_new_textarea->{area}[0];
     is_deeply(
         $area->{click_point},
@@ -222,11 +220,11 @@ sub change_needle_value($$) {
 
     # test removing click point
     $driver->find_element_by_id('toggle-click-coordinates')->click();
-    $decode_new_textarea = decode_json($elem->get_value());
+    $decode_new_textarea = decode_utf8_json($elem->get_value());
     is($decode_new_textarea->{area}[0]->{click_point}, undef, 'click_point removed');
 }
 
-sub overwrite_needle($) {
+sub overwrite_needle {
     my ($needlename) = @_;
 
     # remove animation from modal to speed up test
@@ -259,7 +257,7 @@ sub overwrite_needle($) {
 
     $driver->find_element('#flash-messages span a')->click();
     # restart is an ajax call, for some reason the check/sleep interval must be at least 1 sec for this call
-    wait_for_ajax(1);
+    wait_for_ajax(interval => 1);
     is(
         $driver->get_title(),
         'openQA: opensuse-13.1-DVD-i586-Build0091-textmode@32bit test results',
@@ -298,9 +296,9 @@ subtest 'Needle editor layout' => sub {
     wait_for_ajax;
 
     # layout check
-    is($driver->find_element_by_id('tags_select')->get_value(), 'inst-timezone-text', "inst-timezone tags selected");
+    is($driver->find_element_by_id('tags_select')->get_value(),  'inst-timezone-text', "inst-timezone tags selected");
     is($driver->find_element_by_id('image_select')->get_value(), 'screenshot', "Screenshot background selected");
-    is($driver->find_element_by_id('area_select')->get_value(), 'inst-timezone-text', "inst-timezone areas selected");
+    is($driver->find_element_by_id('area_select')->get_value(),  'inst-timezone-text', "inst-timezone areas selected");
     is($driver->find_element_by_id('take_matches')->is_selected(), 1, '"take matches" selected by default');
 
     # check needle suggested name
@@ -312,10 +310,11 @@ subtest 'Needle editor layout' => sub {
     is($driver->find_element_by_xpath('//input[@value="inst-timezone"]')->is_selected(), 1, "tag selected");
 
     # workaround property isn't selected
-    is($driver->find_element_by_id('property_workaround')->is_selected(), 0, "workaround property unselected");
+    is($driver->find_element_by_id('property_workaround')->is_selected(),    0, 'workaround property unselected');
+    is($driver->find_element_by_id('input_workaround_desc')->is_displayed(), 0, 'workaround description not displayed');
 
     $elem            = $driver->find_element_by_id('needleeditor_textarea');
-    $decode_textarea = decode_json($elem->get_value());
+    $decode_textarea = decode_utf8_json($elem->get_value());
     # the value already defined in $default_json
     is(@{$decode_textarea->{area}},           2,         'exclude areas always present');
     is($decode_textarea->{area}[0]->{xpos},   0,         'xpos correct');
@@ -331,9 +330,9 @@ subtest 'Needle editor layout' => sub {
 
     # toggling 'take matches' has no effect
     $driver->find_element_by_xpath('//input[@value="inst-timezone"]')->click();
-    is(@{decode_json($elem->get_value())->{area}}, 2, 'exclude areas always present');
+    is(@{decode_utf8_json($elem->get_value())->{area}}, 2, 'exclude areas always present');
     $driver->find_element_by_xpath('//input[@value="inst-timezone"]')->click();
-    is(@{decode_json($elem->get_value())->{area}}, 2, 'no duplicated exclude areas present');
+    is(@{decode_utf8_json($elem->get_value())->{area}}, 2, 'no duplicated exclude areas present');
 };
 
 my $needlename = 'test-newneedle';
@@ -408,18 +407,28 @@ subtest 'Saving needle when "taking matches" not selected' => sub {
     check_flash_for_saving_logpackages();
 };
 
+subtest 'Saving needle with only OCR areas' => sub {
+    $driver->get('/tests/99938/modules/logpackages/steps/1/edit');
+    $driver->execute_script('$(\'#modal-overwrite\').removeClass(\'fade\');');
+    $driver->find_element_by_id('tag_ENV-DESKTOP-kde')->click();
+    create_needle(200, 250);
+    $driver->double_click;
+    $driver->double_click;    # the match tpye change to ocr
+    $driver->find_element_by_id('save')->click();
+    wait_for_ajax(msg => 'wait for needle with only OCR areas created');
+    like(
+        $driver->find_element('#flash-messages span')->get_text(),
+        qr/Cannot create a needle with only OCR areas/,
+        'error displayed for OCR-only needle'
+    );
+    $driver->find_element('#flash-messages .close')->click();
+};
+
 subtest 'Verify new needle\'s JSON' => sub {
     # parse new needle json
-    my $new_needle_path = "$dir/$needlename.json";
-    my $overwrite_json;
-    {
-        local $/;    #Enable 'slurp' mode
-        open my $fh, "<", $new_needle_path;
-        $overwrite_json = <$fh>;
-        close $fh;
-    }
-    my $decode_json = decode_json($overwrite_json);
-    my $new_tags    = $decode_json->{'tags'};
+    my $new_needle_file = Mojo::File->new($dir, "$needlename.json");
+    my $decoded_json    = decode_json($new_needle_file->slurp);
+    my $new_tags        = $decoded_json->{tags};
 
     # check new needle json is correct
     my $match = 0;
@@ -428,13 +437,13 @@ subtest 'Verify new needle\'s JSON' => sub {
     }
     is($match, 1, "found new tag in new needle");
     is(
-        $decode_json->{'area'}[0]->{xpos},
-        $decode_textarea->{'area'}[0]->{xpos} + $xoffset,
+        $decoded_json->{area}[0]->{xpos},
+        $decode_textarea->{area}[0]->{xpos} + $xoffset,
         "new xpos stored to new needle"
     );
     is(
-        $decode_json->{'area'}[0]->{ypos},
-        $decode_textarea->{'area'}[0]->{ypos} + $yoffset,
+        $decoded_json->{area}[0]->{ypos},
+        $decode_textarea->{area}[0]->{ypos} + $yoffset,
         "new ypos stored to new needle"
     );
 };
@@ -458,7 +467,8 @@ subtest 'New needle instantly visible after reloading needle editor' => sub {
 
     is(
         $driver->find_element('#editor_warnings span')->get_text(),
-"A new needle with matching tags has been created since the job started: $needlename.json (tags: ENV-VIDEOMODE-text, inst-timezone, test-newtag, test-overwritetag)",
+        "A new needle with matching tags has been created since the job started: $needlename.json"
+          . ' (tags: ENV-VIDEOMODE-text, inst-timezone, test-newtag, test-overwritetag)',
         'warning about new needle displayed'
     );
 
@@ -473,7 +483,13 @@ subtest 'New needle instantly visible after reloading needle editor' => sub {
     $based_on_option->[0]->click();
     is($driver->find_element_by_id('tag_inst-timezone')->is_selected(),
         1, 'tag_inst-timezone checked again via new needle');
-
+    is($driver->find_element_by_id('property_workaround')->is_selected(),    1, 'workaround property selected');
+    is($driver->find_element_by_id('input_workaround_desc')->is_displayed(), 1, 'workaround description displayed');
+    is(
+        $driver->find_element_by_id('input_workaround_desc')->get_value(),
+        'bsc#123456 - this is a täst',
+        'workaround description is shown'
+    );
     # check selecting/displaying image
     my $current_image_script = 'return nEditor.bgImage.src;';
     my $current_image        = $driver->execute_script($current_image_script);
@@ -500,16 +516,15 @@ subtest 'Showing new needles limited to the 5 most recent ones' => sub {
         $needle_name_input->clear();
         $needle_name_input->send_keys($new_needle_name);
         # ensure there are areas selected (by taking over areas from previously created needle)
-        $driver->execute_script(
-'$("#area_select option").eq(1).prop("selected", true); if ($("#take_matches").prop("checked")) { $("#take_matches").click(); }'
-        );
+        $driver->execute_script('$("#area_select option").eq(1).prop("selected", true);'
+              . 'if ($("#take_matches").prop("checked")) { $("#take_matches").click(); }');
         $driver->find_element_by_id('save')->click();
         wait_for_ajax;
         # add expected warnings and needle names for needle
         if ($i >= 2) {
             unshift(@expected_needle_warnings,
-"A new needle with matching tags has been created since the job started: $new_needle_name.json (tags: ENV-VIDEOMODE-text, inst-timezone, test-newtag, test-overwritetag)"
-            );
+                    "A new needle with matching tags has been created since the job started: $new_needle_name.json"
+                  . ' (tags: ENV-VIDEOMODE-text, inst-timezone, test-newtag, test-overwritetag)');
             splice(@expected_needle_names, 2, 0, 'new: ' . $new_needle_name);
         }
     }
@@ -520,16 +535,40 @@ subtest 'Showing new needles limited to the 5 most recent ones' => sub {
       or diag explain \@needle_names;
 };
 
-subtest 'Deletion of needle is handled gracefully' => sub {
-    # delete needle on disk and reload the needle editor
-    ok(unlink $filen);
-    $driver->get($driver->get_current_url);
+my $hash  = '{ "name": "workaround", "value": "workaround for bsc#123456" }';
+my %tests = (string => '"workaround"', hash => $hash);
+foreach my $type (sort keys %tests) {
+    subtest "Needle with $type properties" => sub {
+        $needle_json_file->spurt(qq({ "properties": [ $tests{$type} ] }));
+        $driver->refresh;
+        $driver->title_is('openQA: Needle Editor', 'needle editor shows up');
+        is($driver->find_element_by_id('property_workaround')->is_selected(),    1, 'workaround property selected');
+        is($driver->find_element_by_id('input_workaround_desc')->is_displayed(), 1, 'workaround description displayed');
+    };
+}
+
+subtest 'Broken needle is handled gracefully' => sub {
+    $needle_json_file->spurt("{{{,};");
+    $driver->refresh;
     $driver->title_is('openQA: Needle Editor', 'needle editor still shows up');
+    my @warnings = (split /\n/, $driver->find_element('#editor_warnings span')->get_text());
+    like(
+        $warnings[0],
+        qr/Could not parse needle inst-timezone-text for opensuse 13\.1: .+ at character offset/,
+        'warning about broken needle displayed'
+    ) or diag explain \@warnings;
+};
+
+subtest 'Deletion of needle is handled gracefully' => sub {
+    $needle_json_file->remove;
+    $driver->refresh;
+    $driver->title_is('openQA: Needle Editor', 'needle editor still shows up');
+    my @warnings = (split /\n/, $driver->find_element('#editor_warnings span')->get_text());
     is(
-        $driver->find_element('#editor_warnings span')->get_text(),
-        join("\n", 'Could not parse needle: inst-timezone-text for opensuse 13.1', @expected_needle_warnings),
-        'warning about deleted needle displayed (beside new needle warnings)'
-    );
+        $warnings[0],
+        'Could not parse needle inst-timezone-text for opensuse 13.1: File not found',
+        'warning about missing needle displayed'
+    ) or diag explain \@warnings;
 };
 
 subtest 'areas/tags verified via JavaScript' => sub {
@@ -558,9 +597,8 @@ subtest 'open needle editor for running test' => sub {
     my $t = Test::Mojo->new('OpenQA::WebAPI');
     $t->ua->max_redirects(1);
     warnings { $t->get_ok('/tests/99980/edit') };
-    note(
-'ignoring warning "DateTime objects passed to search() are not supported properly" at lib/OpenQA/WebAPI/Controller/Step.pm line 211'
-    );
+    note(   'ignoring warning "DateTime objects passed to search() are not supported properly"'
+          . ' at lib/OpenQA/WebAPI/Controller/Step.pm line 211');
     $t->status_is(200);
     $t->text_is(title => 'openQA: Needle Editor', 'needle editor shown for running test');
     is(
@@ -615,9 +653,15 @@ subtest '(created) needles can be accessed over API' => sub {
       ->status_is(200, 'needle accessible')->content_type_is('image/png');
     @warnings = warnings {
         $t->get_ok('/needles/opensuse/test-newneedle.png?jsonfile=/try/to/break_out.json')
-          ->status_is(403, 'access to files outside the test directory not granted');
+          ->status_is(403, 'access to files outside the test directory not granted (absolute)');
     };
     map { like($_, qr/is not in a subdir of/, 'expected warning') } @warnings;
+    @warnings = warnings {
+        $t->get_ok(
+'/needles/opensuse/test-newneedle.png?jsonfile=t/data/openqa/share/tests/opensuse/needles/../../../../try/to/break_out.json'
+        )->status_is(403, 'access to files outside the test directory not granted (relative)');
+    };
+    map { like($_, qr/cannot contain ../, 'expected warning') } @warnings;
 
     my $tmp_dir = 't/tmp_needles';
     File::Path::rmtree($tmp_dir);

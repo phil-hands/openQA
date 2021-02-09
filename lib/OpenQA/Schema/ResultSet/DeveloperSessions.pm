@@ -1,4 +1,4 @@
-# Copyright (C) 2018 SUSE LLC
+# Copyright (C) 2018-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::ResultSet::DeveloperSessions;
 
@@ -21,8 +20,11 @@ use warnings;
 
 use base 'DBIx::Class::ResultSet';
 
+use Try::Tiny;
+use OpenQA::Constants qw(WORKER_COMMAND_DEVELOPER_SESSION_START);
 use OpenQA::Schema::Result::DeveloperSessions;
 use OpenQA::WebSockets::Client;
+use OpenQA::Log 'log_error';
 
 sub register {
     my ($self, $job_id, $user_id) = @_;
@@ -57,7 +59,12 @@ sub register {
     if ($result && !$is_session_already_existing) {
         # hope this IPC call isn't blocking too long (since the livehandler isn't preforking)
         my $client = OpenQA::WebSockets::Client->singleton;
-        $client->send_msg($worker_id, 'developer_session_start', $job_id);
+        try {
+            $client->send_msg($worker_id, WORKER_COMMAND_DEVELOPER_SESSION_START, $job_id);
+        }
+        catch {
+            log_error("Unable to inform worker about developer session: $_");
+        };
     }
 
     return $result;
@@ -72,7 +79,7 @@ sub unregister {
     return $self->result_source->schema->txn_do(
         sub {
             my $session = $self->find({job_id => $job_id}) or return 0;
-            my $job = $session->job or return 0;
+            my $job     = $session->job                    or return 0;
             return $job->cancel();
         });
 }

@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2018-2019 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2018-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,133 +12,86 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 # possible reasons why this tests might fail if you run it locally:
 #  * the web UI or any other openQA daemons are still running in the background
 #  * a qemu instance is still running (maybe leftover from last failed test
 #    execution)
 
-use Mojo::Base -strict;
+use Test::Most;
 
-my $tempdir;
 BEGIN {
-    unshift @INC, 'lib';
-    use FindBin;
-    use Mojo::File qw(path tempdir);
-    $tempdir = tempdir;
-    $ENV{OPENQA_BASEDIR} = $tempdir->child('t', 'full-stack.d');
-    $ENV{OPENQA_CONFIG}  = path($ENV{OPENQA_BASEDIR}, 'config')->make_path;
-    # Since tests depends on timing, we require the scheduler to be fixed in its actions.
+    # require the scheduler to be fixed in its actions since tests depends on timing
     $ENV{OPENQA_SCHEDULER_SCHEDULE_TICK_MS}   = 4000;
     $ENV{OPENQA_SCHEDULER_MAX_JOB_ALLOCATION} = 1;
+
     # ensure the web socket connection won't timeout
     $ENV{MOJO_INACTIVITY_TIMEOUT} = 10 * 60;
-    path($FindBin::Bin, "data")->child("openqa.ini")->copy_to(path($ENV{OPENQA_CONFIG})->child("openqa.ini"));
-    path($FindBin::Bin, "data")->child("database.ini")->copy_to(path($ENV{OPENQA_CONFIG})->child("database.ini"));
-    path($FindBin::Bin, "data")->child("workers.ini")->copy_to(path($ENV{OPENQA_CONFIG})->child("workers.ini"));
-    path($ENV{OPENQA_BASEDIR}, 'openqa', 'db')->make_path->child("db.lock")->spurt;
-    # DO NOT SET OPENQA_IPC_TEST HERE
 }
 
-use lib "$FindBin::Bin/lib";
-use Test::More;
+use FindBin;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Output 'stderr_like';
 use IO::Socket::INET;
+use Mojo::File 'path';
 use POSIX '_exit';
 use Fcntl ':mode';
 use DBI;
-
-# optional but very useful
-eval 'use Test::More::Color';
-eval 'use Test::More::Color "foreground"';
-
 use File::Path qw(make_path remove_tree);
 use Module::Load::Conditional 'can_load';
-use OpenQA::Test::Utils qw(create_websocket_server create_live_view_handler setup_share_dir);
+use OpenQA::Utils qw(service_port);
+use OpenQA::Test::Utils qw(
+  create_websocket_server create_scheduler create_live_view_handler setup_share_dir setup_fullstack_temp_dir
+  start_worker stop_service
+);
 use OpenQA::Test::FullstackUtils;
-
-plan skip_all => 'set DEVELOPER_FULLSTACK=1 (be careful)' unless $ENV{DEVELOPER_FULLSTACK};
-plan skip_all => 'set TEST_PG to e.g. DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
-
-# load Selenium::Remote::WDKeys module or skip this test if not available
-unless (can_load(modules => {'Selenium::Remote::WDKeys' => undef,})) {
-    plan skip_all => 'Install Selenium::Remote::WDKeys to run this test';
-    exit(0);
-}
-
-my $workerpid;
-my $wspid;
-my $livehandlerpid;
-my $schedulerpid;
-my $sharedir = setup_share_dir($ENV{OPENQA_BASEDIR});
-
-sub turn_down_stack {
-    for my $pid ($workerpid, $wspid, $livehandlerpid, $schedulerpid) {
-        next unless $pid;
-        kill TERM => $pid;
-        waitpid($pid, 0);
-    }
-}
-
-sub kill_worker {
-    kill TERM => $workerpid;
-    is(waitpid($workerpid, 0), $workerpid, 'WORKER is done');
-    $workerpid = undef;
-}
-
+use OpenQA::Test::TimeLimit '60';
 use OpenQA::SeleniumTest;
 
-# skip if appropriate modules aren't available
-unless (check_driver_modules) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
+plan skip_all => 'set DEVELOPER_FULLSTACK=1 (be careful)'                       unless $ENV{DEVELOPER_FULLSTACK};
+plan skip_all => 'set TEST_PG to e.g. "DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
+
+plan skip_all => 'Install Selenium::Remote::WDKeys to run this test'
+  unless can_load(modules => {'Selenium::Remote::WDKeys' => undef});
+
+my $worker;
+my $ws;
+my $livehandler;
+my $scheduler;
+sub turn_down_stack {
+    stop_service($_) for ($worker, $ws, $livehandler, $scheduler);
 }
 
-OpenQA::Test::FullstackUtils::setup_database();
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless check_driver_modules;
+
+# setup directories
+my $tempdir   = setup_fullstack_temp_dir('full-stack.d');
+my $sharedir  = setup_share_dir($ENV{OPENQA_BASEDIR});
+my $resultdir = path($ENV{OPENQA_BASEDIR}, 'openqa', 'testresults')->make_path;
+ok(-d $resultdir, "resultdir \"$resultdir\" exists");
+
+# setup database without fixtures and special admin users 'Demo' and 'otherdeveloper'
+my $schema = OpenQA::Test::Database->new->create(skip_fixtures => 1, schema_name => 'public', drop_schema => 1);
+my $users  = $schema->resultset('Users');
+$users->create(
+    {
+        username        => $_,
+        nickname        => $_,
+        is_operator     => 1,
+        is_admin        => 1,
+        feature_version => 0,
+    }) for (qw(Demo otherdeveloper));
 
 # make sure the assets are prefetched
 ok(Mojolicious::Commands->start_app('OpenQA::WebAPI', 'eval', '1+0'));
 
-my $mojoport = Mojo::IOLoop::Server->generate_port;
-my $wsport   = $mojoport + 1;
-$wspid = create_websocket_server($wsport, 0, 0, 0);
-
-# start scheduler
-$schedulerpid = fork();
-if ($schedulerpid == 0) {
-    use OpenQA::Scheduler;
-    OpenQA::Scheduler::run;
-    Devel::Cover::report() if Devel::Cover->can('report');
-    _exit(0);
-}
-
-# start Selenium test driver without fixtures usual fixtures but an additional admin user
-my $driver = call_driver(
-    sub {
-        my $schema = OpenQA::Test::Database->new->create(skip_fixtures => 1, skip_schema => 1);
-        my $users  = $schema->resultset('Users');
-
-        # create the admins 'Demo' and 'otherdeveloper'
-        for my $user_name (qw(Demo otherdeveloper)) {
-            $users->create(
-                {
-                    username        => $user_name,
-                    nickname        => $user_name,
-                    is_operator     => 1,
-                    is_admin        => 1,
-                    feature_version => 0,
-                });
-        }
-    },
-    {mojoport => $mojoport});
-my $connect_args = OpenQA::Test::FullstackUtils::get_connect_args();
-
-# make resultdir
-my $resultdir = path($ENV{OPENQA_BASEDIR}, 'openqa', 'testresults')->make_path;
-ok(-d $resultdir, "resultdir \"$resultdir\" exists");
+# start Selenium test driver and other daemons
+my $port   = service_port 'webui';
+my $driver = call_driver({mojoport => $port});
+$ws          = create_websocket_server(undef, 0, 0);
+$scheduler   = create_scheduler;
+$livehandler = create_live_view_handler;
 
 # login
 $driver->title_is('openQA', 'on main page');
@@ -147,21 +99,9 @@ is($driver->find_element('#user-action a')->get_text(), 'Login', 'no one initial
 $driver->click_element_ok('Login', 'link_text');
 $driver->title_is('openQA', 'back on main page');
 
-# start live view handler
-$livehandlerpid = create_live_view_handler($mojoport);
-
-my $JOB_SETUP
-  = 'ISO=Core-7.2.iso DISTRI=tinycore ARCH=i386 QEMU=i386 QEMU_NO_KVM=1 '
-  . 'FLAVOR=flavor BUILD=1 MACHINE=coolone QEMU_NO_TABLET=1 INTEGRATION_TESTS=1 '
-  . 'QEMU_NO_FDC_SET=1 CDMODEL=ide-cd HDDMODEL=ide-drive VERSION=1 TEST=core PUBLISH_HDD_1=core-hdd.qcow2 '
-  . 'TESTING_ASSERT_SCREEN_TIMEOUT=1';
 # setting TESTING_ASSERT_SCREEN_TIMEOUT is important here (see os-autoinst/t/data/tests/tests/boot.pm)
-
-subtest 'schedule job' => sub {
-    OpenQA::Test::FullstackUtils::client_call("jobs post $JOB_SETUP");
-    OpenQA::Test::FullstackUtils::verify_one_job_displayed_as_scheduled($driver);
-};
-
+schedule_one_job_over_api_and_verify($driver,
+    OpenQA::Test::FullstackUtils::job_setup(TESTING_ASSERT_SCREEN_TIMEOUT => '1'));
 my $job_name = 'tinycore-1-flavor-i386-Build1-core@coolone';
 $driver->find_element_by_link_text('core@coolone')->click();
 $driver->title_is("openQA: $job_name test results", 'scheduled test page');
@@ -169,9 +109,7 @@ my $job_page_url = $driver->get_current_url();
 like($driver->find_element('#result-row .card-body')->get_text(), qr/State: scheduled/, 'test 1 is scheduled');
 javascript_console_has_no_warnings_or_errors;
 
-my $os_autoinst_path = '../os-autoinst';
-my $isotovideo_path  = $os_autoinst_path . '/isotovideo';
-my $needle_dir       = $sharedir . '/tests/tinycore/needles';
+my $needle_dir = $sharedir . '/tests/tinycore/needles';
 
 # rename one of the required needle so a certain assert_screen will timeout later
 mkdir($needle_dir . '/../disabled_needles');
@@ -184,16 +122,8 @@ for my $ext (qw(.json .png)) {
         'can rename needle ' . $ext);
 }
 
-sub start_worker {
-    $workerpid = fork();
-    if ($workerpid == 0) {
-        exec("perl ./script/worker --instance=1 $connect_args --isotovideo=$isotovideo_path --verbose");
-        die "FAILED TO START WORKER";
-    }
-}
-
-start_worker;
-OpenQA::Test::FullstackUtils::wait_for_job_running($driver, 'fail on incomplete');
+$worker = start_worker(get_connect_args());
+ok wait_for_job_running($driver), 'test 1 is running';
 
 sub wait_for_session_info {
     my ($info_regex, $diag_info) = @_;
@@ -221,8 +151,8 @@ sub wait_for_session_info {
 my $developer_console_url = '/tests/1/developer/ws-console?proxy=1';
 subtest 'wait until developer console becomes available' => sub {
     $driver->get($developer_console_url);
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_available($driver);
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
+    wait_for_developer_console_available($driver);
+    wait_for_developer_console_like(
         $driver,
         qr/(connected to os-autoinst command server|reusing previous connection to os-autoinst command server)/,
         'proxy says it is connected to os-autoinst cmd srv'
@@ -234,7 +164,7 @@ my $second_tab;
 
 subtest 'pause at assert_screen timeout' => sub {
     # wait until asserting 'on_prompt'
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
+    wait_for_developer_console_like(
         $driver,
         qr/(\"tags\":\[\"on_prompt\"\]|\"mustmatch\":\"on_prompt\")/,
         'asserting on_prompt'
@@ -244,7 +174,7 @@ subtest 'pause at assert_screen timeout' => sub {
     my $command_input = $driver->find_element('#msg');
     $command_input->send_keys('{"cmd":"set_pause_on_screen_mismatch","pause_on":"assert_screen"}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
+    wait_for_developer_console_like(
         $driver,
         qr/\"set_pause_on_screen_mismatch\":\"assert_screen\"/,
         'response to set_pause_on_screen_mismatch'
@@ -253,14 +183,14 @@ subtest 'pause at assert_screen timeout' => sub {
     # skip timeout
     $command_input->send_keys('{"cmd":"set_assert_screen_timeout","timeout":0}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
+    wait_for_developer_console_like(
         $driver,
         qr/\"set_assert_screen_timeout\":0/,
         'response to set_assert_screen_timeout'
     );
 
     # wait until test paused
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
+    wait_for_developer_console_like(
         $driver,
         qr/\"(reason|test_execution_paused)\":\"match=on_prompt timed out/,
         'paused after assert_screen timeout'
@@ -269,38 +199,20 @@ subtest 'pause at assert_screen timeout' => sub {
     # try to resume
     $command_input->send_keys('{"cmd":"resume_test_execution"}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver,
-        qr/\"resume_test_execution\":/, 'resume');
+    wait_for_developer_console_like($driver, qr/\"resume_test_execution\":/, 'resume');
 
     # skip timeout (again)
     $command_input->send_keys('{"cmd":"set_assert_screen_timeout","timeout":0}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
+    wait_for_developer_console_like(
         $driver,
         qr/\"set_assert_screen_timeout\":0/,
         'response to set_assert_screen_timeout'
     );
 
-    # wait until test is paused (again)
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/\"(reason|test_execution_paused)\":\"match=on_prompt timed out/,
-        'paused after assert_screen timeout (again)'
-    );
-
-    # wait until upload progress received
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/\"(outstanding_images)\":[1-9]*/,
-        'progress of image upload received'
-    );
-
-    # wait until upload has finished
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/\"(outstanding_images)\":0/,
-        'image upload has finished'
-    );
+    wait_for_developer_console_like($driver, qr/match=on_prompt timed out/, 'paused on assert_screen timeout (again)');
+    wait_for_developer_console_like($driver, qr/\"(outstanding_images)\":[1-9]*/, 'progress of image upload received');
+    wait_for_developer_console_like($driver, qr/\"(outstanding_images)\":0/,      'image upload has finished');
 
     # open needle editor in 2nd tab
     my $needle_editor_url = '/tests/1/edit';
@@ -308,13 +220,12 @@ subtest 'pause at assert_screen timeout' => sub {
     $driver->switch_to_window($second_tab);
     $driver->title_is('openQA: Needle Editor');
     my $content = $driver->find_element_by_id('content')->get_text();
-    fail('needle editor not available (but should be according to upload progress)')
-      if ($content =~ qr/upload is still in progress/);
+    unlike $content, qr/upload.*still in progress/, 'needle editor not available but should be according to progress';
     # check whether screenshot is present
     my $screenshot_url = $driver->execute_script('return window.nEditor.bgImage.src;');
-    like($screenshot_url, qr/.*\/boot-[0-9]+\.png/, 'screenshot present');
+    like $screenshot_url, qr/.*\/boot-[0-9]+\.png/, 'screenshot present';
     $driver->get($screenshot_url);
-    is($driver->execute_script('return document.contentType;'), 'image/png', 'URL actually refers to an image');
+    is $driver->execute_script('return document.contentType;'), 'image/png', 'URL actually refers to an image';
 };
 
 # rename needle back so assert_screen will succeed
@@ -333,24 +244,22 @@ subtest 'pause at certain test' => sub {
     my $command_input = $driver->find_element('#msg');
     $command_input->send_keys('{"cmd":"set_pause_at_test","name":"shutdown"}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/\"set_pause_at_test\":\"shutdown\"/,
-        'response to set_pause_at_test'
-    );
+    wait_for_developer_console_like($driver, qr/\"set_pause_at_test\":\"shutdown\"/, 'response to set_pause_at_test');
 
     # resume test execution (we're still paused from the previous subtest)
     $command_input->send_keys('{"cmd":"resume_test_execution"}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver,
-        qr/\"resume_test_execution\":/, 'resume');
+    wait_for_developer_console_like($driver, qr/\"resume_test_execution\":/, 'resume');
 
     # wait until the shutdown test is started and hence the test execution paused
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver,
+    wait_for_developer_console_like($driver,
         qr/\"(reason|test_execution_paused)\":\"reached module shutdown\"/, 'paused');
 };
 
-sub test_initial_ui_state {
+sub assert_initial_ui_state {
+    $driver->get($job_page_url);
+    $driver->find_element_by_link_text('Live View')->click();
+
     subtest 'initial state of UI controls' => sub {
         wait_for_session_info(qr/owned by Demo/, 'user displayed');
         element_visible('#developer-vnc-notice',         qr/.*VNC.*91.*/);
@@ -359,10 +268,7 @@ sub test_initial_ui_state {
 }
 
 subtest 'developer session visible in live view' => sub {
-    $driver->get($job_page_url);
-    $driver->find_element_by_link_text('Live View')->click();
-
-    test_initial_ui_state();
+    assert_initial_ui_state();
 
     # panel should be expaned by default because we're already owning the session through the developer console
     # and the test is paused
@@ -374,18 +280,14 @@ subtest 'developer session visible in live view' => sub {
 
     my @module_options = $driver->find_elements('#developer-pause-at-module option');
     my @module_names   = map { $_->get_text() } @module_options;
-    is_deeply(\@module_names, ['Do not pause at a certain module', 'boot', 'shutdown'], 'module');
+    is_deeply \@module_names, ['Do not pause at a certain module', 'boot', 'shutdown'], 'module';
 };
 
 subtest 'status-only route accessible for other users' => sub {
     $driver->get('/logout');
     $driver->get('/login?user=otherdeveloper');
-    is($driver->find_element('#user-action a')->get_text(), 'Logged in as otherdeveloper', 'otherdeveloper logged-in');
-
-    $driver->get($job_page_url);
-    $driver->find_element_by_link_text('Live View')->click();
-
-    test_initial_ui_state();
+    is $driver->find_element('#user-action a')->get_text(), 'Logged in as otherdeveloper', 'otherdeveloper logged-in';
+    assert_initial_ui_state();
 
     subtest 'expand developer panel' => sub {
         element_hidden('#developer-panel .card-body');
@@ -410,13 +312,8 @@ subtest 'status-only route accessible for other users' => sub {
 subtest 'developer session locked for other developers' => sub {
     $driver->get($developer_console_url);
 
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/unable to create \(further\) development session/,
-        'no further session'
-    );
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver, qr/Connection closed/,
-        'closed');
+    wait_for_developer_console_like($driver, qr/unable to create \(further\).*session/, 'no further session');
+    wait_for_developer_console_like($driver, qr/Connection closed/,                     'closed');
 };
 
 $second_tab = open_new_tab('/login?user=Demo');
@@ -425,18 +322,9 @@ subtest 'connect with 2 clients at the same time (use case: developer opens 2nd 
     $driver->switch_to_window($second_tab);
     $driver->get($developer_console_url);
 
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/Connection opened/,
-        'connection opened'
-    );
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/reusing previous connection to os-autoinst/,
-        'connection reused'
-    );
+    wait_for_developer_console_like($driver, qr/Connection opened/,                          'connection opened');
+    wait_for_developer_console_like($driver, qr/reusing previous connection to os-autoinst/, 'connection reused');
 };
-
 
 subtest 'resume test execution and 2nd tab' => sub {
     # login as demo again
@@ -452,27 +340,17 @@ subtest 'resume test execution and 2nd tab' => sub {
 
     # open developer console
     $driver->get($developer_console_url);
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/Connection opened/,
-        'connection opened'
-    );
+    wait_for_developer_console_like($driver, qr/Connection opened/, 'connection opened');
 
     my $command_input = $driver->find_element('#msg');
     $command_input->send_keys('{"cmd":"resume_test_execution"}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver,
-        qr/\"resume_test_execution\":/, 'resume');
+    wait_for_developer_console_like($driver, qr/\"resume_test_execution\":/, 'resume');
 
     # check whether info has also been distributed to 2nd tab
     $driver->switch_to_window($second_tab);
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/\"resume_test_execution\":/,
-        'resume (2nd tab)'
-    );
+    wait_for_developer_console_like($driver, qr/\"resume_test_execution\":/, 'resume (2nd tab)');
 };
-
 
 subtest 'quit session' => sub {
     $driver->switch_to_window($first_tab);
@@ -480,28 +358,20 @@ subtest 'quit session' => sub {
     my $command_input = $driver->find_element('#msg');
     $command_input->send_keys('{"cmd":"quit_development_session"}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver, qr/Connection closed/,
-        'closed');
+    wait_for_developer_console_like($driver, qr/Connection closed/, 'closed');
 
     # check whether 2nd client has been kicked out as well
     $driver->switch_to_window($second_tab);
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/Connection closed/,
-        'closed (2nd tab)'
-    );
+    wait_for_developer_console_like($driver, qr/Connection closed/, 'closed (2nd tab)');
 };
 
 subtest 'test cancelled by quitting the session' => sub {
     $driver->switch_to_window($first_tab);
     $driver->get($job_page_url);
-    OpenQA::Test::FullstackUtils::wait_for_result_panel(
-        $driver,
-        qr/(State: cancelled|Result: (user_cancelled|passed))/,
-        'test 1 has been cancelled (if it was fast enough to actually pass that is ok, too)'
-    );
+    ok wait_for_result_panel($driver, qr/(State: cancelled|Result: (user_cancelled|passed))/),
+      'test 1 has been cancelled (if it was fast enough to actually pass that is ok, too)';
     my $log_file_path = path($resultdir, '00000', "00000001-$job_name")->make_path->child('autoinst-log.txt');
-    ok(-s $log_file_path, "log file generated under $log_file_path");
+    ok -s $log_file_path, "log file generated under $log_file_path";
 };
 
 kill_driver;

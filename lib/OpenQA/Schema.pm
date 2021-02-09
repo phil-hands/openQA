@@ -1,4 +1,4 @@
-# Copyright © 2014-2016 SUSE LLC
+# Copyright © 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -28,11 +28,11 @@ use Try::Tiny;
 use FindBin '$Bin';
 use Fcntl ':flock';
 use File::Spec::Functions 'catfile';
-use OpenQA::Utils ();
+use OpenQA::Utils qw(:DEFAULT prjdir);
 
 # after bumping the version please look at the instructions in the docs/Contributing.asciidoc file
 # on what scripts should be run and how
-our $VERSION = 77;
+our $VERSION = $ENV{OPENQA_SCHEMA_VERSION_OVERRIDE} // 90;
 
 __PACKAGE__->load_namespaces;
 
@@ -57,7 +57,7 @@ sub connect_db {
             die 'Could not find database section \'' . $mode . '\' in ' . $database_file unless $ini{$mode};
             $SINGLETON = __PACKAGE__->connect($ini{$mode});
         }
-        deployment_check $SINGLETON if $check;
+        deploy $SINGLETON if $check;
     }
 
     return $SINGLETON;
@@ -75,18 +75,18 @@ sub dsn {
     return $self->storage->connect_info->[0]->{dsn};
 }
 
-sub deployment_check {
+sub deploy {
+    my ($self, $force_overwrite) = @_;
 
     # lock config file to ensure only one thing will deploy/upgrade DB at once
     # we use a file in prjdir/db as the lock file as the install process and
     # packages make this directory writeable by openQA user by default
-    my $dblockfile = catfile($OpenQA::Utils::prjdir, 'db', 'db.lock');
+    my $dblockfile = catfile(prjdir(), 'db', 'db.lock');
     my $dblock;
 
     # LOCK_EX works most reliably if the file is open with write intent
     open($dblock, '>>', $dblockfile) or die "Can't open database lock file ${dblockfile}!";
-    flock($dblock, LOCK_EX) or die "Can't lock database lock file ${dblockfile}!";
-    my ($schema, $force_overwrite) = @_;
+    flock($dblock, LOCK_EX)          or die "Can't lock database lock file ${dblockfile}!";
     $force_overwrite //= 0;
     my $dir = $FindBin::Bin;
     while (abs_path($dir) ne '/') {
@@ -98,7 +98,7 @@ sub deployment_check {
 
     my $dh = DBIx::Class::DeploymentHandler->new(
         {
-            schema              => $schema,
+            schema              => $self,
             script_directory    => $dir,
             databases           => ['PostgreSQL'],
             sql_translator_args => {add_drop_table => 0},
@@ -132,14 +132,7 @@ sub _try_deploy_db {
     }
     catch {
         $dh->install;
-        # create system user right away
-        $schema->resultset('Users')->create(
-            {
-                username => 'system',
-                email    => 'noemail@open.qa',
-                fullname => 'openQA system user',
-                nickname => 'system'
-            });
+        $schema->create_system_user;    # create system user right away
     };
 
     return !$version;
@@ -155,6 +148,18 @@ sub _try_upgrade_db {
     }
 
     return 0;
+}
+
+sub create_system_user {
+    my ($self) = @_;
+
+    $self->resultset('Users')->create(
+        {
+            username => 'system',
+            email    => 'noemail@open.qa',
+            fullname => 'openQA system user',
+            nickname => 'system'
+        });
 }
 
 # read application secret from database
@@ -177,4 +182,3 @@ sub read_application_secrets {
 }
 
 1;
-# vim: set sw=4 et:

@@ -1,105 +1,152 @@
-/* jshint multistr: true */
-/* jshint esversion: 6 */
+// jshint multistr: true
+// jshint esversion: 6
 
-function checkPreviewVisible(a, preview) {
-  // scroll the element to the top if the preview is not in view
-  if (a.offset().top + preview.height() > $(window).scrollTop() + $(window).height()) {
-    $("body, html").animate({
-      scrollTop: a.offset().top-3
-    }, 250);
-  }
+const testStatus = {
+    state: null,
+    result: null,
+    modlist_initialized: 0,
+    jobid: null,
+    running: null,
+    workerid: null,
+    status_url: null,
+    img_reload_time: 0,
+};
 
-  var rrow = $("#result-row");
-  var extraMargin = 40;
-  var endOfPreview =  a.offset().top + preview.height() + extraMargin;
-  var endOfRow = rrow.height() + rrow.offset().top;
-  if (endOfPreview > endOfRow) {
-    // only enlarge the margin - otherwise the page scrolls back
-    rrow.css("margin-bottom", endOfPreview - endOfRow + extraMargin);
-  }
+const tabConfiguration = {
+    details: {
+        descriptiveName: 'test modules',
+        conditionForShowingNavItem: function() {
+            return testStatus.state === 'running' || testStatus.state === 'uploading' || testStatus.state === 'done';
+        },
+        renderContents: renderTestModules,
+    },
+    external: {
+        descriptiveName: 'external test results',
+        conditionForShowingNavItem: function() {
+            return undefined; // shown if the details contain text results
+        },
+        renderContents: renderExternalTab,
+    },
+    live: {
+        descriptiveName: 'live view controls',
+        conditionForShowingNavItem: function() {
+            return testStatus.state === 'running' || testStatus.state === 'uploading';
+        },
+        onShow: function() {
+            if (this.hasContents) {
+                resumeLiveView();
+            }
+        },
+        onHide: function() {
+            if (this.hasContents) {
+                pauseLiveView();
+            }
+        },
+        onRemove: function() {
+            // ensure live view and developer mode are disabled (no-op if already disabled)
+            pauseLiveView();
+            disableDeveloperMode();
+        },
+        renderContents: renderLiveTab,
+    },
+    downloads: {
+        descriptiveName: 'logs and assets',
+        conditionForShowingNavItem: function() {
+            return testStatus.state === 'done';
+        },
+    },
+    settings: {},
+    dependencies: {
+        renderContents: renderDependencyTab
+    },
+    investigation: {
+        descriptiveName: 'investigation info',
+        conditionForShowingNavItem: function() {
+            return testStatus.state === 'done' && testStatus.result === 'failed';
+        },
+        renderContents: renderInvestigationTab,
+    },
+    comments: {
+        renderContents: renderCommentsTab,
+    },
+    next_previous: {},
+};
+
+function checkPreviewVisible(stepPreviewContainer, preview) {
+    // scroll the element to the top if the preview is not in view
+    if (stepPreviewContainer.offset().top + preview.height() > $(window).scrollTop() + $(window).height()) {
+        $("body, html").animate({
+            scrollTop: stepPreviewContainer.offset().top - 3
+        }, 250);
+    }
+
+    var rrow = $("#result-row");
+    var extraMargin = 40;
+    var endOfPreview = stepPreviewContainer.offset().top + preview.height() + extraMargin;
+    var endOfRow = rrow.height() + rrow.offset().top;
+    if (endOfPreview > endOfRow) {
+        // only enlarge the margin - otherwise the page scrolls back
+        rrow.css("margin-bottom", endOfPreview - endOfRow + extraMargin);
+    }
 }
 
-function insertPreviewContainer(previewContainer, previewLink) {
-  var td = previewLink.parent();
-  var links = td.children(".links_a");
-  var a_index = links.index(previewLink);
-  var as_per_row = Math.floor(td.width() / 64); // previewLink width is 64
-  var full_top_rows = Math.ceil((a_index+1) / as_per_row);
-  var preview_offset = (as_per_row * full_top_rows) - 1;
-  var as_count = links.length - 1;
-  if (as_count < preview_offset) {
-    preview_offset = as_count;
-  }
-  previewContainer.insertAfter(links.eq(preview_offset));
-}
-
-function previewSuccess(data, force) {
-  // find the outher and inner preview container
-  var pin = $("#preview_container_in");
-  var pout = $("#preview_container_out");
-  if (!pin.length || !pout.length) {
-      console.error('showing preview/needle diff: Preview container not found');
-      return;
-  }
-
-  pin.html(data);
-
-  // insert the outher preview container after the right preview link
-  var previewLink = $(".current_preview");
-  insertPreviewContainer(pout, previewLink);
-
-  if (!(pin.find("pre").length || pin.find("audio").length)) {
-    window.differ = new NeedleDiff("needle_diff", 1024, 768);
-    var imageSource = pin.find("#step_view").data("image");
-    if (!imageSource) {
-        console.error('showing preview/needle diff: No image source found');
+function previewSuccess(stepPreviewContainer, data, force) {
+    // skip if preview has been dismissed
+    if (!stepPreviewContainer.hasClass('current_preview')) {
         return;
     }
-    setDiffScreenshot(window.differ, imageSource);
-    setNeedle();
-  }
-  pin.css("left", -($(".result").width()+$(".component").width()+2*16));
-  var tdWidth = $(".current_preview").parents("td").width();
-  pout.width(tdWidth).hide().fadeIn({
-    duration: (force?0:150),
-    complete: function() {
-      checkPreviewVisible(previewLink, pin);
+
+    // find the outher and inner preview container
+    var pin = $("#preview_container_in");
+    var pout = $("#preview_container_out");
+    if (!pin.length || !pout.length) {
+        console.error('showing preview/needle diff: Preview container not found');
+        return;
     }
-  });
-  $('[data-toggle="popover"]').popover({html: true});
-  // make persistent dropdowns persistent by preventing click-event propagation
-  $('.dropdown-persistent').on('click', function (event) {
-      event.stopPropagation();
-  });
-  // ensure keydown event happening when button has focus is propagated to the right handler
-  $('.candidates-selection .dropdown-toggle').on('keydown', function (event) {
-      event.stopPropagation();
-      handleKeyDownOnTestDetails(event);
-  });
-  // handle click on the diff selection
-  $('.trigger-diff').on('click', function (event) {
-      var trigger = $(this);
-      setNeedle(trigger.parents('tr'), trigger.data('diff'));
-      event.stopPropagation();
-  });
-}
 
-function mapHash(hash) {
-  return (hash === "#details" || hash.length < 2) ? "#" : hash;
-}
-
-function setResultHash(hash, replace) {
-  // the details tab is the real page
-  hash = mapHash(hash);
-  var locationhash = mapHash(window.location.hash);
-  if (locationhash === hash) { return; }
-  if (replace && history.replaceState) {
-    history.replaceState(null, null, hash);
-  } else if (!replace && history.pushState) {
-    history.pushState(null, null, hash);
-  } else {
-    location.hash = hash;
-  }
+    // insert and initialize preview data
+    pin.html(data);
+    pout.insertAfter(stepPreviewContainer);
+    if (!(pin.find("pre").length || pin.find("audio").length)) {
+        window.differ = new NeedleDiff("needle_diff", 1024, 768);
+        var imageSource = pin.find("#step_view").data("image");
+        if (!imageSource) {
+            console.error('showing preview/needle diff: No image source found');
+            return;
+        }
+        setDiffScreenshot(window.differ, imageSource);
+        setNeedle();
+    }
+    pin.css("left", -($(".result").width() + $(".component").width() + 2 * 16));
+    var tdWidth = $(".current_preview").parents("td").width();
+    pout.width(tdWidth).hide().fadeIn({
+        duration: (force ? 0 : 150),
+        complete: function() { checkPreviewVisible(stepPreviewContainer, pin); }
+    });
+    $('[data-toggle="popover"]').popover({ html: true });
+    // make persistent dropdowns persistent by preventing click-event propagation
+    $('.dropdown-persistent').on('click', function(event) {
+        event.stopPropagation();
+    });
+    // ensure keydown event happening when button has focus is propagated to the right handler
+    $('.candidates-selection .dropdown-toggle').on('keydown', function(event) {
+        event.stopPropagation();
+        handleKeyDownOnTestDetails(event);
+    });
+    // handle click on the diff selection
+    $('.trigger-diff').on('click', function(event) {
+        var trigger = $(this);
+        setNeedle(trigger.parents('tr'), trigger.data('diff'));
+        event.stopPropagation();
+    });
+    // prevent hiding drop down when showing needle info popover
+    $('.show-needle-info').on('click', function(event) {
+        event.stopPropagation();
+    });
+    // hide needle info popover when hiding drop down
+    $('#needlediff_dropdown').on('hide.bs.dropdown', function(event) {
+        $('#needlediff_selector [data-toggle="popover"]').popover('hide');
+    });
 }
 
 function toggleTextPreview(textResultDomElement) {
@@ -125,12 +172,12 @@ function hidePreviewContainer() {
     }
 }
 
-function setCurrentPreview(a, force) {
+function setCurrentPreview(stepPreviewContainer, force) {
     // just hide current preview
-    if (!(a && a.length && !a.is('.current_preview')) && !force) {
+    if (!(stepPreviewContainer && stepPreviewContainer.length && !stepPreviewContainer.hasClass('current_preview')) && !force) {
         $('.current_preview').removeClass('current_preview');
         hidePreviewContainer();
-        setResultHash('', true);
+        setPageHashAccordingToCurrentTab('', true);
         return;
     }
 
@@ -138,15 +185,15 @@ function setCurrentPreview(a, force) {
     $('.current_preview').removeClass('current_preview');
 
     // show preview for results with text data
-    var textResultElement = a.find('span.text-result');
+    var textResultElement = stepPreviewContainer.find('span.text-result');
     if (textResultElement.length) {
-        a.addClass('current_preview');
+        stepPreviewContainer.addClass('current_preview');
         hidePreviewContainer();
-        setResultHash(textResultElement.data('href'), true);
+        setPageHashAccordingToCurrentTab(textResultElement.data('href'), true);
 
         // ensure element is in viewport
-        var aOffset = a.offset().top;
-        if (aOffset < window.scrollY || (aOffset + a.height()) > (window.scrollY + window.innerHeight)) {
+        var aOffset = stepPreviewContainer.offset().top;
+        if (aOffset < window.scrollY || (aOffset + stepPreviewContainer.height()) > (window.scrollY + window.innerHeight)) {
             $('html').animate({
                 scrollTop: aOffset
             }, 500);
@@ -155,16 +202,17 @@ function setCurrentPreview(a, force) {
     }
 
     // show preview for other/regular results
-    var link = a.find('a');
+    var link = stepPreviewContainer.find('a');
     if (!link || !link.data('url')) {
         return;
     }
-    a.addClass('current_preview');
-    setResultHash(link.attr('href'), true);
-    $.get({ url: link.data('url'),
-            success: function(data) {
-              previewSuccess(data, force);
-            }
+    stepPreviewContainer.addClass('current_preview');
+    setPageHashAccordingToCurrentTab(link.attr('href'), true);
+    $.get({
+        url: link.data('url'),
+        success: function(data) {
+            previewSuccess(stepPreviewContainer, data, force);
+        }
     }).fail(function() {
         console.warn('Failed to load data from: ' + link.data('url'));
         setCurrentPreview(null);
@@ -207,36 +255,6 @@ function prevPreview() {
     selectPreview('prev');
 }
 
-function checkResultHash() {
-    var hash = window.location.hash;
-
-    // default to 'Details' tab
-    if (!hash || hash == '#') {
-        hash = '#details';
-    }
-
-    // check for links or text details matching the hash
-    var link = $("[href='" + hash + "'], [data-href='" + hash + "']");
-    if (link && link.attr("role") === 'tab' && !link.prop('aria-expanded')) {
-        link.tab('show');
-    } else if (hash.search('#step/') === 0) {
-        // show details tab for steps
-        $("[href='#details']").tab('show');
-        // show preview or text details
-        if (link && !link.parent().is(".current_preview")) {
-            setCurrentPreview(link.parent());
-        } else if (!link) {
-            setCurrentPreview(null);
-        }
-    } else if (hash.search('#comment-') === 0) {
-        // show comments tab if anchor contains specific comment
-        $("[href='#comments']").tab('show');
-    } else {
-        // reset
-        setCurrentPreview(null);
-    }
-}
-
 function prevNeedle() {
     // select previous in current tag
     var currentSelection = $('#needlediff_selector tbody tr.selected');
@@ -276,7 +294,7 @@ function handleKeyDownOnTestDetails(e) {
         return;
     }
 
-    switch(e.which) {
+    switch (e.which) {
         case KeyEvent.DOM_VK_LEFT:
             if (!e.shiftKey) {
                 prevPreview();
@@ -310,21 +328,340 @@ function handleKeyDownOnTestDetails(e) {
     }
 }
 
-function setupTab(tabHash) {
-    if (tabHash === '#dependencies') {
-        setupDependencyGraph();
-    } else if (tabHash === '#external') {
-        setupExternalResults();
+function setPageHashAccordingToCurrentTab(tabNameOrHash, replace) {
+    // don't mess with #step hashes within details tab
+    const currentHash = window.location.hash;
+    if (tabNameOrHash === 'details' && currentHash.search('#step/') === 0) {
+        return;
     }
-    if (tabHash === '#live') {
-        setupDeveloperPanel();
-        resumeLiveView();
+
+    const newHash = (tabNameOrHash === window.defaultTab) ? '#' :
+        (tabNameOrHash.search('#') === 0 ? tabNameOrHash : '#' + tabNameOrHash);
+    if (newHash === currentHash || (newHash === '#' && !currentHash)) {
+        return;
+    }
+    if (replace && history.replaceState) {
+        history.replaceState(null, null, newHash);
+    } else if (!replace && history.pushState) {
+        history.pushState(null, null, newHash);
     } else {
-        pauseLiveView();
+        window.location.hash = newHash;
     }
 }
 
-function setupExternalResults() {
+function setupTabHandling() {
+    // invoke handlers when a tab gets shown or hidden
+    $('#result_tabs a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
+        if (e.target) {
+            const tabName = tabNameForNavElement(e.target);
+            activateTab(tabName);
+            setPageHashAccordingToCurrentTab(tabName);
+        }
+        if (e.relatedTarget) {
+            deactivateTab(tabNameForNavElement(e.relatedTarget));
+        }
+    });
+    // show relevant nav elements from the start
+    showRelevantTabNavElements();
+    // change tab when the hash changes and process initial hash
+    window.onhashchange = activateTabAccordingToHashChange;
+    activateTabAccordingToHashChange();
+}
+
+function tabNameForNavElement(navElement) {
+    const hash = navElement.hash;
+    if (typeof hash === 'string') {
+        return hash.substr(1);
+    }
+}
+
+function configureTabNavElement(tabName, displayStyle) {
+    const navElement = document.getElementById('nav-item-for-' + tabName);
+    if (!navElement) {
+        return false;
+    }
+    navElement.style.display = displayStyle;
+    return navElement;
+}
+
+function showTabNavElement(tabName) {
+    return configureTabNavElement(tabName, 'list-item');
+}
+
+function showRelevantTabNavElements() {
+    for (const [tabName, tabConfig] of Object.entries(tabConfiguration)) {
+        const conditionForShowingNavItem = tabConfig.conditionForShowingNavItem;
+        const shouldDisplayTab = !conditionForShowingNavItem || conditionForShowingNavItem.call();
+        // don't mess with tabs handled elsewhere
+        if (shouldDisplayTab === undefined) {
+            continue;
+        }
+        const displayStyle = shouldDisplayTab ? 'list-item' : 'none';
+        // skip if the tab is not present on the page (e.g. the dependencies tab might not be present at all)
+        if (!configureTabNavElement(tabName, displayStyle)) {
+            continue;
+        }
+        // use the tab to be shown as default if there's no default already
+        if (shouldDisplayTab) {
+            window.defaultTab = window.defaultTab || tabName;
+            continue;
+        }
+        // deactivate and remove the tab if now shown anymore
+        if (tabConfig.isActive) {
+            deactivateTab(tabName);
+        }
+        const removeHandler = tabConfig.onRemove;
+        if (tabConfig.onRemove) {
+            removeHandler.call(tabConfig);
+        }
+        if (tabConfig.panelElement) {
+            tabConfig.panelElement.innerHTML = '';
+        }
+        tabConfig.initialized = false;
+    }
+}
+
+function activateTabAccordingToHashChange() {
+    // consider hash; otherwise show default tab
+    let hash = window.location.hash;
+    if (!hash || hash === '#') {
+        if (!window.defaultTab) {
+            return;
+        }
+        hash = '#' + window.defaultTab;
+    }
+
+    // check for tabs, steps or comments matching the hash
+    var link = $("[href='" + hash + "'], [data-href='" + hash + "']");
+    var tabName = hash.substr(1);
+    if (hash.search('#step/') === 0) {
+        setCurrentPreviewFromStepLinkIfPossible(link);
+        link = $("[href='#details']");
+        tabName = 'details';
+        // note: It is not a problem if the details haven't been loaded so far. Once the details become available the hash
+        //       is checked again and the exact step preview will be shown.
+    } else if (hash.search('#comment-') === 0) {
+        link = $("[href='#comments']");
+        tabName = 'comments';
+    } else if (link.attr('role') !== 'tab' || link.prop('aria-expanded')) {
+        setCurrentPreview(null);
+        return;
+    }
+
+    // show the tab only if supposed to be shown for the current job state; otherwise fall back to the default tab
+    const tabConfig = tabConfiguration[tabName];
+    if (tabConfig && (!tabConfig.conditionForShowingNavItem || tabConfig.conditionForShowingNavItem())) {
+        link.tab('show');
+    } else {
+        window.location.hash = '#';
+    }
+}
+
+function loadTabPanelElement(tabName, tabConfig) {
+    const tabPanelElement = document.getElementById(tabName);
+    if (!tabPanelElement) {
+        return false;
+    }
+    const ajaxUrl = tabPanelElement.dataset.src;
+    if (!ajaxUrl) {
+        return false;
+    }
+    tabConfig.panelElement = tabPanelElement; // for easier access in custom renderers
+    $.ajax({
+        url: ajaxUrl,
+        method: 'GET',
+        success: function(response) {
+            const customRenderer = tabConfig.renderContents;
+            if (customRenderer) {
+                return customRenderer.call(tabConfig, response);
+            }
+            tabPanelElement.innerHTML = response;
+        },
+        error: function(xhr, ajaxOptions, thrownError) {
+            const customRenderer = tabConfig.renderError;
+            if (customRenderer) {
+                return customRenderer.call(tabConfig, xhr, ajaxOptions, thrownError);
+            }
+            tabPanelElement.innerHTML = '';
+            tabPanelElement.appendChild(
+                document.createTextNode('Unable to load ' + (tabConfig.descriptiveName || tabName) + '.')
+            );
+        },
+    });
+    tabPanelElement.innerHTML =
+        '<p style="text-align: center;"><i class="fas fa-spinner fa-spin fa-lg"></i> Loading ' +
+        (tabConfig.descriptiveName || tabName) + '…</p>';
+    return tabPanelElement;
+}
+
+function activateTab(tabName) {
+    if (!tabName) {
+        return false;
+    }
+    const tabConfig = tabConfiguration[tabName];
+    if (!tabConfig) {
+        // skip tabs which don't exists
+        // note: Some tabs might not be rendered at all, e.g. the dependencies tab is only rendered if there are dependencies.
+        return false;
+    }
+    tabConfig.isActive = true;
+    if (!tabConfig.initialized) {
+        return (tabConfig.initialized = loadTabPanelElement(tabName, tabConfig));
+    }
+    const showHandler = tabConfig.onShow;
+    if (showHandler) {
+        return showHandler.call(tabConfig);
+    }
+}
+
+function deactivateTab(tabName) {
+    if (!tabName) {
+        return false;
+    }
+    const tabConfig = tabConfiguration[tabName];
+    if (!tabConfig) {
+        return false;
+    }
+    tabConfig.isActive = false;
+    const hideHandler = tabConfig.onHide;
+    if (hideHandler) {
+        return hideHandler.call(tabConfig);
+    }
+}
+
+function setInfoPanelClassName(jobState, jobResult) {
+    const panelClassByResult = { passed: 'border-success', softfailed: 'border-warning' };
+    document.getElementById('info_box').className = 'card ' +
+        (jobState !== 'done' ? 'border-info' : (panelClassByResult[jobResult] || 'border-danger'));
+}
+
+function setupResult(jobid, state, result, status_url) {
+    // make test state and result available to all JavaScript functions which need it
+    testStatus.state = state;
+    testStatus.result = result;
+
+    setupTabHandling();
+    loadEmbeddedLogFiles();
+    if (state !== 'done') {
+        setupRunning(jobid, status_url);
+        return;
+    }
+    setInfoPanelClassName(state, result);
+}
+
+function loadEmbeddedLogFiles() {
+    $('.embedded-logfile').each(function(index, logFileElement) {
+        if (logFileElement.dataset.contentsLoaded) {
+            return;
+        }
+        $.ajax(logFileElement.dataset.src).done(function(response) {
+            logFileElement.appendChild(document.createTextNode(response));
+            logFileElement.dataset.contentsLoaded = true;
+        }).fail(function(jqXHR, textStatus, errorThrown) {
+            logFileElement.appendChild(document.createTextNode('Unable to load logfile: ' + errorThrown));
+        });
+    });
+}
+
+function setCurrentPreviewFromStepLinkIfPossible(stepLink) {
+    if (tabConfiguration.details.hasContents && !stepLink.parent().is(".current_preview")) {
+        setCurrentPreview(stepLink.parent());
+    }
+}
+
+function renderTestModules(response) {
+    this.hasContents = true;
+    renderModuleTable(this.panelElement, response);
+
+    // load the embedded logfiles (autoinst-log.txt); assume that in this case no test modules are available and skip further processing
+    if (this.panelElement.getElementsByClassName('embedded-logfile').length > 0) {
+        loadEmbeddedLogFiles();
+        return;
+    }
+
+    setupLazyLoadingFailedSteps();
+
+    // enable the external tab if there are text results
+    // note: It would be more efficient to query "regular details" and external results in one go because both
+    //       are just a different representation of the same data.
+    if (document.getElementsByClassName('external-result-container').length) {
+        showTabNavElement('external');
+    }
+
+    // display the preview for the current step according to the hash
+    const hash = window.location.hash;
+    if (hash.search('#step/') === 0) {
+        setCurrentPreviewFromStepLinkIfPossible($("[href='" + hash + "'], [data-href='" + hash + "']"));
+    }
+
+    // setup keyboard navigation through test details
+    $(window).keydown(handleKeyDownOnTestDetails);
+
+    // ensure the size of the preview container is adjusted when the window size changes
+    $(window).resize(function() {
+        const currentPreview = $('.current_preview');
+        if (currentPreview.length) {
+            setCurrentPreview($('.current_preview'), true);
+        }
+    });
+
+    // setup result filter, define function to apply filter changes
+    const detailsFilter = $('#details-filter');
+    const detailsNameFilter = $('#details-name-filter');
+    const detailsFailedOnlyFilter = $('#details-only-failed-filter');
+    const resultsTable = $('#results');
+    let anyFilterEnabled = false;
+    let nameFilter = '';
+    let nameFilterEnabled = false;
+    let failedOnlyFilterEnabled = false;
+    const applyFilterChanges = function(event) {
+        // determine enabled filter
+        anyFilterEnabled = !detailsFilter.hasClass('hidden');
+        if (anyFilterEnabled) {
+            nameFilter = detailsNameFilter.val();
+            nameFilterEnabled = nameFilter.length !== 0;
+            failedOnlyFilterEnabled = detailsFailedOnlyFilter.prop('checked');
+            anyFilterEnabled = nameFilterEnabled || failedOnlyFilterEnabled;
+        }
+
+        // show everything if no filter present
+        if (!anyFilterEnabled) {
+            resultsTable.find('tbody tr').show();
+            return;
+        }
+
+        // hide all categories
+        resultsTable.find('tbody tr td[colspan="3"]').parent('tr').hide();
+
+        // show/hide table rows considering filter
+        $.each(resultsTable.find('tbody .result'), function(index, td) {
+            const tdElement = $(td);
+            const trElement = tdElement.parent('tr');
+            const stepMaches = (
+                (!nameFilterEnabled ||
+                    trElement.find('td.component').text().indexOf(nameFilter) >= 0) &&
+                (!failedOnlyFilterEnabled ||
+                    tdElement.hasClass('resultfailed') ||
+                    tdElement.hasClass('resultsoftfailed'))
+            );
+            trElement[stepMaches ? 'show' : 'hide']();
+        });
+    };
+
+    detailsNameFilter.keyup(applyFilterChanges);
+    detailsFailedOnlyFilter.change(applyFilterChanges);
+
+    // setup filter toggle
+    $('.details-filter-toggle').on('click', function(event) {
+        event.preventDefault();
+        detailsFilter.toggleClass('hidden');
+        applyFilterChanges();
+    });
+}
+
+function renderExternalTab(response) {
+    this.panelElement.innerHTML = response;
+
     var externalTable = $('#external-table');
     // skip if table is not present (meaning no external results available) or if the table has
     // already been initialized
@@ -335,7 +672,10 @@ function setupExternalResults() {
     // make the table use DataTable
     externalTable.data('initialized', true);
     externalTable = externalTable.DataTable({
-        lengthMenu: [[10, 25, 50, 100], [10, 25, 50, 100]],
+        lengthMenu: [
+            [10, 25, 50, 100],
+            [10, 25, 50, 100]
+        ],
         order: [],
     });
 
@@ -359,116 +699,144 @@ function setupExternalResults() {
     });
 }
 
-function setupResult(state, jobid, status_url, details_url) {
-  setupLazyLoadingFailedSteps();
-  $(".current_preview").removeClass("current_preview");
-
-  $(window).keydown(handleKeyDownOnTestDetails);
-
-  $(window).resize(function() {
-    if ($(".current_preview")) {
-      setCurrentPreview($(".current_preview"), true);
+function renderLiveTab(response) {
+    this.hasContents = true;
+    this.panelElement.innerHTML = response;
+    initLivelogAndTerminal();
+    if (testStatus.state === 'uploading' || testStatus.state === 'done') {
+        disableLivestream();
+    } else {
+        initLivestream();
     }
-  });
+    setupDeveloperPanel();
+    resumeLiveView();
+}
 
-  $(document).on('click', '.links_a > a', function() {
-    setCurrentPreview($(this).parent());
-    return false;
-  });
+function renderCommentsTab(response) {
+    const tabPanelElement = this.panelElement;
+    tabPanelElement.innerHTML = response;
+    $(tabPanelElement).find('[data-toggle="popover"]').popover({ html: true });
+}
 
-  // don't overwrite the tab if coming from the URL (ignore '#')
-  if (location.hash.length < 2 && state === "scheduled") {
-    setResultHash("#settings", true);
-  }
-  // This could be easily rewritten as $.inArray
-  if ( state == "running"   ||
-       state == "uploading" ||
-       state == "assigned"  ||
-       state == "setup" ) {
-    setupRunning(jobid, status_url, details_url);
-  }
-  else if (state == "scheduled") {
-    // reload when test starts
-    window.setInterval(function() {
-      $.ajax(status_url).done(function(newStatus) {
-        if (newStatus.state != 'scheduled') {
-          setTimeout(function() {location.href = location.href.replace(/#.*/, '');}, 1000);
+function renderInvestigationTab(response) {
+    const tabPanelElement = this.panelElement;
+    if (typeof response !== 'object') {
+        tabPanelElement.innerHTML = 'Investigation info returned by server is invalid.';
+        return;
+    }
+
+    var theadElement = document.createElement('thead');
+    var headTrElement = document.createElement('tr');
+    var headThElement = document.createElement('th');
+    headThElement.appendChild(document.createTextNode('Investigation'));
+    headThElement.colSpan = 2;
+    headTrElement.appendChild(headThElement);
+    theadElement.appendChild(headTrElement);
+
+    var tbodyElement = document.createElement('tbody');
+    Object.keys(response).forEach(key => {
+        var value = response[key];
+        var type = 'pre';
+
+        // The value can be an object with attribute "type" to determine the
+        // behavior. The accepted types are:
+        // - link: adds a link reference using an anchor <a>
+        //   additional required attributes:
+        //     - link: the url
+        //     - text: the text to show instead of the url
+
+        if (typeof value === 'object' && value.type)
+            type = value.type;
+
+        var keyElement = document.createElement('td');
+        keyElement.style.verticalAlign = 'top';
+        keyElement.appendChild(document.createTextNode(key));
+
+        var valueElement = document.createElement('td');
+
+        if (type === "link") {
+            var html = document.createElement("a");
+            html.href = value.link;
+            html.innerHTML = value.text;
+            valueElement.appendChild(html);
+        } else {
+            var textLines = typeof value === 'string' ? value.split('\n') : [value];
+            var textLinesRest;
+
+            var lineLimit = 10;
+            if (textLines.length > lineLimit) {
+                textLinesRest = textLines.slice(lineLimit, textLines.length);
+                textLines = textLines.slice(0, lineLimit);
+            }
+
+            var preElement = document.createElement('pre');
+            preElement.appendChild(document.createTextNode(textLines.join('\n')));
+            valueElement.appendChild(preElement);
+
+            if (textLinesRest) {
+                var preElementMore = document.createElement('pre');
+                preElementMore.appendChild(document.createTextNode(textLinesRest.join('\n')));
+                preElementMore.style = "display: none";
+
+                var moreLink = document.createElement('a');
+                moreLink.style = "cursor:pointer";
+                moreLink.innerHTML = "Show more";
+                moreLink.onclick = function() {
+                    preElementMore.style = "";
+                    moreLink.style = "display:none";
+                };
+
+                valueElement.appendChild(moreLink);
+                valueElement.appendChild(preElementMore);
+            }
         }
-      });
-    }, 10000);
-  }
-  $(window).on("hashchange", checkResultHash);
-  checkResultHash();
 
-  $("a[data-toggle='tab']").on("show.bs.tab", function(e) {
-    var tabshown = $(e.target).attr("href");
-    // now this is very special
-    if (window.location.hash.search("#step/") == 0 && tabshown == "#details" ) {
-      return;
+        var trElement = document.createElement('tr');
+        trElement.appendChild(keyElement);
+        trElement.appendChild(valueElement);
+        tbodyElement.appendChild(trElement);
+    });
+
+    var tableElement = document.createElement('table');
+    tableElement.id = 'investigation_status_entry';
+    tableElement.className = 'infotbl table table-striped';
+    tableElement.appendChild(theadElement);
+    tableElement.appendChild(tbodyElement);
+    tabPanelElement.innerHTML = '';
+    tabPanelElement.appendChild(tableElement);
+    tabPanelElement.dataset.initialized = true;
+}
+
+function renderDependencyTab(response) {
+    const tabPanelElement = this.panelElement;
+    const nodes = response.nodes;
+    const edges = response.edges;
+    const cluster = response.cluster;
+    if (!nodes || !edges || !cluster) {
+        tabPanelElement.innerHTML = 'Unable to query dependency info: no nodes/edges received';
+        return;
     }
-    setResultHash(tabshown);
-  });
+    tabPanelElement.innerHTML = '<p>Arrows visualize chained dependencies specified via <code>START_AFTER_TEST</code> \
+                                 and <code>START_DIRECTLY_AFTER_TEST</code> (hover over boxes to distinguish). \
+                                 Blue boxes visualize parallel dependencies specified via <code>PARALLEL_WITH</code>. \
+                                 The current job is highlighted with a bolder border and yellow background.</p> \
+                                 <p>The graph shows only the latest jobs. That means jobs which have been cloned will \
+                                 never show up.</p><svg id="dependencygraph"></svg>';
 
-  // setup lazy-loading for tabs
-  setupTab(window.location.hash);
-  $('#result-row a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
-    setupTab(e.target.hash);
-  });
-
-  // setup result filter, define function to apply filter changes
-  var detailsFilter = $('#details-filter');
-  var detailsNameFilter = $('#details-name-filter');
-  var detailsFailedOnlyFilter = $('#details-only-failed-filter');
-  var resultsTable = $('#results');
-  var anyFilterEnabled = false;
-  var applyFilterChanges = function(event) {
-      // determine enabled filter
-      anyFilterEnabled = !detailsFilter.hasClass('hidden');
-      if (anyFilterEnabled) {
-          var nameFilter = detailsNameFilter.val();
-          var nameFilterEnabled = nameFilter.length !== 0;
-          var failedOnlyFilterEnabled = detailsFailedOnlyFilter.prop('checked');
-          anyFilterEnabled = nameFilterEnabled || failedOnlyFilterEnabled;
-      }
-
-      // show everything if no filter present
-      if (!anyFilterEnabled) {
-          resultsTable.find('tbody tr').show();
-          return;
-      }
-
-      // hide all categories
-      resultsTable.find('tbody tr td[colspan="3"]').parent('tr').hide();
-
-      // show/hide table rows considering filter
-      $.each(resultsTable.find('tbody .result'), function(index, td) {
-          var tdElement = $(td);
-          var trElement = tdElement.parent('tr');
-          var stepMaches = (
-              (!nameFilterEnabled ||
-                trElement.find('td.component').text().indexOf(nameFilter) >= 0) &&
-                (!failedOnlyFilterEnabled ||
-                    tdElement.hasClass('resultfailed') ||
-                    tdElement.hasClass('resultsoftfailed'))
-          );
-          trElement[stepMaches ? 'show' : 'hide']();
-      });
-  };
-
-  detailsNameFilter.keyup(applyFilterChanges);
-  detailsFailedOnlyFilter.change(applyFilterChanges);
-
-  // setup filter toggle
-  $('.details-filter-toggle').on('click', function(event) {
-      event.preventDefault();
-      detailsFilter.toggleClass('hidden');
-      applyFilterChanges();
-  });
+    // render the graph only while the tab panel element is visible; otherwise delay the rendering until it becomes visible
+    // note: This is required because otherwise the initialization does not seem to work (e.g. in Chromium only the arrows
+    //       are rendered and in Firefox nothing at all).
+    const renderGraph = renderDependencyGraph.bind(this, tabPanelElement, nodes, edges, cluster, tabPanelElement.dataset.currentJobId);
+    if (tabPanelElement.classList.contains('active')) {
+        renderGraph();
+    } else {
+        $("[href='#dependencies']").on('shown.bs.tab', renderGraph);
+    }
 }
 
 function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
     // create a new directed graph
-    var g = new dagreD3.graphlib.Graph({ compound:true }).setGraph({});
+    var g = new dagreD3.graphlib.Graph({ compound: true }).setGraph({});
 
     // set left-to-right layout and spacing
     g.setGraph({
@@ -480,6 +848,7 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
     });
 
     // insert nodes
+    const nodeIDs = {};
     nodes.forEach(node => {
         var testResultId;
         if (node.result !== 'none') {
@@ -518,29 +887,36 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
             name: node.name,
             testResultId: testResultId,
             testResultName: testResultName,
-            startAfter: node.start_after,
-            parallelWith: node.parallel_with,
+            startAfter: node.chained,
+            startDirectlyAfter: node.directly_chained,
+            parallelWith: node.parallel,
         });
+        nodeIDs[node.id] = true;
     });
 
     // insert edges
     edges.forEach(edge => {
-        g.setEdge(edge.from, edge.to, {});
+        if (nodeIDs[edge.from] && nodeIDs[edge.to]) {
+            g.setEdge(edge.from, edge.to, {});
+        }
     });
 
     // insert clusters
-    for (var clusterId in cluster) {
+    Object.keys(cluster).forEach(clusterId => {
         g.setNode(clusterId, {});
         cluster[clusterId].forEach(child => {
-            g.setParent(child, clusterId);
+            if (nodeIDs[child]) {
+                g.setParent(child, clusterId);
+            }
         });
-    }
+    });
 
     // create the renderer
     var render = new dagreD3.render();
 
     // set up an SVG group so that we can translate the final graph.
-    var svg = d3.select('svg'), svgGroup = svg.append('g');
+    var svg = d3.select('svg'),
+        svgGroup = svg.append('g');
 
     // run the renderer (this is what draws the final graph)
     render(svgGroup, g);
@@ -551,14 +927,18 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
             var node = g.node(v);
             var tooltipText = '<p>' + node.name + '</p>';
             var startAfter = node.startAfter;
+            var startDirectlyAfter = node.startDirectlyAfter;
             var parallelWith = node.parallelWith;
-            if (startAfter.length || parallelWith.length) {
+            if (startAfter.length || startDirectlyAfter.length || parallelWith.length) {
                 tooltipText += '<div style="border-top: 1px solid rgba(100, 100, 100, 30); margin: 5px 0px;"></div>';
                 if (startAfter.length) {
-                    tooltipText += '<p><code>START_AFTER_TEST=' + startAfter.join(',') + '</code></p>';
+                    tooltipText += '<p><code>START_AFTER_TEST=' + htmlEscape(startAfter.join(',')) + '</code></p>';
+                }
+                if (startDirectlyAfter.length) {
+                    tooltipText += '<p><code>START_DIRECTLY_AFTER_TEST=' + htmlEscape(startDirectlyAfter.join(',')) + '</code></p>';
                 }
                 if (parallelWith.length) {
-                    tooltipText += '<p><code>PARALLEL_WITH=' + parallelWith.join(',') + '</code></p>';
+                    tooltipText += '<p><code>PARALLEL_WITH=' + htmlEscape(parallelWith.join(',')) + '</code></p>';
                 }
             }
             return tooltipText;
@@ -578,37 +958,4 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
     svg.attr('height', g.graph().height + 40);
 
     // note: centering is achieved by centering the svg element itself like any other html block element
-}
-
-function setupDependencyGraph() {
-    if (window.dependencyGraphInitiated) {
-        return;
-    }
-    window.dependencyGraphInitiated = true;
-
-    var statusElement = document.getElementById('dependencygraph_status');
-    var containerElement = document.getElementById('dependencygraph');
-    $.ajax({
-        url: containerElement.dataset.url,
-        method: 'GET',
-        success: function(dependencyInfo) {
-            var nodes = dependencyInfo.nodes;
-            var edges = dependencyInfo.edges;
-            var cluster = dependencyInfo.cluster;
-            if (!nodes || !edges || !cluster) {
-                $(statusElement).text('Unable to query dependency info: no nodes/edges received');
-                return;
-            }
-            statusElement.style.textAlign = 'left';
-            statusElement.innerHTML = '<p>Arrows visualize chained dependencies specified via <code>START_AFTER_TEST</code>. \
-                                       Blue boxes visualize parallel dependencies specified via <code>PARALLEL_WITH</code>. \
-                                       The current job is highlighted with a bolder border and yellow background.</p> \
-                                       <p>The graph shows only the latest jobs. That means jobs which have been cloned will \
-                                       never show up.</p>';
-            renderDependencyGraph(containerElement, nodes, edges, cluster, containerElement.dataset.currentJobId);
-        },
-        error: function(xhr, ajaxOptions, thrownError) {
-            $(statusElement).text('Unable to query dependency info: ' + thrownError);
-        }
-    });
 }

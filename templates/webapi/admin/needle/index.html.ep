@@ -1,0 +1,102 @@
+% layout 'bootstrap';
+% title 'Needles';
+
+% content_for 'ready_function' => begin
+    setupAdminNeedles();
+% end
+
+<div class="modal fade" id="confirm_delete" tabindex="-1"
+        role="dialog" data-delete-url="<%= url_for('admin_needle_delete') %>"
+        data-backdrop="static" data-keyboard="false">
+  <div class="modal-dialog modal-lg">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h4 class="modal-title">Needle deletion</h4>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+            <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <p id="deletion-question">Really delete following needles?</p>
+        <p id="deletion-ongoing">
+          <button type="button" class="btn btn-danger" id="abort_delete" style="float: right;">Abort</button>
+          <i class="fa fa-cog fa-spin fa-3x fa-fw"></i> Deletion ongoing, <span id="deletion-progress">some</span> needles remaining…
+        </p>
+        <p id="deletion-finished"><i class="glyphicon glyphicon-ok"></i> All outstanding needles processed</p>
+        <table class="table table-striped">
+          <colgroup>
+            <col style="width: 50%" id="outstanding-col">
+            <col style="width: 50%" id="failed-col">
+          </colgroup>
+          <thead>
+            <tr><th>Outstanding needles</th><th>Failed needles</th></tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><ul id="outstanding-needles"></ul></td>
+              <td><ul id="failed-needles"></ul></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-default" id="close_delete" data-dismiss="modal">Close</button>
+        <button type="button" class="btn btn-primary" id="really_delete">Delete them</button>
+      </div>
+    </div><!-- /.modal-content -->
+  </div><!-- /.modal-dialog -->
+</div>
+
+<div class="row">
+    <div class="col-sm-12">
+        <h2><%= title %></h2>
+
+        <div class="row">
+            <div class="col-xl-4">
+                <label for="last_seen_filter">
+                    Limit Use:
+                </label>
+                <form>
+                    %= include 'admin/needle/needle_search', str => 'seen'
+                </form>
+            </div>
+            <div class="col-xl-4">
+                <label for="last_match_filter">
+                    Limit Match:
+                </label>
+                <form>
+                    %= include 'admin/needle/needle_search', str => 'match'
+                </form>
+            </div>
+            <div class="col-xl-4">
+                <div style="width: fit-content; margin-left: auto;">
+                    <div>
+                        <label for="select_all">
+                            Affects all visible:
+                        </label>
+                    </div>
+                    <div>
+                        <button class="btn btn-default" id="select_all">Select</button>
+                        <button class="btn btn-default" id="unselect_all">Unselect</button>
+                        <button class="btn btn-danger" id="delete_all">Delete</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        %= include 'layouts/info'
+
+        <p></p>
+
+        <table id="needles" class="table table-striped" data-ajax-url="<%= url_for('admin_needle_ajax') %>">
+            <thead>
+                <tr>
+                    <th>Directory</th>
+                    <th>Filename</th>
+                    <th>Last Use</th>
+                    <th>Last Match</th>
+                </tr>
+            </thead>
+        </table>
+    </div>
+
+</div>

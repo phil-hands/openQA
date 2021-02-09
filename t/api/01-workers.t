@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2014-2017 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,57 +12,61 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings ':all';
+use Test::Warnings qw(:all :report_warnings);
 use Mojo::URL;
+use OpenQA::Test::TimeLimit '10';
 use OpenQA::Test::Case;
+use OpenQA::Test::Utils 'embed_server_for_testing';
 use OpenQA::Client;
 use OpenQA::WebSockets::Client;
-use OpenQA::Constants 'WEBSOCKET_API_VERSION';
+use OpenQA::Constants qw(DEFAULT_WORKER_TIMEOUT DB_TIMESTAMP_ACCURACY WEBSOCKET_API_VERSION);
+use OpenQA::Jobs::Constants;
 use Date::Format 'time2str';
 
-OpenQA::Test::Case->new->init_data;
-OpenQA::WebSockets::Client->singleton->embed_server_for_testing;
+my $test_case = OpenQA::Test::Case->new;
+my $schema    = $test_case->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
+my $jobs      = $schema->resultset('Jobs');
+my $workers   = $schema->resultset('Workers');
+
+# assume all workers are online
+$workers->update({t_seen => time2str('%Y-%m-%d %H:%M:%S', time + 60, 'UTC')});
+
+embed_server_for_testing(
+    server_name => 'OpenQA::WebSockets',
+    client      => OpenQA::WebSockets::Client->singleton,
+);
 
 my $t   = Test::Mojo->new('OpenQA::WebAPI');
 my $app = $t->app;
 $t->ua(OpenQA::Client->new->ioloop(Mojo::IOLoop->singleton));
 $t->app($app);
 
-my $ret;
-$ret = $t->post_ok('/api/v1/workers', form => {host => 'localhost', instance => 1, backend => 'qemu'});
-is($ret->tx->res->code, 403, 'register worker without API key fails (403)');
-is_deeply(
-    $ret->tx->res->json,
-    {
+$t->post_ok('/api/v1/workers', form => {host => 'localhost', instance => 1, backend => 'qemu'})
+  ->status_is(403, 'register worker without API key fails (403)')->json_is(
+    '' => {
         error        => 'no api key',
         error_status => 403,
     },
     'register worker without API key fails (error message)'
-);
+  );
 
 $t->ua(OpenQA::Client->new(api => 'testapi')->ioloop(Mojo::IOLoop->singleton));
 $t->app($app);
 
-my $workers = [
+my @workers = (
     {
         id         => 1,
         instance   => 1,
-        connected  => 0,
+        connected  => 1,                              # deprecated
+        websocket  => 1,                              # deprecated
         error      => undef,
-        websocket  => 0,
         alive      => 1,
         jobid      => 99963,
         host       => 'localhost',
@@ -76,84 +79,109 @@ my $workers = [
             JOBTOKEN => 'token99961'
         },
         id        => 2,
-        connected => 0,
+        connected => 1,              # deprecated
+        websocket => 1,              # deprecated
         error     => undef,
-        websocket => 0,
         alive     => 1,
         status    => 'running',
         host      => 'remotehost',
         instance  => 1
-    }];
+    });
 
-$ret = $t->get_ok('/api/v1/workers?live=1');
-ok(!$ret->tx->error, 'listing workers works');
-is(ref $ret->tx->res->json, 'HASH', 'workers returned hash');
-is_deeply(
-    $ret->tx->res->json,
-    {
-        workers => $workers,
-    },
-    'worker present'
-) or diag explain $ret->tx->res->json;
+$t->get_ok('/api/v1/workers?live=1')
+  ->json_is('' => {workers => \@workers}, 'workers present with deprecated live flag');
+diag explain $t->tx->res->json unless $t->success;
+$_->{websocket} = 0 for @workers;
+$t->get_ok('/api/v1/workers')->json_is('' => {workers => \@workers}, "workers present with deprecated websocket flag");
+diag explain $t->tx->res->json unless $t->success;
 
-$workers->[0]->{connected} = 1;
-$workers->[1]->{connected} = 1;
-
-$ret = $t->get_ok('/api/v1/workers');
-ok(!$ret->tx->error, 'listing workers works');
-is(ref $ret->tx->res->json, 'HASH', 'workers returned hash');
-is_deeply(
-    $ret->tx->res->json,
-    {
-        workers => $workers,
-    },
-    'worker present'
-) or diag explain $ret->tx->res->json;
-
-
-my $worker_caps = {
+my %registration_params = (
     host     => 'localhost',
     instance => 1,
+);
+$t->post_ok('/api/v1/workers', form => \%registration_params)->status_is(400, 'worker with missing parameters refused')
+  ->json_is('/error' => 'Erroneous parameters (cpu_arch missing, mem_max missing, worker_class missing)');
+
+$registration_params{cpu_arch} = 'foo';
+$t->post_ok('/api/v1/workers', form => \%registration_params)->status_is(400, 'worker with missing parameters refused')
+  ->json_is('/error' => 'Erroneous parameters (mem_max missing, worker_class missing)');
+
+$registration_params{mem_max} = '4711';
+$t->post_ok('/api/v1/workers', form => \%registration_params)->status_is(400, 'worker with missing parameters refused')
+  ->json_is('/error' => 'Erroneous parameters (worker_class missing)');
+
+$registration_params{worker_class} = 'bar';
+$t->post_ok('/api/v1/workers', form => \%registration_params)->status_is(426, 'worker informed to upgrade');
+
+$registration_params{websocket_api_version} = WEBSOCKET_API_VERSION;
+$t->post_ok('/api/v1/workers', form => \%registration_params)->status_is(200, 'register existing worker with token')
+  ->json_is('/id' => 1, 'worker id is 1');
+diag explain $t->tx->res->json unless $t->success;
+
+$registration_params{instance} = 42;
+$t->post_ok('/api/v1/workers', form => \%registration_params)->status_is(200, 'register new worker')
+  ->json_is('/id' => 3, 'new worker id is 3');
+diag explain $t->tx->res->json unless $t->success;
+is_deeply(
+    OpenQA::Test::Case::find_most_recent_event($t->app->schema, 'worker_register'),
+    {
+        id       => $t->tx->res->json->{id},
+        host     => 'localhost',
+        instance => 42,
+    },
+    'worker event was logged correctly'
+);
+
+subtest 'incompleting previous job on worker registration' => sub {
+    # assume the worker runs some job
+    my $running_job_id = 99961;
+    my $worker         = $workers->search({job_id => $running_job_id})->first;
+    my $worker_id      = $worker->id;
+
+    my %registration_params = (
+        host                  => 'remotehost',
+        instance              => 1,
+        job_id                => $running_job_id,
+        cpu_arch              => 'aarch64',
+        mem_max               => 2048,
+        worker_class          => 'foo',
+        websocket_api_version => WEBSOCKET_API_VERSION,
+    );
+
+    is($jobs->find($running_job_id)->state, RUNNING, 'job is running in the first place');
+
+    subtest 'previous job not incompleted when still being worked on' => sub {
+        $t->post_ok('/api/v1/workers', form => \%registration_params)
+          ->status_is(200, 'register existing worker passing job ID')
+          ->json_is('/id' => $worker_id, 'worker ID returned');
+        return diag explain $t->tx->res->json unless $t->success;
+        is($jobs->find($running_job_id)->state, RUNNING, 'assigned job still running');
+    };
+
+    subtest 'previous job incompleted when worker doing something else' => sub {
+        delete $registration_params{job_id};
+        $t->post_ok('/api/v1/workers', form => \%registration_params)
+          ->status_is(200, 'register existing worker passing no job ID')
+          ->json_is('/id' => $worker_id, 'worker ID returned');
+        return diag explain $t->tx->res->json unless $t->success;
+        my $incomplete_job = $jobs->find($running_job_id);
+        is($incomplete_job->state, DONE, 'assigned job set to done');
+        ok($incomplete_job->result eq INCOMPLETE || $incomplete_job->result eq PARALLEL_RESTARTED,
+            'assigned job considered incomplete or parallel restarted')
+          or diag explain 'actual job result: ' . $incomplete_job->result;
+    };
 };
-
-$ret = $t->post_ok('/api/v1/workers', form => $worker_caps);
-is($ret->tx->res->code, 400, "worker with missing parameters refused");
-
-$worker_caps->{cpu_arch} = 'foo';
-$ret = $t->post_ok('/api/v1/workers', form => $worker_caps);
-is($ret->tx->res->code, 400, "worker with missing parameters refused");
-
-$worker_caps->{mem_max} = '4711';
-$ret = $t->post_ok('/api/v1/workers', form => $worker_caps);
-is($ret->tx->res->code, 400, "worker with missing parameters refused");
-
-$worker_caps->{worker_class} = 'bar';
-
-$ret = $t->post_ok('/api/v1/workers', form => $worker_caps);
-is($ret->tx->res->code, 426, "worker informed to upgrade");
-$worker_caps->{websocket_api_version} = WEBSOCKET_API_VERSION;
-
-$ret = $t->post_ok('/api/v1/workers', form => $worker_caps);
-is($ret->tx->res->code,       200, "register existing worker with token");
-is($ret->tx->res->json->{id}, 1,   "worker id is 1");
-
-$worker_caps->{instance} = 42;
-$ret = $t->post_ok('/api/v1/workers', form => $worker_caps);
-is($ret->tx->res->code,       200, "register new worker");
-is($ret->tx->res->json->{id}, 3,   "new worker id is 3");
 
 subtest 'delete offline worker' => sub {
     my $offline_worker_id = 9;
-    my $database_workers  = $t->app->schema->resultset("Workers");
-    $database_workers->create(
+    $workers->create(
         {
-            id        => $offline_worker_id,
-            host      => 'offline_test',
-            instance  => 5,
-            t_updated => time2str('%Y-%m-%d %H:%M:%S', time - 1200, 'UTC'),
+            id       => $offline_worker_id,
+            host     => 'offline_test',
+            instance => 5,
+            t_seen   => time2str('%Y-%m-%d %H:%M:%S', time - DEFAULT_WORKER_TIMEOUT - DB_TIMESTAMP_ACCURACY, 'UTC'),
         });
-
-    $ret = $t->delete_ok("/api/v1/workers/$offline_worker_id")->status_is(200, "delete offline worker successfully.");
+    $t->delete_ok("/api/v1/workers/$offline_worker_id")->status_is(200, 'offline worker deleted');
 
     is_deeply(
         OpenQA::Test::Case::find_most_recent_event($t->app->schema, 'worker_delete'),
@@ -164,9 +192,8 @@ subtest 'delete offline worker' => sub {
         "Delete worker was logged correctly."
     );
 
-    $ret = $t->delete_ok("/api/v1/workers/99")->status_is(404, "The offline worker not found.");
-
-    $ret = $t->delete_ok("/api/v1/workers/1")->status_is(400, "The worker status is not offline.");
+    $t->delete_ok('/api/v1/workers/99')->status_is(404, 'worker not found');
+    $t->delete_ok('/api/v1/workers/1')->status_is(400, 'deleting online worker prevented');
 };
 
 done_testing();

@@ -1,4 +1,4 @@
-# Copyright (C) 2015 SUSE Linux GmbH
+# Copyright (C) 2015 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,13 +11,10 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Controller::Admin::JobGroup;
 use Mojo::Base 'Mojolicious::Controller';
-
-use OpenQA::Utils 'job_groups_and_parents';
 
 sub index {
     my ($self) = @_;
@@ -27,8 +24,9 @@ sub index {
       = $schema->resultset('JobGroupParents')->search(undef, {order_by => [{-asc => 'sort_order'}, {-asc => 'name'}]});
     my $groups
       = $schema->resultset('JobGroups')->search(undef, {order_by => [{-asc => 'sort_order'}, {-asc => 'name'}]});
+    my $for_editor = $schema->resultset('JobGroupParents')->job_groups_and_parents;
 
-    $self->stash('job_groups_and_parents_for_editor', job_groups_and_parents);
+    $self->stash('job_groups_and_parents_for_editor', $for_editor);
     $self->stash('parent_groups',                     $parent_groups);
     $self->stash('groups',                            $groups);
     $self->render('admin/group/index');

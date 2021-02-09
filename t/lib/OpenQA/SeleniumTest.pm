@@ -1,103 +1,64 @@
 package OpenQA::SeleniumTest;
-use base 'Exporter';
 
-use strict;
-use warnings;
+use Test::Most;
+
+use base 'Exporter';
 
 require OpenQA::Test::Database;
 
-our @EXPORT = qw($drivermissing check_driver_modules start_driver
+our @EXPORT = qw($drivermissing check_driver_modules enable_timeout
+  disable_timeout start_driver
   call_driver kill_driver wait_for_ajax disable_bootstrap_animations
+  wait_for_ajax_and_animations
   open_new_tab mock_js_functions element_visible element_hidden
   element_not_present javascript_console_has_no_warnings_or_errors
-  wait_until wait_until_element_gone);
+  wait_until wait_until_element_gone wait_for_element);
 
 use Data::Dump 'pp';
+use IPC::Run qw(start);
 use Mojo::IOLoop::Server;
 use Mojo::Server::Daemon;
-use Test::More;
 use Try::Tiny;
-use Time::HiRes 'time';
+use Time::HiRes qw(time sleep);
 use OpenQA::WebAPI;
+use OpenQA::Log 'log_info';
 use OpenQA::Utils;
+use OpenQA::Test::Utils 'collect_coverage_of_gru_jobs';
+use POSIX '_exit';
 
 our $_driver;
-our $mojopid;
-our $gru_pid;
+our $webapi;
+our $gru;
 our $mojoport;
 our $startingpid   = 0;
 our $drivermissing = 'Install Selenium::Remote::Driver and Selenium::Chrome to run these tests';
 
-=head2 start_app
-
-  start_app([$schema_hook]);
-
-Fork a server instance with database creation and return the server port.
-
-By default the database is created based on the fixture set.
-
-The optional parameter C<$schema_hook> allows to provide a custom way of creating a database, e.g.
-
-    sub schema_hook {
-        my $schema = OpenQA::Test::Database->new->create;
-        # delete unused job id 1234
-        $schema->resultset('Jobs')->find(1234)->delete;
-    }
-    start_app(\&schema_hook);
-=cut
-
-sub start_app {
-    my ($schema_hook, $args) = @_;
-    $mojoport = $args->{mojoport} // $ENV{MOJO_PORT} // Mojo::IOLoop::Server->generate_port;
-
+sub _start_app {
+    my ($args) = @_;
+    $mojoport    = $ENV{OPENQA_BASE_PORT} = $args->{mojoport} // $ENV{MOJO_PORT} // Mojo::IOLoop::Server->generate_port;
     $startingpid = $$;
-    $mojopid     = fork();
-    if ($mojopid == 0) {
-        log_info("inserting fixtures into database\n");
-        if ($schema_hook) {
-            $schema_hook->();
-        }
-        else {
-            OpenQA::Test::Database->new->create;
-        }
-
-        # Run openQA in test mode - it will mock Scheduler and Websockets DBus services
-        log_info("starting web UI\n");
-        $ENV{MOJO_MODE} = 'test';
-        my $daemon = Mojo::Server::Daemon->new(
-            listen => ["http://127.0.0.1:$mojoport"],
-            silent => 1,
-        );
-        $daemon->build_app('OpenQA::WebAPI');
-        $daemon->run;
-        exit(0);
-    }
-
-    # as this might download assets on first test, we need to wait a while
-    my $wait = time + 50;
-    while (time < $wait) {
-        my $t      = time;
-        my $socket = IO::Socket::INET->new(
-            PeerHost => '127.0.0.1',
-            PeerPort => $mojoport,
-            Proto    => 'tcp',
-        );
-        last if $socket;
-        sleep 1 if time - $t < 1;
-    }
-    start_gru() if ($args->{with_gru});
+    $webapi      = OpenQA::Test::Utils::create_webapi($mojoport);
+    $gru         = _start_gru() if ($args->{with_gru});
     return $mojoport;
 }
 
-sub start_gru {
-    $gru_pid = fork();
-    if ($gru_pid == 0) {
+sub _start_gru {
+    start sub {
+        $0 = 'openqa-gru';
         log_info("starting gru\n");
         $ENV{MOJO_MODE} = 'test';
-        Mojolicious::Commands->start_app('OpenQA::WebAPI', 'gru', 'run', '-m', 'test', '--check', '0');
-        exit(0);
-    }
-    return $gru_pid;
+        my $app = Mojo::Server->new->build_app('OpenQA::WebAPI');
+        collect_coverage_of_gru_jobs($app);
+        $app->start('gru', 'run', '-m', 'test');
+    };
+}
+
+sub enable_timeout {
+    $_driver->set_implicit_wait_timeout(2000);
+}
+
+sub disable_timeout {
+    $_driver->set_implicit_wait_timeout(0);
 }
 
 sub start_driver {
@@ -105,13 +66,31 @@ sub start_driver {
 
     # Connect to it
     eval {
+        # enforce the JSON Wire protocol (instead of using W3C WebDriver protocol)
+        # note: This is required with Selenium::Remote::Driver 1.36 which would now use W3C mode leading
+        #       to errors like "unknown command: unknown command: Cannot call non W3C standard command while
+        #       in W3C mode".
+        $Selenium::Remote::Driver::FORCE_WD2 = 1;
+
+        # pass options for Chromium via chromeOptions *and* goog:chromeOptions to support all versions of
+        # Selenium::Remote::Driver which switched to use goog:chromeOptions in version 1.36
+        my @chrome_option_keys = (qw(chromeOptions goog:chromeOptions));
+
         my %opts = (
             base_url           => "http://localhost:$mojoport/",
             default_finder     => 'css',
             webelement_class   => 'Test::Selenium::Remote::WebElement',
             extra_capabilities => {
-                loggingPrefs  => {browser => 'ALL'},
-                chromeOptions => {args    => []}
+                loggingPrefs => {browser => 'ALL'},
+                map { $_ => {args => []} } @chrome_option_keys,
+            },
+            error_handler => sub {
+                # generate Test::Most failure instead of croaking to preserve
+                # context but bail out to not have repeated entries for the
+                # same problem exceeded console scrollback buffers easily
+                my ($driver, $exception, $args) = @_;                   # uncoverable statement
+                my $err = (split /\n/, $exception)[0] =~ s/Error while executing command: //r;   # uncoverable statement
+                BAIL_OUT($err . ' at ' . __FILE__ . ':' . __LINE__);                             # uncoverable statement
             },
         );
 
@@ -124,10 +103,14 @@ sub start_driver {
         }
         $opts{custom_args} = "--log-path=t/log_chromedriver";
         unless ($ENV{NOT_HEADLESS}) {
-            push(@{$opts{extra_capabilities}{chromeOptions}{args}}, ('--headless', '--disable-gpu', '--no-sandbox'));
+            push(@{$opts{extra_capabilities}{$_}{args}}, qw(--headless --disable-gpu --no-sandbox))
+              for @chrome_option_keys;
         }
-        $_driver = Test::Selenium::Chrome->new(%opts);
-        $_driver->set_implicit_wait_timeout(2000);
+        $_driver           = Test::Selenium::Chrome->new(%opts);
+        $_driver->{is_wd3} = 0;    # ensure the Selenium::Remote::Driver instance uses JSON Wire protocol
+        enable_timeout;
+        # Scripts are considered stuck after this timeout
+        $_driver->set_timeout(script => $ENV{OPENQA_SELENIUM_SCRIPT_TIMEOUT_MS} // 2000);
         $_driver->set_window_size(600, 800);
         $_driver->get("http://localhost:$mojoport/");
 
@@ -135,16 +118,6 @@ sub start_driver {
     die $@ if ($@);
 
     return $_driver;
-}
-
-sub make_screenshot($) {
-    my ($fn) = (@_);
-
-    open(my $fh, '>', $fn);
-    binmode($fh);
-    my $png_base64 = $_driver->screenshot();
-    print($fh MIME::Base64::decode_base64($png_base64));
-    close($fh);
 }
 
 # opens a new tab/window for the specified URL and returns its handle
@@ -177,11 +150,10 @@ sub check_driver_modules {
 }
 
 sub call_driver {
-    # return a omjs driver using specified schema hook if modules
-    # are available, otherwise return undef
+    # return a omjs driver if modules are available, otherwise return undef
     return undef unless check_driver_modules;
-    my ($schema_hook, $args) = @_;
-    my $mojoport = start_app($schema_hook, $args);
+    my ($args) = @_;
+    my $mojoport = _start_app($args);
     return start_driver($mojoport);
 }
 
@@ -190,10 +162,24 @@ sub _default_check_interval {
 }
 
 sub wait_for_ajax {
-    my $check_interval = _default_check_interval(shift);
-    while (!$_driver->execute_script("return jQuery.active == 0")) {
+    my (%args)         = @_;
+    my $check_interval = _default_check_interval($args{interval});
+    my $timeout        = 60 * 5;
+    my $slept          = 0;
+    my $msg            = $args{msg} ? (': ' . $args{msg}) : '';
+
+    while (!$_driver->execute_script('return window.jQuery && jQuery.active === 0')) {
+        if ($timeout <= 0) {
+            fail("Wait for jQuery timed out$msg");    # uncoverable statement
+            return undef;                             # uncoverable statement
+        }
+
+        $timeout -= $check_interval;
         sleep $check_interval;
+        $slept = 1;
     }
+    pass("Wait for jQuery successful$msg");
+    return $slept;
 }
 
 sub disable_bootstrap_animations {
@@ -204,6 +190,12 @@ sub disable_bootstrap_animations {
     for my $rule (@rules) {
         $_driver->execute_script("document.styleSheets[0].addRule($rule, 1);");
     }
+}
+
+sub wait_for_ajax_and_animations {
+    my (%args) = @_;
+    disable_bootstrap_animations();
+    wait_for_ajax(%args);
 }
 
 sub javascript_console_has_no_warnings_or_errors {
@@ -222,27 +214,38 @@ sub javascript_console_has_no_warnings_or_errors {
         my $msg    = $log_entry->{message};
         if ($source eq 'network') {
             # ignore errors when gravatar not found
-            next if ($msg =~ qr/gravatar/);
+            next if ($msg =~ qr/gravatar/);    # uncoverable statement
+
             # ignore that needle editor in 33-developer_mode.t is not instantly available
-            next if ($msg =~ qr/tests\/1\/edit.*404/);
+            next if ($msg =~ qr/tests\/1\/edit.*404/);    # uncoverable statement
+
             # FIXME: loading thumbs during live run causes 404. ignore for now
             # (',' is a quotation mark here and '/' part of expression to match)
-            next if ($msg =~ qr,/thumb/, || $msg =~ qr,/.thumbs/,);
+            next if ($msg =~ qr,/thumb/, || $msg =~ qr,/.thumbs/,);    # uncoverable statement
+
+            # ignore error responses in 13-admin.t testing YAML errors
+            next if ($msg =~ qr/api\/v1\/exp.*\/job_templates_scheduling\/1003 - Failed.*/);    # uncoverable statement
         }
         elsif ($source eq 'javascript') {
-            # FIXME: ignore WebSocket error for now (connection errors are tracked via devel console anyways)
+            # ignore when the proxied ws connection is closed; connection errors are tracked via the devel console
+            # anyways and when the test execution is over this kind of error is expected
             next if ($msg =~ qr/ws\-proxy.*Close received/);
-   # FIXME: find the reason why Chromium says we're trying to send something over an already closed WebSocket connection
-            next if ($msg =~ qr/Data frame received after close/);
+
+            # ignore "connection establishment" ws errors in ws_console.js; the ws server might just not be running yet
+            # and ws_console.js will retry
+            next if ($msg =~ qr/ws_console.*Error in connection establishment/);    # uncoverable statement
+
+            # FIXME: find the reason why Chromium says we are trying to send something over an already closed
+            # WebSocket connection
+            next if ($msg =~ qr/Data frame received after close/);    # uncoverable statement
         }
         push(@errors, $log_entry);
     }
 
     if (@errors) {
-        diag('javascript console output: ' . pp(\@errors));
-        ok(scalar @errors eq 0, 'no errors or warnings on javascript console' . $test_name_suffix);
+        diag('javascript console output' . $test_name_suffix . ': ' . pp(\@errors));
     }
-    return scalar @errors eq 0;    #TODO: fix this return value
+    return scalar @errors eq 0;
 }
 
 # mocks the specified JavaScript functions (reverted when navigating to another page)
@@ -264,7 +267,7 @@ sub element_visible {
     is(scalar @elements, 1, $selector . ' present exactly once');
 
     my $element = $elements[0];
-    ok($element, $selector . ' exists') or return;
+    ok($element,                 $selector . ' exists') or return;
     ok($element->is_displayed(), $selector . ' visible');
 
     # assert the element's text
@@ -306,8 +309,8 @@ sub element_not_present {
 
 sub wait_until {
     my ($check_function, $check_description, $timeout, $check_interval) = @_;
-    $timeout        //= 10;
-    $check_interval //= 0.2;
+    $timeout        //= 100;
+    $check_interval //= .1;
 
     while (1) {
         if ($check_function->()) {
@@ -315,11 +318,11 @@ sub wait_until {
             return 1;
         }
         if ($timeout <= 0) {
-            fail($check_description);
-            return 0;
+            fail($check_description);    # uncoverable statement
+            return 0;                    # uncoverable statement
         }
         $timeout -= $check_interval;
-        sleep $check_interval;
+        wait_for_ajax(msg => $check_description) or sleep $check_interval;
     }
 }
 
@@ -335,6 +338,29 @@ sub wait_until_element_gone {
     );
 }
 
+sub wait_for_element {
+    my (%args)                = @_;
+    my $selector              = $args{selector};
+    my $expected_is_displayed = $args{is_displayed};
+
+    my $element;
+    wait_until(
+        sub {
+            my @elements = $_driver->find_elements($selector);
+            if (scalar @elements >= 1
+                && (!defined $expected_is_displayed || $elements[0]->is_displayed == $expected_is_displayed))
+            {
+                $element = $elements[0];
+            }
+            return defined $element;
+        },
+        $args{description} // ($selector . ' present'),
+        $args{timeout},
+        $args{check_interval},
+    );
+    return $element;
+}
+
 sub kill_driver() {
     return unless $startingpid && $$ == $startingpid;
     if ($_driver) {
@@ -342,15 +368,13 @@ sub kill_driver() {
         $_driver->shutdown_binary;
         $_driver = undef;
     }
-    if ($mojopid) {
-        kill('TERM', $mojopid);
-        waitpid($mojopid, 0);
-        $mojopid = undef;
+    if ($webapi) {
+        $webapi->signal('TERM');
+        $webapi->finish;
     }
-    if ($gru_pid) {
-        kill('TERM', $gru_pid);
-        waitpid($gru_pid, 0);
-        $gru_pid = undef;
+    if ($gru) {
+        $gru->signal('TERM');
+        $gru->finish;
     }
 }
 

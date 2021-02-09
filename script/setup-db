@@ -1,0 +1,9 @@
+#!/bin/sh -e
+[ "$1" = "-h" ] || [ "$1" = "--help" ] && echo "Create local database with user for a local openQA instance" && exit
+
+dbuser="${1:-"geekotest"}"
+dbname="${2:-"openqa"}"
+# prevent "could not change directory, permission denied"
+cd "$HOME"
+psql -t -c '\du' | grep -q "$dbuser" || createuser -D "$dbuser"
+psql -l -t | grep -q "$dbname" || createdb -O "$dbuser" "$dbname"

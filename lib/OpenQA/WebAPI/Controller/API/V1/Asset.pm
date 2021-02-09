@@ -18,7 +18,6 @@ use Mojo::Base 'Mojolicious::Controller';
 
 use DBIx::Class::ResultClass::HashRefInflator;
 use OpenQA::Utils;
-use OpenQA::IPC;
 
 =pod
 
@@ -51,28 +50,12 @@ sub register {
 
     my $type = $self->param('type');
     my $name = $self->param('name');
-    return $self->render(
-        json => {
-            error => 'type and name must not be empty'
-        },
-        status => 400,
-    ) unless $type && $name;
 
-    my $asset = $self->app->schema->resultset('Assets')->register($type, $name);
-    return $self->render(
-        json => {
-            error => 'registering asset failed',
-        },
-        status => 400
-    ) unless $asset;
+    my $asset = $self->schema->resultset('Assets')->register($type, $name);
+    return $self->render(json => {error => 'registering asset failed'}, status => 400) unless $asset;
 
     $self->emit_event('openqa_asset_register', {id => $asset->id, type => $type, name => $name});
-    $self->render(
-        json => {
-            id => $asset->id,
-        },
-        status => 200,
-    );
+    $self->render(json => {id => $asset->id}, status => 200);
 }
 
 =over 4
@@ -88,7 +71,7 @@ as its id, name, timestamp of creation and type is included.
 
 sub list {
     my $self   = shift;
-    my $schema = $self->app->schema;
+    my $schema = $self->schema;
 
     my $rs = $schema->resultset("Assets")->search();
     $rs->result_class('DBIx::Class::ResultClass::HashRefInflator');
@@ -99,11 +82,7 @@ sub trigger_cleanup {
     my ($self) = @_;
 
     my $res = $self->gru->enqueue_limit_assets();
-    $self->render(
-        json => {
-            status => 'ok',
-            gru_id => $res->{gru_id},
-        });
+    $self->render(json => {status => 'ok', gru_id => $res->{gru_id}});
 }
 
 =over 4
@@ -120,16 +99,11 @@ on success and of 404 on error.
 
 sub get {
     my $self   = shift;
-    my $schema = $self->app->schema;
+    my $schema = $self->schema;
 
     my %args;
     for my $arg (qw(id type name)) {
         $args{$arg} = $self->stash($arg) if defined $self->stash($arg);
-    }
-
-    if (defined $args{id} && $args{id} !~ /^\d+$/) {
-        $self->render(json => {}, status => 404);
-        return;
     }
 
     my $rs = $schema->resultset("Assets")->search(\%args);
@@ -162,31 +136,19 @@ sub delete {
         $args{$arg} = $self->stash($arg) if defined $self->stash($arg);
     }
 
-    my %cond;
-    my %attrs;
-
-    if (defined $args{id}) {
-        if ($args{id} !~ /^\d+$/) {
-            $self->render(json => {}, status => 404);
-            return;
-        }
-        $cond{id} = $args{id};
+    my $asset = $self->schema->resultset("Assets")->search(\%args);
+    return $self->render(
+        json =>
+          {error => 'The asset might have already been removed and only the cached view has not been updated yet.'},
+        status => 404
+    ) if $asset->count == 0;
+    my $rs;
+    eval { $rs = $asset->delete_all };
+    if ($@) {
+        return $self->render(json => {error => $@}, status => 409);
     }
-    elsif (defined $args{type} && defined $args{name}) {
-        $cond{name} = $args{name};
-        $cond{type} = $args{type};
-    }
-    else {
-        return;
-    }
-
-    my $asset = $self->app->schema->resultset("Assets")->search(\%cond, \%attrs);
-    return unless $asset;
-    my $rs = $asset->delete_all;
     $self->emit_event('openqa_asset_delete', \%args);
-
-    $self->render(json => {count => $rs});
+    $self->render(json => {count => $rs}, status => 200);
 }
 
 1;
-# vim: set sw=4 et:

@@ -1,3 +1,6 @@
+use strict;
+use warnings;
+
 [
     Assets => {
         type => 'iso',
@@ -29,7 +32,7 @@
         id          => 1001,
         name        => 'opensuse',
         sort_order  => 0,
-        description => "##Test description\n\nwith bugref bsc#1234",
+        description => "## Test description\n\nwith bugref bsc#1234",
     },
     JobGroups => {
         id         => 1002,
@@ -54,25 +57,27 @@
         group_id => 1001,
         priority => 56,
         result   => "incomplete",
+        reason   => 'just a test',
         settings => [
             {key => 'DESKTOP',     value => 'minimalx'},
             {key => 'ISO',         value => 'openSUSE-Factory-staging_e-x86_64-Build87.5011-Media.iso'},
             {key => 'ISO_MAXSIZE', value => 737280000},
             {key => 'ISO_1',       value => 'openSUSE-Factory-staging_e-x86_64-Build87.5011-Media.iso'}
         ],
-        ARCH    => 'x86_64',
-        BUILD   => '87.5011',
-        DISTRI  => 'opensuse',
-        FLAVOR  => 'staging_e',
-        TEST    => 'minimalx',
-        VERSION => 'Factory',
-        MACHINE => '32bit',
-        state   => "done",
+        ARCH       => 'x86_64',
+        BUILD      => '87.5011',
+        DISTRI     => 'opensuse',
+        FLAVOR     => 'staging_e',
+        TEST       => 'minimalx',
+        VERSION    => 'Factory',
+        MACHINE    => '32bit',
+        result_dir => '00099926-opensuse-Factory-staging_e-x86_64-Build87.5011-minimalx',
+        state      => "done",
         # One hour ago
         t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 3600, 'UTC'),
         # Two hours ago
-        t_started => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
-        t_created => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
+        t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
+        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
         jobs_assets => [{asset_id => 4},]
 
     },
@@ -84,7 +89,6 @@
         state    => "scheduled",
         # Two hours ago
         t_created  => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
-        backend    => 'qemu',
         t_finished => undef,
         t_started  => undef,
         TEST       => "RAID0",
@@ -114,7 +118,6 @@
         t_created  => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
         t_finished => undef,
         t_started  => undef,
-        backend    => 'qemu',
         TEST       => "RAID1",
         FLAVOR     => 'DVD',
         BUILD      => '0091',
@@ -140,7 +143,7 @@
         state       => "done",
         t_finished  => time2str('%Y-%m-%d %H:%M:%S', time - 536400, 'UTC'),    # 149 hours ago
         t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 540000, 'UTC'),    # 150 hours ago
-        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),      # Two hours ago
+        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200,   'UTC'),    # Two hours ago
         TEST        => "kde",
         jobs_assets => [{asset_id => 1},],
         ARCH        => 'i586',
@@ -167,7 +170,7 @@
         t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 3600, 'UTC'),
         # Two hours ago
         t_started => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
-        # One hours ago
+        # One hour ago
         t_created  => time2str('%Y-%m-%d %H:%M:%S', time - 3600, 'UTC'),
         TEST       => "doc",
         ARCH       => 'x86_64',
@@ -176,14 +179,14 @@
         BUILD      => '0048',
         DISTRI     => 'opensuse',
         MACHINE    => '64bit',
-        backend    => 'qemu',
         result_dir => '00099938-opensuse-Factory-DVD-x86_64-Build0048-doc',
         settings   => [
             {key => 'DVD',         value => '1'},
             {key => 'DESKTOP',     value => 'kde'},
             {key => 'ISO_MAXSIZE', value => '4700372992'},
             {key => 'ISO',         value => 'openSUSE-Factory-DVD-x86_64-Build0048-Media.iso'},
-            {key => 'QEMUCPU',     value => 'qemu64'}]
+            {key => 'QEMUCPU',     value => 'qemu64'},
+            {key => 'FOO',         value => 'foo/foo.txt'}]
     },
     Jobs => {
         id       => 99936,
@@ -198,7 +201,6 @@
         TEST       => "kde",
         ARCH       => 'x86_64',
         VERSION    => 'Factory',
-        backend    => 'qemu',
         FLAVOR     => 'DVD',
         BUILD      => '0048',
         DISTRI     => 'opensuse',
@@ -227,7 +229,6 @@
         TEST      => "kde",
         ARCH      => 'x86_64',
         VERSION   => 'Factory',
-        backend   => 'qemu',
         FLAVOR    => 'DVD',
         BUILD     => '0048',
         DISTRI    => 'opensuse',
@@ -262,7 +263,6 @@
         BUILD      => '0048@0815',
         DISTRI     => 'opensuse',
         MACHINE    => '64bit',
-        backend    => 'qemu',
         result_dir => '00099938-opensuse-Factory-DVD-x86_64-Build0048-doc',
         settings   => [
             {key => 'DVD',         value => '1'},
@@ -290,10 +290,14 @@
         BUILD       => '0091',
         VERSION     => '13.1',
         MACHINE     => '32bit',
-        backend     => 'qemu',
         jobs_assets => [{asset_id => 1}, {asset_id => 5}],
         result_dir  => '00099946-opensuse-13.1-DVD-i586-Build0091-textmode',
-        settings    => [
+        # job module statistics are hard-coded in accordance with t/fixtures/05-job_modules.pl
+        passed_module_count     => 28,
+        softfailed_module_count => 1,
+        failed_module_count     => 1,
+        skipped_module_count    => 0,
+        settings                => [
             {key => 'QEMUCPU',     value => 'qemu32'},
             {key => 'DVD',         value => '1'},
             {key => 'VIDEOMODE',   value => 'text'},
@@ -310,10 +314,9 @@
         priority    => 35,
         result      => "passed",
         state       => "done",
-        backend     => 'qemu',
         t_finished  => time2str('%Y-%m-%d %H:%M:%S', time - 14400, 'UTC'),    # Four hour ago
         t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 18000, 'UTC'),    # Five hours ago
-        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),     # Two hours ago
+        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200,  'UTC'),    # Two hours ago
         TEST        => "textmode",
         FLAVOR      => 'DVD',
         DISTRI      => 'opensuse',
@@ -337,10 +340,9 @@
         priority    => 35,
         result      => "softfailed",
         state       => "done",
-        backend     => 'qemu',
         t_finished  => time2str('%Y-%m-%d %H:%M:%S', time - 14400, 'UTC'),    # Four hours ago
         t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 18000, 'UTC'),    # Five hours ago
-        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),     # Two hours ago
+        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200,  'UTC'),    # Two hours ago
         TEST        => "textmode",
         FLAVOR      => 'DVD',
         DISTRI      => 'opensuse',
@@ -363,10 +365,9 @@
         priority    => 35,
         result      => "passed",
         state       => "done",
-        backend     => 'qemu',
-        t_finished  => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),     # Two hours ago
+        t_finished  => time2str('%Y-%m-%d %H:%M:%S', time - 7200,  'UTC'),    # Two hours ago
         t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 14300, 'UTC'),    # Three hours ago
-        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 3600, 'UTC'),     # One hour ago
+        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 3600,  'UTC'),    # One hour ago
         TEST        => "textmode",
         FLAVOR      => 'DVD',
         DISTRI      => 'opensuse',
@@ -390,7 +391,7 @@
         result      => "none",
         state       => "running",
         t_finished  => undef,
-        t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 600, 'UTC'),     # 10 minutes ago
+        t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 600,  'UTC'),    # 10 minutes ago
         t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),    # Two hours ago
         TEST        => "kde",
         BUILD       => '0091',
@@ -398,7 +399,6 @@
         FLAVOR      => 'DVD',
         MACHINE     => '64bit',
         VERSION     => '13.1',
-        backend     => 'qemu',
         jobs_assets => [{asset_id => 2},],
         ARCH        => 'x86_64',
         settings    => [
@@ -418,14 +418,13 @@
         state       => "done",
         t_finished  => time2str('%Y-%m-%d %H:%M:%S', time - 10800, 'UTC'),    # Three hour ago
         t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 14400, 'UTC'),    # Four hours ago
-        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),     # Two hours ago
+        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7200,  'UTC'),    # Two hours ago
         TEST        => "kde",
         BUILD       => '0091',
         DISTRI      => 'opensuse',
         FLAVOR      => 'DVD',
         MACHINE     => '64bit',
         VERSION     => '13.1',
-        backend     => 'qemu',
         jobs_assets => [{asset_id => 2},],
         ARCH        => 'x86_64',
         result_dir  => '00099962-opensuse-13.1-DVD-x86_64-Build0091-kde',
@@ -472,7 +471,6 @@
         result     => "none",
         state      => "running",
         t_finished => undef,
-        backend    => 'qemu',
         # 10 minutes ago
         t_started => time2str('%Y-%m-%d %H:%M:%S', time - 600, 'UTC'),
         # Two hours ago
@@ -501,14 +499,13 @@
         state       => "done",
         t_finished  => time2str('%Y-%m-%d %H:%M:%S', time - 542400, 'UTC'),    # 149 hours ago
         t_started   => time2str('%Y-%m-%d %H:%M:%S', time - 546000, 'UTC'),    # 150 hours ago
-        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7800, 'UTC'),      # Two hours ago
+        t_created   => time2str('%Y-%m-%d %H:%M:%S', time - 7800,   'UTC'),    # Two hours ago
         TEST        => "console tests",
         BUILD       => '0091',
         DISTRI      => 'opensuse',
         FLAVOR      => 'DVD',
         MACHINE     => '64bit',
         VERSION     => '13.1',
-        backend     => 'qemu',
         jobs_assets => [{asset_id => 2},],
         ARCH        => 'x86_64',
         settings    => [
@@ -520,4 +517,3 @@
         result_dir => '00099764-opensuse-13.1-DVD-x86_64-Build0091-kde',
     },
 ]
-# vim: set sw=4 et:

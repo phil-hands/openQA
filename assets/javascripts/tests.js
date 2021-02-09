@@ -11,12 +11,12 @@ function removeClassFromArray(data, theclass) {
     for (i = 0; i < data.length; ++i) $("#job_" + data[i]).removeClass(theclass);
 }
 
-function highlightJobs () {
+function highlightJobs() {
     addClassToArray($(this).data('children'), 'highlight_child');
     addClassToArray($(this).data('parents'), 'highlight_parent');
 }
 
-function unhighlightJobs( children, parents ) {
+function unhighlightJobs(children, parents) {
     if (document.activeElement == this) {
         return;
     }
@@ -24,7 +24,7 @@ function unhighlightJobs( children, parents ) {
     removeClassFromArray($(this).data('parents'), 'highlight_parent');
 }
 
-function highlightJobsHtml (children, parents) {
+function highlightJobsHtml(children, parents) {
     return ' data-children="[' + children.toString() + ']" data-parents="[' + parents.toString() + ']" class="parent_child"';
 }
 
@@ -71,6 +71,8 @@ function renderTestName(data, type, row) {
         } else {
             html += '<i class="status fa fa-circle state_scheduled" title="Scheduled"></i>';
         }
+    } else if (row.state === 'assigned') {
+        html += '<i class="status fa fa-circle state_running" title="Assigned"></i>';
     } else {
         html += '<i class="status fa fa-circle state_running" title="Running"></i>';
     }
@@ -79,23 +81,14 @@ function renderTestName(data, type, row) {
 
     var deps = row.deps;
     if (deps) {
-        var parents = deps.parents;
-        var children = deps.children;
-        var depsTooltip = [];
-        depsTooltip.quantify = function(quandity, singular, plural) {
-            if (quandity) {
-                this.push([quandity, quandity === 1 ? singular : plural].join(' '));
-            }
-        };
-        depsTooltip.quantify(parents.Chained.length, 'chained parent', 'chained parents');
-        depsTooltip.quantify(parents.Parallel.length, 'parallel parent', 'parallel parents');
-        depsTooltip.quantify(children.Chained.length, 'chained child', 'chained children');
-        depsTooltip.quantify(children.Parallel.length, 'parallel child', 'parallel children');
-        if (depsTooltip.length) {
-            html += ' <a href="/tests/' + row.id + '" title="' + depsTooltip.join(', ') + '"' +
-                highlightJobsHtml(children.Parallel.concat(children.Chained), parents.Parallel.concat(parents.Chained)) +
+        var dependencyResult = showJobDependency(deps);
+        var dependencyHtml = '';
+        if (dependencyResult.title !== undefined) {
+            dependencyHtml = ' <a href="/tests/' + row.id + '" title="' + dependencyResult.title + '"' +
+                highlightJobsHtml(dependencyResult['data-children'], dependencyResult['data-parents']) +
                 '><i class="fa fa-code-branch"></i></a>';
         }
+        html += dependencyHtml;
     }
     if (row.comment_count) {
         html += ' <a href="/tests/' + row.id + '#comments"><i class="test-label label_comment fa fa-comment" title="' +
@@ -110,13 +103,12 @@ function renderTestName(data, type, row) {
 
 function renderTimeAgo(data, type, row, position, notAvailableMessage) {
     var haveData = data && data !== 'Z';
-    if(type === 'display') {
+    if (type === 'display') {
         return (haveData ?
             ('<span title="' + data + '">' + jQuery.timeago(data) + '</span>') :
             (notAvailableMessage ? notAvailableMessage : 'not yet'));
-    } else {
-        return haveData ? data : 0;
     }
+    return haveData ? data : 'Z-9999-12-31';
 }
 
 function renderTimeAgoForFinished(data, type, row, position) {
@@ -128,7 +120,7 @@ function renderProgress(data, type, row) {
     if (type !== 'display') {
         return progress ? progress : 0;
     }
-    var progressText = progress === undefined ? 'running' : (progress + ' %');
+    var progressText = progress === undefined ? row.state : (progress + ' %');
     var progressClass = progress === undefined ? 'progress-bar progress-bar-striped active' : 'progress-bar';
     var progressWidth = progress === undefined ? 100 : progress;
     var progressBar = '<div class="' + progressClass + '" role="progressbar" style="width: ' + progressWidth +
@@ -155,9 +147,11 @@ function renderPriority(data, type, row) {
 function increaseJobPrio(jobId, linkElement) {
     changeJobPrio(jobId, 10, linkElement);
 }
+
 function decreaseJobPrio(jobId, linkElement) {
     changeJobPrio(jobId, -10, linkElement);
 }
+
 function changeJobPrio(jobId, delta, linkElement) {
     var prioValueElement = $(linkElement).parent().find('.prio-value');
     var currentPrio = parseInt(prioValueElement.text());
@@ -179,39 +173,37 @@ function changeJobPrio(jobId, delta, linkElement) {
     });
 }
 
-function renderTestResult( data, type, row ) {
+function renderTestSummary(data) {
+    var html = (data.passed || 0) + "<i class='fa module_passed fa-star' title='modules passed'></i>";
+    if (data.softfailed)
+        html += " " + data.softfailed + "<i class='fa module_softfailed fa-star-half' title='modules with warnings'></i>";
+    if (data.failed)
+        html += " " + data.failed + "<i class='far module_failed fa-star' title='modules failed'></i>";
+    if (data.none)
+        html += " " + data.none + "<i class='fa module_none fa-ban' title='modules skipped'></i>";
+    if (data.skipped)
+        html += " " + data.skipped + "<i class='fa module_skipped fa-angle-double-right' title='modules externally skipped'></i>";
+    return html;
+}
+
+function renderTestResult(data, type, row) {
     if (type !== 'display') {
         return (parseInt(data.passed) * 10000) + (parseInt(data.softfailed) * 100) + parseInt(data.failed);
     }
 
     var html = '';
     if (row.state === 'done') {
-        html += data.passed + "<i class='fa module_passed fa-star' title='modules passed'></i>";
-        if (data.softfailed) {
-            html += " " + data.softfailed + "<i class='fa module_softfailed fa-star-half' title='modules with warnings'></i>";
-        }
-        if (data.failed) {
-            html += " " + data.failed + "<i class='far module_failed fa-star' title='modules failed'></i>";
-        }
-        if (data.none) {
-            html += " " + data.none + "<i class='fa module_none fa-ban' title='modules skipped'></i>";
-        }
-        if (data.skipped) {
-            html += " " + data.skipped + "<i class='fa module_skipped fa-angle-double-right' title='modules externally skipped'></i>";
-        }
-    }
-    if (row.state === 'cancelled') {
+        html += renderTestSummary(data);
+    } else if (row.state === 'cancelled') {
         html += "<i class='fa fa-times' title='canceled'></i>";
     }
-    if (row.deps.parents.Parallel.length + row.deps.parents.Chained.length > 0) {
-        if (row.result === 'skipped' || row.result === 'parallel_failed') {
-            html += " <i class='fa fa-unlink' title='dependency failed'></i>";
-        }
-        else {
-            html += " <i class='fa fa-link' title='dependency passed'></i>";
-        }
+    var dependencyResultHtml = '';
+    if (row.deps.has_parents) {
+        dependencyResultHtml = row.deps.parents_ok ?
+            " <i class='fa fa-link' title='dependency passed'></i>" :
+            " <i class='fa fa-unlink' title='dependency failed'></i>";
     }
-    return '<a href="/tests/' + row.id + '">' + html + '</a>';
+    return '<a href="/tests/' + row.id + '">' + html + dependencyResultHtml + '</a>';
 }
 
 function renderTestLists() {
@@ -247,23 +239,22 @@ function renderTestLists() {
             { data: "progress" },
             { data: "testtime" },
         ],
-        columnDefs: [
-            { targets: 0,
-              className: "name",
-              render: renderMediumName
-            },
-            { targets: 1,
-              className: "test",
-              render: renderTestName
-            },
-            { targets: 2,
-              render: renderProgress
-            },
-            { targets: 3,
-              className: "time",
-              render: renderTimeAgo
-            },
-        ],
+        columnDefs: [{
+            targets: 0,
+            className: "name",
+            render: renderMediumName
+        }, {
+            targets: 1,
+            className: "test",
+            render: renderTestName
+        }, {
+            targets: 2,
+            render: renderProgress
+        }, {
+            targets: 3,
+            className: "time",
+            render: renderTimeAgo
+        }, ],
     });
     var scheduledTable = $('#scheduled').DataTable({
         order: [], // no initial resorting
@@ -292,26 +283,28 @@ function renderTestLists() {
             { data: "prio" },
             { data: "testtime" },
         ],
-        columnDefs: [
-            { targets: 0,
-              className: "name",
-              render: renderMediumName
-            },
-            { targets: 1,
-              className: "test",
-              render: renderTestName
-            },
-            { targets: 2,
-              render: renderPriority
-            },
-            { targets: 3,
-              className: "time",
-              render: renderTimeAgo
-            },
-        ],
+        columnDefs: [{
+            targets: 0,
+            className: "name",
+            render: renderMediumName
+        }, {
+            targets: 1,
+            className: "test",
+            render: renderTestName
+        }, {
+            targets: 2,
+            render: renderPriority
+        }, {
+            targets: 3,
+            className: "time",
+            render: renderTimeAgo
+        }, ],
     });
     var table = $('#results').DataTable({
-        lengthMenu: [[10, 25, 50], [10, 25, 50]],
+        lengthMenu: [
+            [10, 25, 50],
+            [10, 25, 50]
+        ],
         ajax: {
             url: "/tests/list_ajax",
             data: function() {
@@ -331,23 +324,22 @@ function renderTestLists() {
             { data: "result_stats" },
             { data: "testtime" },
         ],
-        columnDefs: [
-            { targets: 0,
-              className: "name",
-              render: renderMediumName
-            },
-            { targets: 1,
-              className: "test",
-              render: renderTestName
-            },
-            { targets: 2,
-              render: renderTestResult
-            },
-            { targets: 3,
-              className: "time",
-              render: renderTimeAgoForFinished
-            },
-        ]
+        columnDefs: [{
+            targets: 0,
+            className: "name",
+            render: renderMediumName
+        }, {
+            targets: 1,
+            className: "test",
+            render: renderTestName
+        }, {
+            targets: 2,
+            render: renderTestResult
+        }, {
+            targets: 3,
+            className: "time",
+            render: renderTimeAgoForFinished
+        }, ]
     });
 
     // register event listener to the two range filtering inputs to redraw on input
@@ -355,7 +347,7 @@ function renderTestLists() {
         $('#relevantbox').css('color', 'cyan');
         table.ajax.reload(function() {
             $('#relevantbox').css('color', 'inherit');
-        } );
+        });
     });
 
     // initialize filter for result (of finished jobs) as chosen
@@ -410,11 +402,19 @@ function renderTestLists() {
 }
 
 function setupTestButtons() {
-    $(document).on("click", '.restart', function(event) {
+    $(document).on('click', '.restart', function(event) {
         event.preventDefault();
-        $.post($(this).attr("href")).done( function( data, res, xhr ) {
-            var urls = xhr.responseJSON.test_url[0];
-            $.each( urls , function( key, value ) {
+        var restartLink = this;
+        $.post(restartLink.href).done(function(data, res, xhr) {
+            var responseJSON = xhr.responseJSON;
+            var flashTarget = $('#flash-messages-finished-jobs');
+            if (typeof responseJSON !== 'object' || !Array.isArray(responseJSON.test_url)) {
+                addFlash('danger', '<strong>Unable to restart job.</strong>', flashTarget);
+                return;
+            }
+            showJobRestartResults(responseJSON, undefined, forceJobRestartViaRestartLink.bind(undefined, restartLink), flashTarget);
+            var urls = responseJSON.test_url[0];
+            $.each(urls, function(key, value) {
                 // Skip to mark the job that is not shown in current page
                 if (!$('#job_' + key).length) {
                     return true;
@@ -432,14 +432,14 @@ function setupTestButtons() {
         event.preventDefault();
         var cancel_link = $(this);
         var test = $(this).parent('td');
-        $.post(cancel_link.attr("href")).done( function( data ) { $(test).append(' (cancelled)'); });
+        $.post(cancel_link.attr("href")).done(function(data) { $(test).append(' (cancelled)'); });
         var i = $(this).find('i').removeClass('fa-times-circle');
         $(this).replaceWith(i);
     });
 }
 
 function setupResultButtons() {
-    $('#restart-result').click( function(event) {
+    $('#restart-result').click(function(event) {
         event.preventDefault();
         restartJob($(this).attr('href'), $(this).data('jobid'));
         // prevent posting twice by clicking #restart-result
@@ -486,4 +486,30 @@ function setupLazyLoadingFailedSteps() {
             this.hasFailedSteps = false;
         });
     });
+}
+
+function showJobDependency(deps) {
+    var parents = deps.parents;
+    var children = deps.children;
+    var depsTooltip = [];
+    var result = {};
+    depsTooltip.quantify = function(quantity, singular, plural) {
+        if (quantity) {
+            this.push([quantity, quantity === 1 ? singular : plural].join(' '));
+        }
+    };
+    depsTooltip.quantify(parents.Chained.length, 'chained parent', 'chained parents');
+    depsTooltip.quantify(parents['Directly chained'].length, 'directly chained parent', 'directly chained parents');
+    depsTooltip.quantify(parents.Parallel.length, 'parallel parent', 'parallel parents');
+    depsTooltip.quantify(children.Chained.length, 'chained child', 'chained children');
+    depsTooltip.quantify(children['Directly chained'].length, 'directly chained child', 'directly chained children');
+    depsTooltip.quantify(children.Parallel.length, 'parallel child', 'parallel children');
+    if (depsTooltip.length) {
+        var childrenToHighlight = children.Parallel.concat(children.Chained, children['Directly chained']);
+        var parentsToHighlight = parents.Parallel.concat(parents.Chained, parents['Directly chained']);
+        result.title = depsTooltip.join(', ');
+        result['data-children'] = childrenToHighlight;
+        result['data-parents'] = parentsToHighlight;
+    }
+    return result;
 }

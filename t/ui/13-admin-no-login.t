@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2018 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2018-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,42 +12,61 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-use Mojo::Base -strict;
-
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 
-use Test::More;
-use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '18';
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 
 my $test_case = OpenQA::Test::Case->new;
-$test_case->init_data;
+$test_case->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl 04-products.pl');
 
-plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver();
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
 
-# First page without login
-$driver->title_is("openQA");
+$driver->title_is('openQA');
 
-# Test suites without login
-is $driver->get('/admin/test_suites'), 1, 'opened test suites';
-$driver->title_is('openQA: Test suites');
-like $driver->find_element('#test-suites tbody tr.odd td')->get_text(),  qr/textmode/, 'first entry';
-like $driver->find_element('#test-suites tbody tr.even td')->get_text(), qr/kde/,      'second entry';
-like $driver->find_element('#test-suites tbody tr.even td:nth-child(3)')->get_text(),
-  qr/Simple kde test, before advanced_kde/,
-  'second entry has a description';
-like $driver->find_element('#test-suites tbody tr:last-child td')->get_text(), qr/advanced_kde/, 'last entry';
+subtest 'Test suites without login' => sub {
+    is $driver->get('/admin/test_suites'), 1, 'opened test suites';
+    $driver->title_is('openQA: Test suites');
+    wait_for_ajax(msg => 'Wait for test suites table');
+    like($driver->find_element('#test-suites tbody tr:nth-child(2) td')->get_text(), qr/advanced_kde/, '2nd entry');
+    like($driver->find_element('#test-suites tbody tr:nth-child(5) td')->get_text(), qr/kde/,          '5th entry');
+    my $description = $driver->find_element('#test-suites tbody tr:nth-child(5) td:nth-child(3)')->get_text();
+    like($description, qr/Simple kde test, before advanced_kde/, '5th entry has a description');
+    like($driver->find_element('#test-suites tbody tr:last-child td')->get_text(), qr/textmode/, 'last entry');
+};
+
+subtest 'Test suites can be searched' => sub {
+    $driver->get('/admin/test_suites?q=client2');
+    wait_for_ajax(msg => 'Wait for test suites table search result');
+    like($driver->find_element('#test-suites tbody tr:first-child td')->get_text(), qr/client2/, 'first entry');
+};
+
+subtest Products => sub {
+    $driver->get('/admin/products');
+    wait_for_ajax(msg => 'Wait for products table');
+    like($driver->find_element('#products tbody tr:first-child td')->get_text(), qr/opensuse/, 'first product entry');
+
+    $driver->get('/admin/products?q=sle');
+    wait_for_ajax(msg => 'Wait for products table search result');
+    like($driver->find_element('#products tbody tr:first-child td')->get_text(), qr/sle/, 'product search entry');
+};
+
+subtest Machines => sub {
+    $driver->get('/admin/machines');
+    wait_for_ajax(msg => 'Wait for machines table');
+    like($driver->find_element('#machines tbody tr:first-child td')->get_text(), qr/32bit/, 'first machine entry');
+
+    $driver->get('/admin/machines?q=laptop');
+    wait_for_ajax(msg => 'Wait for machines table search result');
+    like($driver->find_element('#machines tbody tr:first-child td')->get_text(), qr/Laptop_64/, 'machine search entry');
+};
 
 kill_driver();
 done_testing();

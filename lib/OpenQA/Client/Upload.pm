@@ -1,4 +1,4 @@
-# Copyright (C) 2018 SUSE Linux Products GmbH
+# Copyright (C) 2018 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,16 +11,15 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Client::Upload;
 use Mojo::Base 'OpenQA::Client::Handler';
 
-use Mojo::Exception;
 use OpenQA::File;
-use Carp 'croak';
+use Carp qw(croak);
 use Mojo::Asset::Memory;
+use Mojo::File qw(path);
 
 has max_retrials => 5;
 
@@ -38,7 +37,22 @@ sub asset {
 
     my $uri = "jobs/$job_id";
     $opts->{asset} //= 'public';
-    my $file_name  = (!$opts->{name}) ? path($opts->{file})->basename : $opts->{name};
+    my $file_name = (!$opts->{name}) ? path($opts->{file})->basename : $opts->{name};
+
+    # Worker and WebUI are on the same host (much faster)
+    if ($opts->{local} && $self->is_local) {
+        $self->emit('upload_local.prepare');
+        my $res = $self->client->start(
+            $self->_build_post(
+                "$uri/artefact" => {
+                    file  => {filename => $file_name, content => ''},
+                    asset => $opts->{asset},
+                    local => "$opts->{file}"
+                }));
+        $self->emit('upload_local.response' => $res);
+        return undef;
+    }
+
     my $chunk_size = $opts->{chunk_size} // 1000000;
     my $pieces     = OpenQA::File->new(file => Mojo::File->new($opts->{file}))->split($chunk_size);
     $self->emit('upload_chunk.prepare' => $pieces);
@@ -72,9 +86,9 @@ sub asset {
             };
             $self->emit('upload_chunk.fail' => $res => $_) if $done == 0;
 
-            $trial-- if $trial > 0;
+            $trial--                                              if $trial > 0;
             $self->emit('upload_chunk.request_err' => $res => $@) if $@;
-            $e = $@ || $res if $trial == 0 && $done == 0;
+            $e = $@ || $res                                       if $trial == 0 && $done == 0;
         } until ($trial == 0 || $done);
 
         $failed++ if $trial == 0 && $done == 0;

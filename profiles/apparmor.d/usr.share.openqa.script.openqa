@@ -18,25 +18,29 @@
 
   /etc/openqa/database.ini r,
   /etc/openqa/openqa.ini r,
+  /etc/openqa/templates/ r,
+  /etc/openqa/templates/** r,
   /proc/meminfo r,
-  /tmp/** rw,
+  /tmp/** rwk,
   /usr/bin/perl ix,
   /usr/bin/ssh rcx,
+  /usr/bin/timeout rix,
   /usr/bin/unzip-plain rix,
   /usr/lib/git/git rix,
-  /usr/lib/git/git-remote rix,
   /usr/lib/git/git-add rix,
-  /usr/lib/git/git-rm rix,
-  /usr/lib/git/git-rebase rix,
   /usr/lib/git/git-commit rix,
   /usr/lib/git/git-push rix,
+  /usr/lib/git/git-rebase rix,
+  /usr/lib/git/git-remote rix,
+  /usr/lib/git/git-rm rix,
+  /usr/share/openqa/assets/** r,
   /usr/share/openqa/dbicdh/** r,
   /usr/share/openqa/lib/** r,
   /usr/share/openqa/public/** r,
-  /usr/share/openqa/assets/** r,
   /usr/share/openqa/script/openqa r,
   /usr/share/openqa/templates/ r,
   /usr/share/openqa/templates/** r,
+  /var/lib/openqa/.config/openqa/client.conf r,
   /var/lib/openqa/.gitconfig r,
   /var/lib/openqa/backlog/ r,
   /var/lib/openqa/cache/** rw,
@@ -45,6 +49,7 @@
   /var/lib/openqa/images/ r,
   /var/lib/openqa/images/** rw,
   /var/lib/openqa/pool/ r,
+  /var/lib/openqa/pool/** r,
   /var/lib/openqa/share/ r,
   /var/lib/openqa/share/factory/hdd/ rw,
   /var/lib/openqa/share/factory/hdd/* rw,
@@ -57,6 +62,7 @@
   /var/lib/openqa/share/factory/repo/ r,
   /var/lib/openqa/share/factory/repo/** rw,
   /var/lib/openqa/share/factory/tmp/ rw,
+  /var/lib/openqa/share/factory/tmp/* rw,
   /var/lib/openqa/share/factory/tmp/** rw,
   /var/lib/openqa/share/tests/ r,
   /var/lib/openqa/share/tests/** rw,
@@ -65,7 +71,8 @@
   /var/lib/openqa/testresults/** rw,
   /var/lib/openqa/webui/** rw,
   /var/log/openqa rwk,
-  /var/tmp/* rw,
+  /var/tmp/* rwk,
+  owner /var/lib/openqa/share/tests/** rwl,
 
 
   profile /usr/bin/ssh {
@@ -74,6 +81,7 @@
     #include <abstractions/nameservice>
 
     /etc/ssh/ssh_config r,
+    /etc/ssh/ssh_known_hosts r,
     /etc/ssl/openssl.cnf r,
     /proc/*/fd/ r,
     /proc/filesystems r,
@@ -81,4 +89,7 @@
     /var/lib/openqa/.ssh/* rw,
 
   }
+
+  # Site-specific additions and overrides. See local/README for details.
+  #include <local/usr.share.openqa.script.openqa>
 }

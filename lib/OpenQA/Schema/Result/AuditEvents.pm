@@ -20,8 +20,6 @@ use warnings;
 
 use base 'DBIx::Class::Core';
 
-# use db_helpers;
-
 __PACKAGE__->table('audit_events');
 __PACKAGE__->load_components(qw(Timestamps));
 __PACKAGE__->add_columns(
@@ -50,4 +48,3 @@ __PACKAGE__->set_primary_key('id');
 __PACKAGE__->belongs_to(owner => 'OpenQA::Schema::Result::Users', 'user_id', {join_type => 'left'});
 
 1;
-# vim: set sw=4 et:

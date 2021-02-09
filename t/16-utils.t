@@ -1,6 +1,5 @@
-#!/usr/bin/env perl -w
-
-# Copyright (C) 2016 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2016-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,29 +12,72 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-use strict;
-use warnings;
-
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
-use OpenQA::Utils;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
+use OpenQA::Utils qw(:DEFAULT prjdir sharedir resultdir assetdir imagesdir base_host random_string random_hex);
 use OpenQA::Test::Utils 'redirect_output';
-use Test::More;
+use OpenQA::Test::TimeLimit '10';
 use Scalar::Util 'reftype';
 use Mojo::File qw(path tempdir tempfile);
+
+subtest 'service ports' => sub {
+    local $ENV{OPENQA_BASE_PORT} = undef;
+    is service_port('webui'),         9526, 'webui port';
+    is service_port('websocket'),     9527, 'websocket port';
+    is service_port('livehandler'),   9528, 'livehandler port';
+    is service_port('scheduler'),     9529, 'scheduler port';
+    is service_port('cache_service'), 9530, 'cache service port';
+    local $ENV{OPENQA_BASE_PORT} = 9530;
+    is service_port('webui'),         9530, 'webui port';
+    is service_port('websocket'),     9531, 'websocket port';
+    is service_port('livehandler'),   9532, 'livehandler port';
+    is service_port('scheduler'),     9533, 'scheduler port';
+    is service_port('cache_service'), 9534, 'cache service port';
+    eval { service_port('unknown') };
+    like $@, qr/Unknown service: unknown/, 'unknown port';
+};
+
+subtest 'set listen address' => sub {
+    local $ENV{MOJO_LISTEN} = undef;
+    set_listen_address(9526);
+    like $ENV{MOJO_LISTEN}, qr/127\.0\.0\.1:9526/, 'address set';
+    set_listen_address(9527);
+    unlike $ENV{MOJO_LISTEN}, qr/127\.0\.0\.1:9527/, 'not changed';
+};
+
+subtest 'random number generator' => sub {
+    my $r  = random_string;
+    my $r2 = random_string;
+    is(length($r), 16, "length 16");
+    like($r, qr/^\w+$/a, "random_string only consists of word characters");
+    is(length($r), length($r2), "same length");
+    isnt($r, $r2, "random_string produces different results");
+
+    $r  = random_string 32;
+    $r2 = random_string 32;
+    is(length($r), 32, "length 32");
+    like($r, qr/^\w+$/a, "random_string only consists of word characters");
+    is(length($r), length($r2), "same length");
+    isnt($r, $r2, "random_string produces different results");
+
+    is(length(random_hex), 16, 'default length 16');
+    $r  = random_hex 97;
+    $r2 = random_hex 97;
+    is(length($r), 97, "length 97");
+    like($r, qr/^[0-9A-F]+$/a, "random_hex only consists of hex characters");
+    is(length($r), length($r2), "same length");
+    isnt($r, $r2, "random_hex produces different results");
+};
 
 is bugurl('bsc#1234'), 'https://bugzilla.suse.com/show_bug.cgi?id=1234', 'bug url is properly expanded';
 ok find_bugref('gh#os-autoinst/openQA#1234'), 'github bugref is recognized';
 is(find_bugref('bsc#1234 poo#4321'), 'bsc#1234', 'first bugres found');
 is_deeply(find_bugrefs('bsc#1234 poo#4321'), ['bsc#1234', 'poo#4321'], 'multiple bugrefs found');
-is_deeply(find_bugrefs('bc#1234 #4321'), [], 'no bugrefs found');
+is_deeply(find_bugrefs('bc#1234 #4321'),     [],                       'no bugrefs found');
 is bugurl('gh#os-autoinst/openQA#1234'),                        'https://github.com/os-autoinst/openQA/issues/1234';
 is bugurl('poo#1234'),                                          'https://progress.opensuse.org/issues/1234';
 is href_to_bugref('https://progress.opensuse.org/issues/1234'), 'poo#1234';
@@ -52,6 +94,8 @@ like bugref_to_href('boo#2345,poo#3456'),
   'interpunctation is not consumed by href';
 is bugref_to_href('jsc#SLE-3275'), '<a href="https://jira.suse.de/browse/SLE-3275">jsc#SLE-3275</a>';
 is href_to_bugref('https://jira.suse.de/browse/FOOBAR-1234'), 'jsc#FOOBAR-1234', 'jira tickets url to bugref';
+is find_bug_number('yast_roleconf-ntp-servers-empty-bsc1114818-20181115.png'), 'bsc1114818',
+  'find the bug number from the needle name';
 
 my $t3 = {
     bar => {
@@ -186,7 +230,7 @@ EOT
     # Create a valid Git repository where we can fetch the exact version.
     $head_file->spurt("7223a2408120127ad2d82d71ef1893bbe02ad8aa");
     $refs_file->spurt($refs_content);
-    is detect_current_version($git_dir), 'git-4.3-7223a240', 'detect current version from Git repository';
+    is detect_current_version($git_dir),   'git-4.3-7223a240', 'detect current version from Git repository';
     like detect_current_version($git_dir), qr/(git\-\d+\.\d+\-$sha_regex)/, 'Git version scheme matches';
 
     # If refs file can't be found or there is no tag present, version should be undef
@@ -202,11 +246,11 @@ subtest 'Plugins handling' => sub {
     is path_to_class('foo/bar/baz.pm'), "foo::bar::baz";
 
     ok grep("OpenQA::Utils", loaded_modules), "Can detect loaded modules";
-    ok grep("Test::More",    loaded_modules), "Can detect loaded modules";
+    ok grep("Test::Most",    loaded_modules), "Can detect loaded modules";
 
-    is_deeply [loaded_plugins("OpenQA::Utils", "Test::More")], ["OpenQA::Utils", "Test::More"],
+    is_deeply [loaded_plugins('OpenQA::Utils', 'Test::Most')], ['OpenQA::Utils', 'Test::Most', 'Test::Most::Exception'],
       "Can detect loaded plugins, filtering by namespace";
-    ok grep("Test::More", loaded_plugins),
+    ok grep("Test::Most", loaded_plugins),
       "loaded_plugins() behave like loaded_modules() when no arguments are supplied";
 
     my $test_hash = {
@@ -287,10 +331,54 @@ subtest parse_assets_from_settings => sub {
     is_deeply $assets, $refassets, "correct with relative UEFI_PFLASH_VARS";
 };
 
+subtest 'base_host' => sub {
+    is base_host('http://opensuse.org'),             'opensuse.org';
+    is base_host('www.opensuse.org'),                'www.opensuse.org';
+    is base_host('test'),                            'test';
+    is base_host('https://opensuse.org/test/1/2/3'), 'opensuse.org';
+};
+
+subtest 'project directory functions' => sub {
+    local $ENV{OPENQA_BASEDIR};
+    local $ENV{OPENQA_SHAREDIR};
+    is prjdir(),    '/var/lib/openqa',               'right directory';
+    is sharedir(),  '/var/lib/openqa/share',         'right directory';
+    is resultdir(), '/var/lib/openqa/testresults',   'right directory';
+    is assetdir(),  '/var/lib/openqa/share/factory', 'right directory';
+    is imagesdir(), '/var/lib/openqa/images',        'right directory';
+
+    local $ENV{OPENQA_BASEDIR} = '/tmp/test';
+    is prjdir(),    '/tmp/test/openqa',               'right directory';
+    is sharedir(),  '/tmp/test/openqa/share',         'right directory';
+    is resultdir(), '/tmp/test/openqa/testresults',   'right directory';
+    is assetdir(),  '/tmp/test/openqa/share/factory', 'right directory';
+    is imagesdir(), '/tmp/test/openqa/images',        'right directory';
+
+    local $ENV{OPENQA_SHAREDIR} = '/tmp/share';
+    is prjdir(),    '/tmp/test/openqa',             'right directory';
+    is sharedir(),  '/tmp/share',                   'right directory';
+    is resultdir(), '/tmp/test/openqa/testresults', 'right directory';
+    is assetdir(),  '/tmp/share/factory',           'right directory';
+    is imagesdir(), '/tmp/test/openqa/images',      'right directory';
+};
+
+subtest 'change_sec_to_word' => sub {
+    is change_sec_to_word(), undef, 'do pass parameter';
+    is change_sec_to_word(1.2),    undef,           'treat float as invalid parameter';
+    is change_sec_to_word('test'), undef,           'treat string as invalid parameter';
+    is change_sec_to_word(10),     '10s',           'correctly converted';
+    is change_sec_to_word(70),     '1m 10s',        'correctly converted';
+    is change_sec_to_word(900),    '15m',           'correctly converted';
+    is change_sec_to_word(3900),   '1h 5m',         'correctly converted';
+    is change_sec_to_word(7201),   '2h 1s',         'correctly converted';
+    is change_sec_to_word(64890),  '18h 1m 30s',    'correctly converted';
+    is change_sec_to_word(648906), '7d 12h 15m 6s', 'correctly converted';
+};
+
 done_testing;
 
 {
-    package foo;
+    package foo;      # uncoverable statement
     use Mojo::Base -base;
-    sub baz { @_ }
+    sub baz { @_ }    # uncoverable statement
 }

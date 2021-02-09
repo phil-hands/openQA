@@ -26,9 +26,8 @@ sub addproperty { shift->{properties}->add(OpenQA::Parser::Result::XUnit::Proper
 sub parse {
     my ($self, $xml) = @_;
     confess "No XML given/loaded" unless $xml;
-    $self->_dom(Mojo::DOM->new->xml(1)->parse($xml));
+    my $dom = Mojo::DOM->new->xml(1)->parse($xml);
 
-    my $dom = $self->_dom();
     my @tests;
     my %t_names;
     my $i = 1;
@@ -36,7 +35,7 @@ sub parse {
 
         my $result      = {};
         my $ts_category = exists $ts->{classname} ? $ts->{classname} : 'xunit';
-        my $ts_name     = exists $ts->{name} ? $ts->{name} : 'unkn';
+        my $ts_name     = exists $ts->{name}      ? $ts->{name}      : 'unkn';
 
         # We add support for this optional field :)
         my $ts_generator_script = exists $ts->{script} ? $ts->{script} : undef;
@@ -69,9 +68,9 @@ sub parse {
             });
 
         my $ts_result = 'ok';
-        $ts_result = 'fail' if ($ts->{failures} && $ts->{failures} > 0) || ($ts->{errors} && $ts->{errors} > 0);
-        $result->{result}     = $ts_result;
-        $result->{dents}      = 0;
+        $ts_result        = 'fail' if ($ts->{failures} && $ts->{failures} > 0) || ($ts->{errors} && $ts->{errors} > 0);
+        $result->{result} = $ts_result;
+        $result->{dents}  = 0;
         $result->{properties} = OpenQA::Parser::Results->new;
         my $num = 1;
         $ts->find('property')->each(sub { addproperty($result, {name => $_->{name}, value => $_->{value}}) });
@@ -90,6 +89,7 @@ sub parse {
                 $content .= "# $tc->{name}\n" if $tc->{name};
 
                 for my $out ($tc->children('skipped, passed, error, failure')->each) {
+                    $tc_result = 'fail' if ($out->tag =~ m/failure|error/);
                     $content .= "# " . $out->tag . ": \n\n";
                     $content .= $out->{message} . "\n" if $out->{message};
                     $content .= $out->text . "\n";

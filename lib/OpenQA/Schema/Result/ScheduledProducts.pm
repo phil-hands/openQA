@@ -1,4 +1,4 @@
-# Copyright (C) 2019 SUSE LLC
+# Copyright (C) 2019-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,13 +19,16 @@ use strict;
 use warnings;
 
 use base 'DBIx::Class::Core';
-use db_helpers;
 
 use DBIx::Class::Timestamps 'now';
 use File::Basename;
 use Try::Tiny;
+use OpenQA::App;
+use OpenQA::Log qw(log_debug log_warning);
 use OpenQA::Utils;
+use OpenQA::JobSettings;
 use OpenQA::JobDependencies::Constants;
+use OpenQA::Scheduler::Client;
 use Mojo::JSON qw(encode_json decode_json);
 use Carp;
 
@@ -112,6 +115,11 @@ __PACKAGE__->inflate_column(
         deflate => sub { encode_json(shift) },
     });
 
+sub to_string {
+    my ($self) = @_;
+    return join('-', grep { $_ ne '' } ($self->distri, $self->version, $self->flavor, $self->arch, $self->build));
+}
+
 sub to_hash {
     my ($self, %args) = @_;
     my %result;
@@ -183,6 +191,9 @@ sub schedule_iso {
     return $result;
 }
 
+# make sure that the DISTRI is lowercase
+sub _distri_key { lc(shift->{DISTRI}) }
+
 =over 4
 
 =item _schedule_iso()
@@ -197,7 +208,7 @@ sub _schedule_iso {
     my ($self, $args) = @_;
 
     my @notes;
-    my $gru     = $OpenQA::Utils::app->gru;
+    my $gru     = OpenQA::App->singleton->gru;
     my $schema  = $self->result_source->schema;
     my $user_id = $self->user_id;
 
@@ -206,26 +217,26 @@ sub _schedule_iso {
     for my $asset (values %{parse_assets_from_settings($args)}) {
         my ($name, $type) = ($asset->{name}, $asset->{type});
         return {error => 'Asset type and name must not be empty.'} unless $name && $type;
-        return {error => "Failed to register asset $name."} unless $assets->register($type, $name, 1);
+        return {error => "Failed to register asset $name."}        unless $assets->register($type, $name, 1);
     }
 
     # read arguments for deprioritization and obsoleten
     my $deprioritize       = delete $args->{_DEPRIORITIZEBUILD} // 0;
     my $deprioritize_limit = delete $args->{_DEPRIORITIZE_LIMIT};
-    my $obsolete           = !(delete $args->{_NO_OBSOLETE} // delete $args->{_NOOBSOLETEBUILD} // $deprioritize);
+    my $obsolete           = delete $args->{_OBSOLETE}                 // 0;
     my $onlysame           = delete $args->{_ONLY_OBSOLETE_SAME_BUILD} // 0;
+    my $skip_chained_deps  = delete $args->{_SKIP_CHAINED_DEPS}        // 0;
 
-    # Any arg name ending in _URL is special: it tells us to download
-    # the file at that URL before running the job
-    my $downloads = create_downloads_list($args);
-    my $jobs      = $self->_generate_jobs($args, \@notes);
+    my $result = $self->_generate_jobs($args, \@notes, $skip_chained_deps);
+    return {error => $result->{error_message}, error_code => $result->{error_code} // 400}
+      if defined $result->{error_message};
+    my $jobs = $result->{settings_result};
 
     # take some attributes from the first job to guess what old jobs to cancel
     # note: We should have distri object that decides which attributes are relevant here.
     if (($obsolete || $deprioritize) && $jobs && $jobs->[0] && $jobs->[0]->{BUILD}) {
         my $build = $jobs->[0]->{BUILD};
-        OpenQA::Utils::log_debug(
-            "Triggering new iso with build \'$build\', obsolete: $obsolete, deprioritize: $deprioritize");
+        log_debug("Triggering new iso with build \'$build\', obsolete: $obsolete, deprioritize: $deprioritize");
         my %cond;
         my @attrs = qw(DISTRI VERSION FLAVOR ARCH);
         push @attrs, 'BUILD' if ($onlysame);
@@ -254,28 +265,38 @@ sub _schedule_iso {
     # define function to create jobs in the database; executed as transaction
     my @successful_job_ids;
     my @failed_job_info;
+    my %tmp_downloads;
     my $create_jobs_in_database = sub {
         my $jobs_resultset = $schema->resultset('Jobs');
         my @created_jobs;
 
         # remember ids of created parents
-        my %testsuite_ids;    # key: "suite", value: {key: "machine", value: "array of job ids"}
+        my %job_ids_by_test_machine;    # key: "TEST@MACHINE", value: "array of job ids"
 
         for my $settings (@{$jobs || []}) {
             my $prio = delete $settings->{PRIO};
             $settings->{_GROUP_ID} = delete $settings->{GROUP_ID};
 
             # create a new job with these parameters and count if successful, do not send job notifies yet
-            my $job = $jobs_resultset->create_from_settings($settings, $self->id);
-            push @created_jobs, $job;
+            try {
+                # Any setting name ending in _URL is special: it tells us to download
+                # the file at that URL before running the job
+                my $download_list = create_downloads_list($settings);
+                my $job           = $jobs_resultset->create_from_settings($settings, $self->id);
+                push @created_jobs, $job;
+                my $j_id = $job->id;
+                $job_ids_by_test_machine{_settings_key($settings)} //= [];
+                push @{$job_ids_by_test_machine{_settings_key($settings)}}, $j_id;
 
-            $testsuite_ids{$settings->{TEST}}->{$settings->{MACHINE}} //= [];
-            push @{$testsuite_ids{$settings->{TEST}}->{$settings->{MACHINE}}}, $job->id;
+                # set prio if defined explicitely (otherwise default prio is used)
+                $job->update({priority => $prio}) if (defined($prio));
 
-            # set prio if defined explicitely (otherwise default prio is used)
-            $job->update({priority => $prio}) if (defined($prio));
+                $self->_create_download_lists(\%tmp_downloads, $download_list, $j_id);
+            }
+            catch {
+                push(@failed_job_info, {job_name => $settings->{TEST}, error_message => $_});
+            }
         }
-
         # keep track of ...
         my %created_jobs;       # ... for cycle detection
         my %cluster_parents;    # ... for checking wrong parents
@@ -283,7 +304,8 @@ sub _schedule_iso {
         # jobs are created, now recreate dependencies and extract ids
         for my $job (@created_jobs) {
             my $error_messages
-              = $self->_create_dependencies_for_job($job, \%testsuite_ids, \%created_jobs, \%cluster_parents);
+              = $self->_create_dependencies_for_job($job, \%job_ids_by_test_machine, \%created_jobs, \%cluster_parents,
+                $skip_chained_deps);
             if (!@$error_messages) {
                 push(@successful_job_ids, $job->id);
             }
@@ -298,24 +320,29 @@ sub _schedule_iso {
         }
 
         # log wrong parents
-        for my $parent_test_machine (keys %cluster_parents) {
-            if ($cluster_parents{$parent_test_machine} ne 'depended') {
-                my $error_msg
-                  = "$parent_test_machine has no child, check its machine placed or dependency setting typos";
-                OpenQA::Utils::log_warning($error_msg);
-                push(
-                    @failed_job_info,
-                    {
-                        job_id         => $cluster_parents{$parent_test_machine},
-                        error_messages => [$error_msg]});
-            }
+        for my $parent_test_machine (sort keys %cluster_parents) {
+            my $job_id = $cluster_parents{$parent_test_machine};
+            next if $job_id eq 'depended';
+            my $error_msg = "$parent_test_machine has no child, check its machine placed or dependency setting typos";
+            log_warning($error_msg);
+            push(
+                @failed_job_info,
+                {
+                    job_id         => $job_id,
+                    error_messages => [$error_msg]});
         }
 
         # now calculate blocked_by state
         for my $job (@created_jobs) {
             $job->calculate_blocked_by;
         }
-        $gru->enqueue_download_jobs($downloads, \@successful_job_ids);
+        my %downloads = map {
+            $_ => [
+                [keys %{$tmp_downloads{$_}->{destination}}], $tmp_downloads{$_}->{do_extract},
+                $tmp_downloads{$_}->{blocked_job_id}]
+          }
+          keys %tmp_downloads;
+        $gru->enqueue_download_jobs(\%downloads);
     };
 
     try {
@@ -323,21 +350,17 @@ sub _schedule_iso {
     }
     catch {
         my $error = shift;
-        push(@notes, "Transaction failed: $error");
+        push(@notes,           "Transaction failed: $error");
         push(@failed_job_info, map { {job_id => $_, error_messages => [$error]} } @successful_job_ids);
         @successful_job_ids = ();
     };
-
-    # enqueue cleanup task
-    $gru->enqueue_limit_assets();
-    $gru->enqueue(limit_results_and_logs => [], {priority => 5, ttl => 172800, limit => 1});
 
     # emit events
     for my $succjob (@successful_job_ids) {
         OpenQA::Events->singleton->emit_event('openqa_job_create', data => {id => $succjob}, user_id => $user_id);
     }
 
-    wakeup_scheduler;
+    OpenQA::Scheduler::Client->singleton->wakeup;
 
     my %results = (
         successful_job_ids => \@successful_job_ids,
@@ -359,19 +382,17 @@ Return settings key for given job settings. Internal method.
 
 sub _settings_key {
     my ($settings) = @_;
-    return "$settings->{TEST}:$settings->{MACHINE}";
-
+    return "$settings->{TEST}\@$settings->{MACHINE}";
 }
 
 =over 4
 
 =item _parse_dep_variable()
 
-Parse dependency variable in format like "suite1:64bit,suite2,suite3:uefi"
-and return settings arrayref for each entry. With machine explicitly defined
-that allow inter-machine dependency and without specifying machine means
-the dependency tests that are scheduled for the same machine.
-Internal method.
+Parse dependency variable in format like "suite1@64bit,suite2,suite3@uefi"
+and return settings arrayref for each entry. Defining the machine explicitly
+to make an inter-machine dependency. Otherwise the MACHINE from the settings
+is used.
 
 =back
 
@@ -381,17 +402,17 @@ sub _parse_dep_variable {
     my ($value, $settings) = @_;
 
     return unless defined $value;
-
-    my @after = split(/\s*,\s*/, $value);
-
     return map {
-        if ($_ =~ /^(.+):([^:]+)$/) {
+        if ($_ =~ /^(.+)\@([^@]+)$/) {
             [$1, $2];
+        }
+        elsif ($_ =~ /^(.+):([^:]+)$/) {
+            [$1, $2];    # for backwards compatibility
         }
         else {
             [$_, $settings->{MACHINE}];
         }
-    } @after;
+    } split(/\s*,\s*/, $value);
 }
 
 =over 4
@@ -406,7 +427,7 @@ used in B<_generate_jobs>.
 =cut
 
 sub _sort_dep {
-    my ($list) = @_;
+    my ($list, $skip_chained_deps) = @_;
 
     my %done;
     my %count;
@@ -423,12 +444,13 @@ sub _sort_dep {
         for my $job (@$list) {
             next if $done{$job};
             my @parents;
-            push @parents, _parse_dep_variable($job->{START_AFTER_TEST}, $job);
-            push @parents, _parse_dep_variable($job->{PARALLEL_WITH},    $job);
+            push @parents, _parse_dep_variable($job->{START_AFTER_TEST}, $job),
+              _parse_dep_variable($job->{START_DIRECTLY_AFTER_TEST}, $job),
+              _parse_dep_variable($job->{PARALLEL_WITH},             $job);
 
             my $c = 0;    # number of parents that must go to @out before this job
             foreach my $parent (@parents) {
-                my $parent_test_machine = join(':', @$parent);
+                my $parent_test_machine = join('@', @$parent);
                 $c += $count{$parent_test_machine} if defined $count{$parent_test_machine};
             }
 
@@ -463,23 +485,23 @@ method used in the B<schedule_iso()> method.
 =cut
 
 sub _generate_jobs {
-    my ($self, $args, $notes) = @_;
+    my ($self, $args, $notes, $skip_chained_deps) = @_;
 
     my $ret      = [];
     my $schema   = $self->result_source->schema;
     my @products = $schema->resultset('Products')->search(
         {
-            distri  => lc($args->{DISTRI}),
+            distri  => _distri_key($args),
             version => $args->{VERSION},
             flavor  => $args->{FLAVOR},
             arch    => $args->{ARCH},
         });
 
     unless (@products) {
-        push(@$notes, 'no products found, retrying version wildcard');
+        push(@$notes, 'no products found for version ' . $args->{DISTRI} . 'falling back to "*"');
         @products = $schema->resultset('Products')->search(
             {
-                distri  => lc($args->{DISTRI}),
+                distri  => _distri_key($args),
                 version => '*',
                 flavor  => $args->{FLAVOR},
                 arch    => $args->{ARCH},
@@ -487,7 +509,9 @@ sub _generate_jobs {
     }
 
     if (!@products) {
-        carp "no products found for " . join('-', map { $args->{$_} } qw(DISTRI VERSION FLAVOR ARCH));
+        my $error = 'no products found for ' . join('-', map { $args->{$_} } qw(DISTRI FLAVOR ARCH));
+        push(@$notes, $error);
+        return {error_message => $error, error_code => 200};
     }
 
     my %wanted;    # jobs specified by $args->{TEST} or $args->{MACHINE} or their parents
@@ -507,6 +531,7 @@ sub _generate_jobs {
     # allow overriding the priority
     my $priority = delete $args->{_PRIORITY};
 
+    my $error_message;
     for my $product (@products) {
         # find job templates
         my $templates = $product->job_templates;
@@ -516,72 +541,28 @@ sub _generate_jobs {
         my @templates = $templates->all;
 
         unless (@templates) {
-            carp "no templates found for " . join('-', map { $args->{$_} } qw(DISTRI VERSION FLAVOR ARCH));
+            my $error = 'no templates found for ' . join('-', map { $args->{$_} } qw(DISTRI FLAVOR ARCH));
+            push(@$notes, $error);
+            return {error_message => $error, error_code => 404};
         }
         for my $job_template (@templates) {
-            my %settings = map { $_->key => $_->value } $product->settings;
-
-            # we need to merge worker classes of all 3
-            my @classes;
-            if (my $class = delete $settings{WORKER_CLASS}) {
-                push @classes, $class;
-            }
-
-            my %tmp_settings = map { $_->key => $_->value } $job_template->machine->settings;
-            if (my $class = delete $tmp_settings{WORKER_CLASS}) {
-                push @classes, $class;
-            }
-            @settings{keys %tmp_settings} = values %tmp_settings;
-
-            %tmp_settings = map { $_->key => $_->value } $job_template->test_suite->settings;
-            if (my $class = delete $tmp_settings{WORKER_CLASS}) {
-                push @classes, $class;
-            }
-            @settings{keys %tmp_settings} = values %tmp_settings;
-            $settings{TEST}               = $job_template->test_suite->name;
-            $settings{MACHINE}            = $job_template->machine->name;
-            $settings{BACKEND}            = $job_template->machine->backend;
-            $settings{WORKER_CLASS} = @classes ? join(',', sort(@classes)) : "qemu_$args->{ARCH}";
-
-            for (keys %$args) {
-                next if $_ eq 'TEST' || $_ eq 'MACHINE';
-                $settings{uc $_} = $args->{$_};
-            }
-            # make sure that the DISTRI is lowercase
-            $settings{DISTRI} = lc($settings{DISTRI});
+           # compose settings from product, machine, testsuite and job template itself
+           # note: That order also defines the precedence from lowest to highest. The only exception is the WORKER_CLASS
+           #       variable where all occurrences are merged.
+            my %settings;
+            my %params = (
+                settings     => \%settings,
+                input_args   => $args,
+                product      => $product,
+                machine      => $job_template->machine,
+                test_suite   => $job_template->test_suite,
+                job_template => $job_template,
+            );
+            my $error = OpenQA::JobSettings::generate_settings(\%params);
+            $error_message .= $error if defined $error;
 
             $settings{PRIO}     = defined($priority) ? $priority : $job_template->prio;
             $settings{GROUP_ID} = $job_template->group_id;
-
-            # allow some messing with the usual precedence order. If anything
-            # sets +VARIABLE, that setting will be used as VARIABLE regardless
-            # (so a product or template +VARIABLE beats a post'ed VARIABLE).
-            # if *multiple* things set +VARIABLE, whichever comes highest in
-            # the usual precedence order wins.
-            for (keys %settings) {
-                if (substr($_, 0, 1) eq '+') {
-                    $settings{substr($_, 1)} = delete $settings{$_};
-                }
-            }
-
-            # variable expansion
-            # replace %NAME% with $settings{NAME}
-            my $expanded;
-            do {
-                $expanded = 0;
-                for my $var (keys %settings) {
-                    my $val = $settings{$var};
-                    next unless ($val && $val =~ /(%\w+%)/);
-                    my $replace_var = $1;
-                    $replace_var =~ s/^%(\w+)%$/$1/;
-                    my $replace_val = $settings{$replace_var};
-                    next unless (defined $replace_val);
-                    $replace_val = '' if $replace_var eq $var;    #stop infinite recursion
-                    $val =~ s/%${replace_var}%/$replace_val/g;
-                    $settings{$var} = $val;
-                    $expanded = 1;
-                }
-            } while ($expanded);
 
             if (!$args->{MACHINE} || $args->{MACHINE} eq $settings{MACHINE}) {
                 if (!@tests) {
@@ -596,7 +577,6 @@ sub _generate_jobs {
                     }
                 }
             }
-
             push @$ret, \%settings;
         }
     }
@@ -607,57 +587,68 @@ sub _generate_jobs {
         if ($wanted{_settings_key($ret->[$i])}) {
             # add parents to wanted list
             my @parents;
-            push @parents, _parse_dep_variable($ret->[$i]->{START_AFTER_TEST}, $ret->[$i]);
-            push @parents, _parse_dep_variable($ret->[$i]->{PARALLEL_WITH},    $ret->[$i]);
+            push @parents, _parse_dep_variable($ret->[$i]->{START_AFTER_TEST}, $ret->[$i]),
+              _parse_dep_variable($ret->[$i]->{START_DIRECTLY_AFTER_TEST}, $ret->[$i])
+              unless $skip_chained_deps;
+            push @parents, _parse_dep_variable($ret->[$i]->{PARALLEL_WITH}, $ret->[$i]);
             for my $parent (@parents) {
-                my $parent_test_machine = join(':', @$parent);
-                $wanted{$parent_test_machine} = 1;
+                my $parent_test_machine = join('@', @$parent);
+                my @parents_job_template
+                  = grep { join('@', $_->{TEST}, $_->{MACHINE}) eq $parent_test_machine } @$ret;
+                for my $parent_job_template (@parents_job_template) {
+                    $wanted{join('@', $parent_job_template->{TEST}, $parent_job_template->{MACHINE})} = 1;
+                }
             }
         }
         else {
             splice @$ret, $i, 1;    # not wanted - delete
         }
     }
-    return $ret;
+    return {error_message => $error_message, settings_result => $ret};
 }
 
 =over 4
 
-=item _job_create_dependencies()
+=item _create_dependencies_for_job()
 
 Create job dependencies for tasks with settings START_AFTER_TEST or PARALLEL_WITH
-defined. Internal method used by the B<schedule_iso()> method.
+defined. Internal method used by the B<_schedule_iso()> method.
 
 =back
 
 =cut
 
 sub _create_dependencies_for_job {
-    my ($self, $job, $testsuite_mapping, $created_jobs, $cluster_parents) = @_;
+    my ($self, $job, $job_ids_mapping, $created_jobs, $cluster_parents, $skip_chained_deps) = @_;
 
     my @error_messages;
-    my $settings = $job->settings_hash;
-    for my $dependency (
-        [START_AFTER_TEST => OpenQA::JobDependencies::Constants::CHAINED],
-        [PARALLEL_WITH    => OpenQA::JobDependencies::Constants::PARALLEL])
-    {
+    my $settings     = $job->settings_hash;
+    my @dependencies = ([PARALLEL_WITH => OpenQA::JobDependencies::Constants::PARALLEL]);
+    push(@dependencies,
+        [START_AFTER_TEST          => OpenQA::JobDependencies::Constants::CHAINED],
+        [START_DIRECTLY_AFTER_TEST => OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED])
+      unless $skip_chained_deps;
+    for my $dependency (@dependencies) {
         my ($depname, $deptype) = @$dependency;
         next unless defined $settings->{$depname};
         for my $testsuite (_parse_dep_variable($settings->{$depname}, $settings)) {
             my ($test, $machine) = @$testsuite;
-            for my $mach (keys %{$testsuite_mapping->{$test}}) {
-                if (!exists $cluster_parents->{$test . ':' . $mach}) {
-                    $cluster_parents->{$test . ':' . $mach} = $testsuite_mapping->{$test}->{$mach};
-                }
+            my $key = "$test\@$machine";
+
+            for my $parent_job (keys %$job_ids_mapping) {
+                my @parents = split(/@/, $parent_job);
+                $cluster_parents->{$parent_job} = $job_ids_mapping->{$parent_job}
+                  if (!exists $cluster_parents->{$parent_job} && $test eq $parents[0]);
             }
-            if (!defined $testsuite_mapping->{$test}->{$machine}) {
-                my $error_msg = "$depname=$test:$machine not found - check for dependency typos and dependency cycles";
+
+            if (!defined $job_ids_mapping->{$key}) {
+                my $error_msg = "$depname=$key not found - check for dependency typos and dependency cycles";
                 push(@error_messages, $error_msg);
             }
             else {
-                my @parents = @{$testsuite_mapping->{$test}->{$machine}};
+                my @parents = @{$job_ids_mapping->{$key}};
                 $self->_create_dependencies_for_parents($job, $created_jobs, $deptype, \@parents);
-                $cluster_parents->{$test . ':' . $machine} = 'depended';
+                $cluster_parents->{$key} = 'depended';
             }
         }
     }
@@ -696,7 +687,9 @@ Internal method used by the B<job_create_dependencies()> method
 sub _create_dependencies_for_parents {
     my ($self, $job, $created_jobs, $deptype, $parents) = @_;
 
-    my $job_dependencies = $self->result_source->schema->resultset('JobDependencies');
+    my $schema           = $self->result_source->schema;
+    my $job_dependencies = $schema->resultset('JobDependencies');
+    my $worker_class;
     for my $parent (@$parents) {
         try {
             _check_for_cycle($job->id, $parent, $created_jobs);
@@ -704,12 +697,58 @@ sub _create_dependencies_for_parents {
         catch {
             die 'There is a cycle in the dependencies of ' . $job->settings_hash->{TEST};
         };
+        if ($deptype eq OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED) {
+            unless (defined $worker_class) {
+                $worker_class = $job->settings->find({key => 'WORKER_CLASS'});
+                $worker_class = $worker_class ? $worker_class->value : '';
+            }
+            my $parent_worker_class
+              = $schema->resultset('JobSettings')->find({job_id => $parent, key => 'WORKER_CLASS'});
+            $parent_worker_class = $parent_worker_class ? $parent_worker_class->value : '';
+            if ($worker_class ne $parent_worker_class) {
+                my $test_name = $job->settings_hash->{TEST};
+                die
+"Worker class of $test_name ($worker_class) does not match the worker class of its directly chained parent ($parent_worker_class)";
+            }
+        }
         $job_dependencies->create(
             {
                 child_job_id  => $job->id,
                 parent_job_id => $parent,
                 dependency    => $deptype,
             });
+    }
+}
+
+=over 4
+
+=item _create_download_lists()
+
+Internal method used by the B<_schedule_iso()> method
+
+=back
+
+=cut
+
+sub _create_download_lists {
+    my ($self, $tmp_downloads, $download_list, $job_id) = @_;
+    foreach my $url (keys %$download_list) {
+        my $download_parameters = $download_list->{$url};
+        my $destination_path    = $download_parameters->[0];
+
+        # caveat: The extraction parameter is currently not processed per destination.
+        # If multiple destinations for the same download have a different 'do_extract' parameter the first one will win.
+        my $download_info = $tmp_downloads->{$url};
+        unless ($download_info) {
+            $tmp_downloads->{$url} = {
+                destination    => {$destination_path => 1},
+                do_extract     => $download_parameters->[1],
+                blocked_job_id => [$job_id]};
+            next;
+        }
+        push @{$download_info->{blocked_job_id}}, $job_id;
+        $download_info->{destination}->{$destination_path} = 1
+          unless ($download_info->{destination}->{$destination_path});
     }
 }
 

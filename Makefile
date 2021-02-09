@@ -1,26 +1,54 @@
-PROVE_ARGS ?= -r -v
-DOCKER_IMG ?= openqa:latest
+RETRY ?= 0
+# STABILITY_TEST: Set to 1 to fail as soon as any of the RETRY fails rather
+# than succeed if any of the RETRY succeed
+STABILITY_TEST ?= 0
+# KEEP_DB: Set to 1 to keep the test database process spawned for tests. This
+# can help with faster re-runs of tests but might yield inconsistent results
+KEEP_DB ?= 0
+# TESTS: Specify individual test files in a space separated lists. As the user
+# most likely wants only the mentioned tests to be executed and no other
+# checks this implicitly disables CHECKSTYLE
+TESTS ?=
+ifeq ($(TESTS),)
+PROVE_ARGS ?= --trap -r -v
+else
+CHECKSTYLE ?= 0
+PROVE_ARGS ?= --trap -v $(TESTS)
+endif
+PROVE_LIB_ARGS ?= -l
+CONTAINER_IMG ?= openqa:latest
+# python-jsbeautifier does not support reading config file
+# https://github.com/beautify-web/js-beautify/issues/1074
+# Note: Keep in sync with .jsbeautifyrc
+JSBEAUTIFIER_OPTS ?= --brace-style=collapse,preserve-inline
+TEST_PG_PATH ?= /dev/shm/tpg
+# TIMEOUT_M: Timeout for one retry of tests in minutes
+TIMEOUT_M ?= 60
+TIMEOUT_RETRIES ?= $$((${TIMEOUT_M} * (${RETRY} + 1) ))m
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(patsubst %/,%,$(dir $(mkfile_path)))
 docker_env_file := "$(current_dir)/docker.env"
+unstables := $(shell cat .circleci/unstable_tests.txt | tr '\n' :)
 
-.PHONY: all
-all:
+# tests need these environment variables to be unset
+OPENQA_BASEDIR =
+OPENQA_CONFIG =
 
-.PHONY: install
-install:
-	./script/generate-packed-assets
+.PHONY: help
+help:
+	@echo Call one of the available targets:
+	@sed -n 's/\(^[^.#[:space:]A-Z]*\):.*$$/\1/p' Makefile | uniq
+	@echo See docs/Contributing.asciidoc for more details
+
+.PHONY: install-generic
+install-generic:
+	./tools/generate-packed-assets
 	for i in lib public script templates assets; do \
 		mkdir -p "$(DESTDIR)"/usr/share/openqa/$$i ;\
 		cp -a $$i/* "$(DESTDIR)"/usr/share/openqa/$$i ;\
 	done
 
-# we didn't actually want to install these...
-	for i in tidy check_coverage generate-packed-assets generate-documentation generate-documentation-genapi.pl run-tests-within-container; do \
-		rm "$(DESTDIR)"/usr/share/openqa/script/$$i ;\
-	done
-#
-	for i in images testresults pool ; do \
+	for i in db images testresults pool ; do \
 		mkdir -p "$(DESTDIR)"/var/lib/openqa/$$i ;\
 	done
 # shared dirs between openQA web and workers + compatibility links
@@ -50,69 +78,129 @@ install:
 	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system
 	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system-generators
 	install -d -m 755 "$(DESTDIR)"/usr/lib/tmpfiles.d
-	install -m 644 systemd/openqa-worker@.service "$(DESTDIR)"/usr/lib/systemd/system
-	sed -e 's_^\(ExecStart=/usr/share/openqa/script/worker\) \(--instance %i\)$$_\1 --no-cleanup \2_' \
-		systemd/openqa-worker@.service \
-		> "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-no-cleanup@.service
-	sed -i '/Wants/aConflicts=openqa-worker@.service' \
-		"$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-no-cleanup@.service
-	install -m 644 systemd/openqa-worker.target "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-webui.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-livehandler.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-gru.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-vde_switch.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-slirpvde.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-websockets.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-worker-cacheservice.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-worker-cacheservice-minion.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-scheduler.service "$(DESTDIR)"/usr/lib/systemd/system
-	install -m 644 systemd/openqa-setup-db.service "$(DESTDIR)"/usr/lib/systemd/system
+	for i in systemd/*.{service,target,timer,path}; do \
+		install -m 644 $$i "$(DESTDIR)"/usr/lib/systemd/system ;\
+	done
+	sed \
+		-e 's_^\(ExecStart=/usr/share/openqa/script/worker\) \(--instance %i\)$$_\1 --no-cleanup \2_' \
+		-e '/Wants/aConflicts=openqa-worker@.service' \
+		systemd/openqa-worker@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-no-cleanup@.service
+	sed \
+		-e '/Type/aEnvironment=OPENQA_WORKER_TERMINATE_AFTER_JOBS_DONE=1' \
+		-e 's/Restart=on-failure/Restart=always/' \
+		-e '/Wants/aConflicts=openqa-worker@.service' \
+		systemd/openqa-worker@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-auto-restart@.service
 	install -m 755 systemd/systemd-openqa-generator "$(DESTDIR)"/usr/lib/systemd/system-generators
 	install -m 644 systemd/tmpfiles-openqa.conf "$(DESTDIR)"/usr/lib/tmpfiles.d/openqa.conf
-	install -D -m 644 etc/dbus-1/system.d/org.opensuse.openqa.conf "$(DESTDIR)"/etc/dbus-1/system.d/org.opensuse.openqa.conf
+	install -m 644 systemd/tmpfiles-openqa-webui.conf "$(DESTDIR)"/usr/lib/tmpfiles.d/openqa-webui.conf
 #
-	install -D -m 640 /dev/null "$(DESTDIR)"/var/lib/openqa/db/db.sqlite
 # install openQA apparmor profile
 	install -d -m 755 "$(DESTDIR)"/etc/apparmor.d
 	install -m 644 profiles/apparmor.d/usr.share.openqa.script.openqa "$(DESTDIR)"/etc/apparmor.d
 	install -m 644 profiles/apparmor.d/usr.share.openqa.script.worker "$(DESTDIR)"/etc/apparmor.d
+	install -d -m 755 "$(DESTDIR)"/etc/apparmor.d/local
+	install -m 644 profiles/apparmor.d/local/usr.share.openqa.script.openqa "$(DESTDIR)"/etc/apparmor.d/local
 
 	cp -Ra dbicdh "$(DESTDIR)"/usr/share/openqa/dbicdh
 
+# Additional services which have a strong dependency on openSUSE and do not
+# make sense for other distributions
+.PHONY: install-opensuse
+install-opensuse: install-generic
+	for i in systemd/opensuse/*.{service,timer}; do \
+		install -m 644 $$i "$(DESTDIR)"/usr/lib/systemd/system ;\
+	done
 
-.PHONY: checkstyle
-checkstyle:
-ifneq ($(CHECKSTYLE),0)
-	PERL5LIB=lib/perlcritic:$$PERL5LIB perlcritic lib
+os := $(shell grep opensuse /etc/os-release)
+.PHONY: install
+ifeq ($(os),)
+install: install-generic
+else
+install: install-opensuse
 endif
 
 .PHONY: test
 ifeq ($(TRAVIS),true)
 test: run-tests-within-container
 else
-test: checkstyle
-	OPENQA_CONFIG= prove ${PROVE_ARGS}
+ifeq ($(CHECKSTYLE),0)
+test: test-with-database
+else
+test: test-checkstyle-standalone test-with-database
+endif
 endif
 
-# prepares running the tests within Docker (eg. pulls os-autoinst) and then runs the tests considering
+.PHONY: test-checkstyle
+test-checkstyle: test-checkstyle-standalone test-tidy-compile
+
+.PHONY: test-t
+test-t:
+	$(MAKE) test-with-database TIMEOUT_M=35 PROVE_ARGS="$$HARNESS t/*.t" GLOBIGNORE="t/*tidy*:t/*compile*:$(unstables)"
+
+.PHONY: test-ui
+test-ui:
+	$(MAKE) test-with-database TIMEOUT_M=25 PROVE_ARGS="$$HARNESS t/ui/*.t" GLOBIGNORE="t/*tidy*:t/*compile*:$(unstables)"
+
+.PHONY: test-api
+test-api:
+	$(MAKE) test-with-database TIMEOUT_M=20 PROVE_ARGS="$$HARNESS t/api/*.t" GLOBIGNORE="t/*tidy*:t/*compile*:$(unstables)"
+
+# put unstable tests in unstable_tests.txt and uncomment in circle CI to handle unstables with retries
+.PHONY: test-unstable
+test-unstable:
+	for f in $$(cat .circleci/unstable_tests.txt); do $(MAKE) test-with-database TIMEOUT_M=5 PROVE_ARGS="$$HARNESS $$f" RETRY=3 || exit; done
+
+.PHONY: test-fullstack
+test-fullstack:
+	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=9 PROVE_ARGS="$$HARNESS t/full-stack.t"
+
+.PHONY: test-scheduler
+test-scheduler:
+	$(MAKE) test-with-database SCHEDULER_FULLSTACK=1 SCALABILITY_TEST=1 TIMEOUT_M=5 PROVE_ARGS="$$HARNESS t/05-scheduler-full.t t/43-scheduling-and-worker-scalability.t" RETRY=3
+
+.PHONY: test-developer
+test-developer:
+	$(MAKE) test-with-database DEVELOPER_FULLSTACK=1 TIMEOUT_M=10 PROVE_ARGS="$$HARNESS t/33-developer_mode.t" RETRY=3
+
+# we have apparently-redundant -I args in PERL5OPT here because Docker
+# only works with one and Fedora's build system only works with the other
+.PHONY: test-with-database
+test-with-database:
+	test -d $(TEST_PG_PATH) && (pg_ctl -D $(TEST_PG_PATH) -s status >&/dev/null || pg_ctl -D $(TEST_PG_PATH) -s start) || ./t/test_postgresql $(TEST_PG_PATH)
+	PERL5OPT="$(PERL5OPT) -It/lib -I$(PWD)/t/lib -MOpenQA::Test::PatchDeparse" $(MAKE) test-unit-and-integration TEST_PG="DBI:Pg:dbname=openqa_test;host=$(TEST_PG_PATH)"
+	-[ $(KEEP_DB) = 1 ] || pg_ctl -D $(TEST_PG_PATH) stop
+
+.PHONY: test-unit-and-integration
+test-unit-and-integration:
+	export GLOBIGNORE="$(GLOBIGNORE)";\
+	RETRY=${RETRY} timeout -s SIGINT -k 5 -v ${TIMEOUT_RETRIES} tools/retry prove ${PROVE_LIB_ARGS} ${PROVE_ARGS}
+
+# prepares running the tests within a container (eg. pulls os-autoinst) and then runs the tests considering
 # the test matrix environment variables
-# note: This is supposed to run within the Docker container unlike `launch-docker-to-run-tests-within`
+# note: This is supposed to run within the container unlike `launch-docker-to-run-tests-within`
 #       which launches the container.
 .PHONY: run-tests-within-container
 run-tests-within-container:
-	script/run-tests-within-container
+	tools/run-tests-within-container
 
-# ignore tests and test related addons in coverage analysis
-COVER_OPTS ?= -select_re "^/lib" -ignore_re '^t/.*' +ignore_re lib/perlcritic/Perl/Critic/Policy -coverage statement
+COVER_OPTS ?= -select_re '^/lib' +ignore_re lib/perlcritic/Perl/Critic/Policy -coverage statement
+
+comma := ,
+space :=
+space +=
+.PHONY: print-cover-opts
+print-cover-opt:
+	  # this was used in writing .circleci/config.yml
+	  @echo "$(subst $(space),$(comma),$(COVER_OPTS))"
 
 .PHONY: coverage
 coverage:
 	cover ${COVER_OPTS} -test
 
-COVER_REPORT_OPTS ?= -select_re ^lib/
+COVER_REPORT_OPTS ?= -select_re '^(lib|script|t)/'
 
-.PHONY: travis-codecov
-travis-codecov: coverage
+.PHONY: coverage-codecov
+coverage-codecov: coverage
 	cover $(COVER_REPORT_OPTS) -report codecov
 
 .PHONY: coverage-html
@@ -121,7 +209,9 @@ coverage-html: coverage
 
 public/favicon.ico: assets/images/logo.svg
 	for w in 16 32 64 128; do \
-		inkscape -e assets/images/logo-$$w.png -w $$w assets/images/logo.svg ; \
+		(cd assets/images/ && for i in *.svg; do \
+			inkscape -e $${i%.svg}-$$w.png -w $$w $$i; \
+		done); \
 	done
 	convert assets/images/logo-16.png assets/images/logo-32.png assets/images/logo-64.png assets/images/logo-128.png -background white -alpha remove public/favicon.ico
 	rm assets/images/logo-128.png assets/images/logo-32.png assets/images/logo-64.png
@@ -132,15 +222,60 @@ docker-test-build:
 
 .PHONY: docker.env
 docker.env:
-	env | grep -E 'FULLSTACK|UITEST|GH|TRAVIS|CPAN|DEBUG|ZYPPER' > $(docker_env_file)
+	env | grep -E 'CHECKSTYLE|FULLSTACK|UITEST|GH|TRAVIS|CPAN|DEBUG|ZYPPER' > $(docker_env_file)
 
 .PHONY: launch-docker-to-run-tests-within
 launch-docker-to-run-tests-within: docker.env
-	docker run --env-file $(docker_env_file) -v $(current_dir):/opt/openqa -v /var/run/dbus:/var/run/dbus \
-	   $(DOCKER_IMG) make travis-codecov
+	docker run --env-file $(docker_env_file) -v $(current_dir):/opt/openqa \
+	   $(CONTAINER_IMG) make coverage-codecov
 	rm $(docker_env_file)
 
 .PHONY: prepare-and-launch-docker-to-run-tests-within
 .NOTPARALLEL: prepare-and-launch-docker-to-run-tests-within
 prepare-and-launch-docker-to-run-tests-within: docker-test-build launch-docker-to-run-tests-within
 	echo "Use docker-rm and docker-rmi to remove the container and image if necessary"
+
+# all additional checks not called by prove
+.PHONY: test-checkstyle-standalone
+test-checkstyle-standalone: test-shellcheck test-yaml test-critic test-js-style
+
+.PHONY: test-critic
+test-critic:
+	PERL5LIB=lib/perlcritic:$$PERL5LIB perlcritic lib
+
+.PHONY: test-tidy-compile
+test-tidy-compile:
+	$(MAKE) test-unit-and-integration TIMEOUT_M=20 PROVE_ARGS="$$HARNESS t/*{tidy,compile}*.t" GLOBIGNORE="$(unstables)"
+
+.PHONY: test-shellcheck
+test-shellcheck:
+	@which shellcheck >/dev/null 2>&1 || (echo "Command 'shellcheck' not found, can not execute shell script checks" && false)
+	shellcheck -x $$(file --mime-type script/* t/* container/worker/*.sh | sed -n 's/^\(.*\):.*text\/x-shellscript.*$$/\1/p')
+
+.PHONY: test-yaml
+test-yaml:
+	@which yamllint >/dev/null 2>&1 || (echo "Command 'yamllint' not found, can not execute YAML syntax checks" && false)
+	@# Fall back to find if there is no git, e.g. in package builds
+	yamllint --strict $$((git ls-files "*.yml" "*.yaml" 2>/dev/null || find -name '*.y*ml') | grep -v ^dbicdh)
+
+.PHONY: check-js-beautify
+check-js-beautify:
+	@which js-beautify >/dev/null 2>&1 || (echo "Command 'js-beautify' not found, can not execute JavaScript beautifier" && false)
+
+.PHONY: test-js-style
+test-js-style: check-js-beautify
+	@# Fall back to find if there is no git, e.g. in package builds
+	for i in $$(git ls-files "*.js" 2>/dev/null || find assets/javascripts/ -name '*.js'); do js-beautify ${JSBEAUTIFIER_OPTS} $$i > $$i.new; diff $$i $$i.new && rm $$i.new || exit 1; done
+
+.PHONY: tidy-js
+tidy-js: check-js-beautify
+	@# Fall back to find if there is no git, e.g. in package builds
+	for i in $$(git ls-files "*.js" 2>/dev/null || find assets/javascripts/ -name '*.js'); do js-beautify ${JSBEAUTIFIER_OPTS} $$i > $$i.new; mv $$i.new $$i; done
+
+.PHONY: tidy
+tidy: tidy-js
+	tools/tidy
+
+.PHONY: update-deps
+update-deps:
+	tools/update-deps --specfile dist/rpm/openQA.spec

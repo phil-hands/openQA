@@ -1,0 +1,144 @@
+% use OpenQA::Jobs::Constants;
+            <div class="card-header">
+                Results for
+                % if (current_route 'latest') {
+                    <%= link_to $job->id => url_for ('test', testid => $job->id) %>:
+                % }
+                %= $job->name
+            </div>
+            <div id="info-box-content" class="card-body"
+                % if ($additional_data) {
+                    data-favicon-url-16="<%= favicon_url '-16.png' %>" data-favicon-url-svg="<%= favicon_url '.svg' %>"
+                % }
+            >
+                <div>
+                    % if ($job->state eq DONE) {
+                        <div class="position-absolute top-right pt-2-and-half pr-3">
+                            %= $job->passed_module_count
+                            <i class='fa module_passed fa-star' title='modules passed'></i>
+                            % if ($job->softfailed_module_count) {
+                                %= $job->softfailed_module_count
+                                <i class='fa module_softfailed fa-star-half' title='modules with warnings'></i>
+                            % }
+                            % if ($job->failed_module_count) {
+                                %= $job->failed_module_count
+                                <i class='far module_failed fa-star' title='modules failed'></i>
+                            % }
+                            % if ($job->skipped_module_count) {
+                                %= $job->skipped_module_count
+                                <i class='fa module_none fa-ban' title='modules skipped'></i>
+                            % }
+                            % if ($job->externally_skipped_module_count) {
+                                %= $job->externally_skipped_module_count
+                                <i class='fa module_skipped fa-angle-double-right' title='modules externally skipped'></i>
+                            % }
+                        </div>
+
+                        Result: <b><%= $job->result %></b>
+                    % }
+                    % else {
+                        State: <b><%= $job->state %></b>
+                        % if (scalar($job->gru_dependencies) > 0) {
+                            % my $grutext = '';
+                            % for my $grudep ($job->gru_dependencies) {
+                                % $grutext .= join(",", $grudep->gru_task->id, $grudep->gru_task->taskname);
+                                % $grutext .= " ";
+                            % }
+                            waiting for background (GRU) tasks: <%= $grutext %>
+                        % }
+                    % }
+                    % if ($job->t_finished) {
+                        finished
+                        <abbr class="timeago" title="<%= $job->t_finished->datetime() %>Z"><%= format_time($job->t_finished) %></abbr>
+                        (
+                        %= $job->t_started ? format_time_duration($job->t_finished - $job->t_started) : 0
+                        )
+                    % } elsif ($job->t_started)
+                    % {
+                        started
+                        <abbr class="timeago" title="<%= $job->t_started->datetime() %>Z"><%= format_time($job->t_started) %></abbr>
+                    % }
+                    % if (is_operator && $job->can_be_duplicated) {
+                        %= link_post url_for('apiv1_restart', jobid => $testid) => ('data-remote' => 'true', id => 'restart-result', 'data-jobid' => $testid) => begin
+                            <i class="fa fa-2 fa-redo" title="Restart job"></i>
+                        %= end
+                        <%= help_popover('Restart job' => '
+                            <p>Restarts the job and certain dependent jobs.</p>
+                            <p>Rules for restarting dependencies:</p>
+                            <ul>
+                                <li>If the job is part of a parallel cluster, all jobs within that cluster are restarted.</li>
+                                <li>Any kind of chained child jobs are restarted.</li>
+                                <li>Directly chained parent jobs are restarted.</li>
+                            </ul>
+                            All rules are applied recursively. Direct use of the REST-API allows excluding parents and (passed/softfailed) children.',
+                            'https://open.qa/docs/#_handling_of_related_jobs_on_failure_cancellation_restart', 'documentation', 'bottom');
+                        %>
+                    % }
+                    % if (is_operator && (OpenQA::Jobs::Constants::meta_state($job->state) ne OpenQA::Jobs::Constants::FINAL)) {
+                        %= link_post url_for('apiv1_cancel', jobid => $job->id) => ('data-remote' => 'true', id => 'cancel_running') => begin
+                            <i class="far fa-2 fa-times-circle" title="Cancel Job"></i>
+                        % end
+                    % }
+                    % if (my $reason = $job->reason) {
+                        <br>Reason: <%= $reason %>
+                    % }
+                </div>
+                % if (my $developer_session = $job->developer_session) {
+                    <div id="developer-global-session-info">
+                        % if ($job->t_finished) {
+                            Developer session was opened during testrun by
+                        % }
+                        % else {
+                            Developer session has been opened by
+                        % }
+                        %= $developer_session->user->name
+                    </div>
+                % } else {
+                     <div id="developer-global-session-info" style="display: none;"></div>
+                % }
+                <div id="clones">
+                    % if ($clone_of) {
+                        Clone of
+                        %= link_to $clone_of->id => url_for ('test', testid => $clone_of->id)
+                    % }
+                    % if (my $clone_id = $job->clone_id) {
+                        Cloned as
+                        %= link_to $clone_id => url_for ('test', testid => $clone_id)
+                    % }
+                </div>
+                <div id="scheduled-product-info">
+                    Scheduled product:\
+                    % if (my $scheduled_product = $job->scheduled_product) {
+                        %= link_to $scheduled_product->to_string, url_for('admin_product_log')->query(id => $scheduled_product->id)
+                    % } else {
+                        job has not been created by posting an ISO
+                        % if ($clone_of) {
+                            (but possibly the <%= link_to 'original job' => url_for ('test', testid => $clone_of->id) %>)
+                        % }
+                    % }
+                </div>
+                % if ($job->state eq SCHEDULED) {
+                    <div>
+                        <a class="prio-down" data-method="post" href="javascript:void(0);" onclick="decreaseJobPrio(<%= $job->id %>, this);">
+                            <i class="far fa-minus-square"></i>
+                        </a>
+                        <span class="prio-value"><%= $job->priority %></span>
+                        <a class="prio-up" data-method="post" href="javascript:void(0);" onclick="increaseJobPrio(<%= $job->id %>, this);">
+                            <i class="far fa-plus-square"></i>
+                        </a>
+                    </div>
+                % }
+                % if ($worker) {
+                    <div id="assigned-worker">
+                        Assigned worker:
+                        <span title="VNC port: <%= 90 + $worker->instance %>">
+                            %= link_to $worker->name => url_for('admin_worker_show', worker_id => $worker->id)
+                        </span>
+                    </div>
+                % }
+                % if (my $scenario_description = $job->scenario_description) {
+                    <div id="scenario-description">
+                            %= $scenario_description
+                    </div>
+                % }
+            </div>

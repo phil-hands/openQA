@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,15 +11,14 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Test::Testresults;
 use Mojo::Base -base;
 
 use File::Copy::Recursive 'dircopy';
 use File::Path 'remove_tree';
-use OpenQA::Utils;
+use OpenQA::Utils qw(:DEFAULT resultdir);
 
 sub create {
     my $self    = shift;
@@ -30,12 +29,12 @@ sub create {
 
     if ($options{directory}) {
         # Remove previous
-        remove_tree($OpenQA::Utils::resultdir) if -e $OpenQA::Utils::resultdir;
+        remove_tree(resultdir()) if -e resultdir();
         # copy new
-        dircopy($options{directory}, $OpenQA::Utils::resultdir) or die $!;
+        dircopy($options{directory}, resultdir()) or die $!;
     }
 
-    return $OpenQA::Utils::resultdir;
+    return resultdir();
 }
 
 1;
@@ -60,4 +59,3 @@ Copy a testresults directory
 Copy the given directory to the location used as testresults by running tests.
 
 =cut
-# vim: set sw=4 et:

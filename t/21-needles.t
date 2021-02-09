@@ -1,6 +1,7 @@
-#!/usr/bin/env perl -w
+#!/usr/bin/env perl
 
 # Copyright (C) 2016 Red Hat
+# Copyright (C) 2019-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,23 +16,19 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-use strict;
-use warnings;
-
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
+use Cwd 'abs_path';
 use OpenQA::Schema;
 use OpenQA::Test::Database;
+use OpenQA::Test::TimeLimit '10';
 use OpenQA::Task::Needle::Scan;
 use File::Find;
-use Test::More;
+use Test::Output 'combined_like';
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 use Date::Format 'time2str';
 
 my %settings = (
@@ -51,7 +48,8 @@ my $needledir_fedora    = "t/data/openqa/share/tests/fedora/needles";
 # create dummy job
 my $job = $schema->resultset('Jobs')->create_from_settings(\%settings);
 # create dummy module
-my $module = $job->insert_module({name => "a", category => "a", script => "a", flags => {}});
+$job->insert_module({name => "a", category => "a", script => "a", flags => {}});
+my $module = $job->modules->find({name => 'a'});
 my $t      = Test::Mojo->new('OpenQA::WebAPI');
 
 sub process {
@@ -171,5 +169,36 @@ OpenQA::Task::Needle::Scan::_needles($t->app);
 is($needles->find({filename => "test-nonexistent.json"})->file_present, 0);
 # this needle exists, so it should have file_present set to 1
 is($needles->find({filename => "installer/test-nestedneedle-1.json"})->file_present, 1);
+
+subtest 'handling relative paths in update_needle' => sub {
+    is($module->job->needle_dir,
+        $needledir_fedora, 'needle dir of job deduced from settings (prerequisite for handling relative paths)');
+
+    subtest 'handle needle path relative to share dir (legacy os-autoinst)' => sub {
+        my $needle
+          = OpenQA::Schema::Result::Needles::update_needle('tests/fedora/needles/test-rootneedle.json', $module, 0);
+        is(
+            $needle->path,
+            abs_path('t/data/openqa/share/tests/fedora/needles/test-rootneedle.json'),
+            'needle path correct'
+        );
+    };
+    subtest 'handle needle path relative to needle dir' => sub {
+        my $needle = OpenQA::Schema::Result::Needles::update_needle('test-rootneedle.json', $module, 0);
+        is(
+            $needle->path,
+            abs_path('t/data/openqa/share/tests/fedora/needles/test-rootneedle.json'),
+            'needle path correct'
+        );
+    };
+    subtest 'handle needle path to non existent needle' => sub {
+        my $needle;
+        combined_like {
+            $needle = OpenQA::Schema::Result::Needles::update_needle('test-does-not-exist.json', $module, 0);
+        }
+        qr/Needle file test-does-not-exist\.json not found within $needledir_fedora/, 'error logged';
+        is($needle, undef, 'no needle created');
+    };
+};
 
 done_testing;

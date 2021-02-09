@@ -1,4 +1,8 @@
-#!/usr/bin/perl -w
+#!/usr/bin/env perl
+
+# Summary: Verify timezone settings page
+# Maintainer: Allison Average <allison@example.com>
+
 use strict;
 use base "y2logsstep";
 use testapi;
@@ -9,4 +13,3 @@ sub run() {
 }
 
 1;
-# vim: set sw=4 et:

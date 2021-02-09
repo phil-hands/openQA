@@ -3,6 +3,15 @@
     background-color: $color-softfailed;
     color: $color-result;
 }
+#restart-result + .help_popover {
+    font-size: 80%;
+    position: relative;
+    top: 5px;
+    left: -3px;
+    margin-left: 0px;
+    padding-left: 0px;
+    opacity: 0.75;
+}
 
 // test result
 .resultok { background-color: $color-ok; color: $color-result; }
@@ -11,7 +20,6 @@
 .resultrunning { background-color: $color-result-testing; color: $color-result; }
 .resultwarning { background-color: $color-warning; color: $color-result; }
 .resultsoftfailed { background-color: $color-softfailed; color: $color-result; }
-.resultfailed { background-color: $color-result-failed; color: $color-result; }
 .resultfailed { background-color: $color-result-failed; color: $color-result; }
 .resultmissing { background-color: $color-result-missing; color: $color-result; }
 
@@ -88,6 +96,7 @@ div.flags {
 .fa.module_skipped { color: $color-module-skipped; }
 .fa.result_failed, .fa.result_fail {color: $color-failed; }
 .fa.result_incomplete { color: $color-incomplete; }
+.fa.result_timeout_exceeded { color: $color-incomplete; }
 .fa.result_none { color: $color-module-none; }
 .fa.result_obsoleted { color: $color-module-none; }
 .fa.result_parallel_failed { color: $color-module-none; }
@@ -129,6 +138,17 @@ div.flags {
     }
 }
 
+// settings and investigation table
+#settings_box td {
+    text-align: left;
+}
+#settings_box, #investigation_status_entry {
+    padding-top: 9px;
+}
+#investigation_status_entry pre {
+    margin: 2px 0px;
+}
+
 // misc
 .component {
     text-align: right;
@@ -145,9 +165,6 @@ span.thumbnail {
 }
 span.thumbnail.current {
     box-shadow: 0 0 3px 4px #666;
-}
-td .resborder {
-    margin-top: 3px;
 }
 .resborder {
     border: solid 3px;
@@ -181,22 +198,26 @@ span.resborder {
     font-size: small;
     padding: 1px;
 
-    .fa-question {
+    &.icon_audio {
+        background-size: contain;
+        background-repeat: no-repeat;
+        background-position: center center;
+    }
+    .fa-question, .step_actions {
         padding: 5px;
+    }
+    .step_actions {
+        white-space: normal;
+        float: right;
     }
 }
 span.resborder_na {
     overflow: hidden;
     padding: 4px;
 }
-.text-result-container {
-    display: inline-block !important;
-    width: 100%;
-}
 .text-result {
     display: block;
     width: 100%;
-
     .resborder {
         min-width: -moz-available;
         min-width: -webkit-fill-available;
@@ -204,6 +225,10 @@ span.resborder_na {
         min-width: stretch;
         max-width: 100%;
         height: auto;
+    }
+}
+.text-result, .serial-result-preview {
+    .resborder {
         font-family: monospace;
         text-align: left;
         margin: 1px 0;
@@ -217,9 +242,43 @@ span.resborder_na {
         overflow-wrap: break-word;
     }
 }
+.external-result-container {
+    width: 100%;
+}
+.serial-result-container {
+    margin-right: 4px;
+    .serial-result-preview .resborder {
+        cursor: pointer;
+        width: 60px;  // in accordance with the thumbnail width
+        height: 45px; // in accordance with the thumbnail height
+        font-size: 60%;
+        overflow: hidden;
+    }
+    .text-result {
+        display: none;
+        .resborder {
+            width: initial;
+            height: initial;
+            background-position: 0% 0%;
+            background-repeat: no-repeat;
+            padding-left: 40px;
+            font-size: 100%;
+        }
+    }
+}
+.serial-result-container.current_preview {
+    margin-right: 0px;
+    display: inline;
+    .text-result {
+        display: initial;
+    }
+}
 .current_preview .text-result .resborder {
     max-height: none;
     box-shadow: inset 0 2px 2px rgba(0, 0, 0, 0.2);
+}
+pre.embedded-logfile {
+    white-space: pre-wrap;
 }
 
 h2.modcategory {
@@ -293,7 +352,12 @@ ul.modcategory {
     padding-right: 40px;
 }
 
-// table for external results
+// hide all tabs (actually their nav items) by default; they will be activated via JavaScript as needed
+#result_tabs .nav-item {
+    display: none;
+}
+
+// external results
 #external-table {
     td[colspan="4"] {
         border-right: 1px solid $table-border-color;
@@ -318,4 +382,13 @@ ul.modcategory {
     td.result-softfail {
         background-color: $color-softfailed;
     }
+}
+
+.top-right {
+    top: 0px;
+    right: 0px;
+}
+
+.pt-2-and-half {
+    padding-top: 0.75rem !important;
 }

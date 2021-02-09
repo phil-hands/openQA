@@ -1,0 +1,109 @@
+% layout 'bootstrap';
+% content_for 'head' => begin
+  %= asset 'codemirror.js'
+  %= asset 'codemirror.css'
+% end
+
+% my $title = 'OBS synchronization folders';
+% $title = $title . " of $project" if $project;
+% title $title;
+<h2><%= $title %></h2>
+
+<div class="row">
+    <div class="col-sm-12">
+        %= include 'layouts/info'
+        <table class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Project</th>
+                    <th>Last sync</th>
+                    <th>Synced builds</th>
+                    <th>Builds on OBS</th>
+                    <th>Sync status</th>
+                    <th>Job created</th>
+                    <th>Dirty status</th>
+                    <th>Last failure</th>
+                </tr>
+            </thead>
+            <tbody>
+            % for my $folder (sort keys %$folder_info_by_name) {
+                % my $folder_ident = $folder;
+                % $folder_ident =~ s/\W//g; # remove all special characters
+                % my $folder_info = $folder_info_by_name->{$folder};
+                % my $alias = $folder;
+                % $alias = "$project|$folder" if $project;
+                % my $job_id = $folder_info->{run_last_job_id};
+                % my $fail_job_id = $folder_info->{fail_last_job_id};
+                % my $test_id = $folder_info->{test_id};
+                % my $test_link = $folder_info->{test_result};
+                % $test_link = $test_id unless $test_link;
+                <tr id="folder_<%= $folder_ident %>">
+                    <td class="project">
+                        %= link_to $alias => url_for('plugin_obs_rsync_folder', alias => $alias)
+                    </td>
+                    % if ($folder_info->{run_last}) {
+                    <td class="lastsynccol">
+                        <span id="lastsync_<%= $folder_ident %>" class="lastsync">
+                            %= $folder_info->{run_last}
+                            % if ($job_id) {
+                                <span> | </span>
+                                <%= link_to $job_id => url_for('minion_jobs')->query(id => $job_id), class => "jobid" %>
+                            % }
+                        </span>
+                        % if ($test_id) {
+                        <span> | </span>
+                        <span id="testlink_<%= $folder_ident %>" class="testlink">
+                                <%= link_to $test_link => url_for('test')->query(testid => $test_id) %>
+                        </span>
+                        % }
+                        <button type="submit" class="lastsyncforget btn btn-info" btn-sm"
+                                data-posturl="<%= url_for('plugin_obs_rsync_forget_run_last', alias => $alias) %>"
+                                data-geturl="<%= url_for('plugin_obs_rsync_get_run_last', alias => $alias) %>"
+                                onclick="postAndRedrawElement(this, 'lastsync_<%=$folder_ident%>',0,'Are you sure you want to delete information about last sync for <%=$alias%>')">
+                            Forget
+                        </button>
+                    </td>
+                    % } else {
+                    <td class="lastsync">no data</td>
+                    % }
+                    <td class="lastsyncbuilds"><%= $folder_info->{run_last_builds} // '' %></td>
+                    <td class=obsbuildscol">
+                        <span id="obsbuilds_<%= $folder_ident %>" class="obsbuilds"></span>
+                        <button type="submit" class="obsbuildsupdate btn btn-info" btn-sm"
+                                data-posturl="<%= url_for('plugin_obs_rsync_update_builds_text', alias => $alias) %>"
+                                data-geturl="<%= url_for('plugin_obs_rsync_get_builds_text', alias => $alias) %>"
+                                onclick="postAndRedrawElement(this, 'obsbuilds_<%=$folder_ident%>',2000)">
+                            Update
+                        </button>
+                    </td>
+                    <td class="syncstatus"><%= $folder_info->{state} %></td>
+                    <td class="jobcreated"><%= $folder_info->{created} %></td>
+                    <td class="dirtystatuscol">
+                        <span id="dirtystatus_<%= $folder_ident %>" class="dirtystatus"><%= $folder_info->{dirty_status} %></span>
+                        <button type="submit" class="dirtystatusupdate btn btn-info" btn-sm"
+                                data-posturl="<%= url_for('plugin_obs_rsync_update_dirty_status', project => $project // $folder) %>"
+                                data-geturl="<%= url_for('plugin_obs_rsync_get_dirty_status', project => $project // $folder) %>"
+                                onclick="postAndRedrawElement(this, 'dirtystatus_<%=$folder_ident%>', 2000)">
+                            Update
+                        </button>
+                    </td>
+                    <td class="lastfailurecol">
+                    % if ($folder_info->{fail_last_when}) {
+                        <%= $folder_info->{fail_last_when} %>
+                    % }
+                    % if ($fail_job_id) {
+                        <%= link_to $fail_job_id => url_for('minion_jobs')->query(id => $fail_job_id), class => "failjobid" %>
+                    % }
+                    </td>
+                </tr>
+            % }
+            </tbody>
+        </table>
+    </div>
+</div>
+<hr>
+<div class="btn-toolbar" role="toolbar">
+    <div class="btn-group mr-2" role="group">
+        %= link_to 'View job queue' => url_for('plugin_obs_rsync_queue'), class => 'btn btn-primary', role => 'button'
+    </div>
+</div>

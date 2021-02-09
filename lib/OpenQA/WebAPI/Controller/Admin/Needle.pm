@@ -1,4 +1,4 @@
-# Copyright (C) 2015 SUSE LLC
+# Copyright (C) 2015-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,15 +11,16 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Controller::Admin::Needle;
 use Mojo::Base 'Mojolicious::Controller';
 
+use Cwd 'realpath';
 use OpenQA::Utils;
-use OpenQA::ServerSideDataTable;
+use OpenQA::WebAPI::ServerSideDataTable;
 use Date::Format 'time2str';
+use DateTime::Format::Pg;
 
 sub index {
     my ($self) = @_;
@@ -32,6 +33,12 @@ sub _translate_days($) {
     return time2str('%Y-%m-%d %H:%M:%S', time - $days * 3600 * 24, 'UTC');
 }
 
+sub _translate_date_format($) {
+    my ($datetime) = @_;
+    my $datetime_obj = DateTime::Format::Pg->parse_datetime($datetime);
+    return DateTime::Format::Pg->format_datetime($datetime_obj);
+}
+
 sub _translate_cond($) {
     my ($cond) = @_;
 
@@ -41,7 +48,43 @@ sub _translate_cond($) {
     elsif ($cond =~ m/^max(\d+)$/) {
         return {'<' => _translate_days($1)};
     }
+    elsif ($cond =~ m/^min(\d{4}\-\d{2}\-\d{2}\w\d{2}:\d{2}:\d{2})$/) {
+        return {'>=' => _translate_date_format($1)};
+    }
+    elsif ($cond =~ m/^max(\d{4}\-\d{2}\-\d{2}\w\d{2}:\d{2}:\d{2})$/) {
+        return {'<' => _translate_date_format($1)};
+    }
     die "Unknown '$cond'";
+}
+
+sub _prepare_data_table {
+    my ($self, $n, $paths, $dir_rs, $needles_rs) = @_;
+    my $filename = $n->filename;
+    my $hash     = {
+        id        => $n->id,
+        directory => $n->directory->name,
+        filename  => $filename,
+    };
+    my $dir_path = $n->directory->path;
+    my $real_dir_id;
+
+    if ($paths->{$dir_path}) {
+        $real_dir_id = $paths->{$dir_path}->{real_path_id} if $dir_path ne ($paths->{$dir_path}->{real_path} // '');
+    }
+    else {
+        my $real_path_id  = $n->directory->id;
+        my $dir_real_path = realpath($dir_path);
+        if ($dir_real_path && $dir_real_path ne $dir_path) {
+            my $real_dir = $dir_rs->find({path => $dir_real_path});
+            $real_dir_id = $real_path_id = $real_dir->id if $real_dir;
+        }
+        $paths->{$dir_path} = {
+            real_path    => $dir_real_path,
+            real_path_id => $real_path_id,
+        };
+    }
+    $n = ($real_dir_id ? $needles_rs->find({dir_id => $real_dir_id, filename => $filename}) : undef) // $n;
+    return $self->populate_hash_with_needle_timestamps_and_urls($n, $hash);
 }
 
 sub ajax {
@@ -62,7 +105,7 @@ sub ajax {
         push(@filter_conds, {last_matched_time => _translate_cond($match_query)});
     }
 
-    OpenQA::ServerSideDataTable::render_response(
+    OpenQA::WebAPI::ServerSideDataTable::render_response(
         controller        => $self,
         resultset         => 'Needles',
         columns           => \@columns,
@@ -74,35 +117,10 @@ sub ajax {
             join => [qw(directory)],
         },
         prepare_data_function => sub {
-            my ($needles) = @_;
-            my @data;
-            my %modules;
-
-            while (my $n = $needles->next) {
-                my $hash = {
-                    id         => $n->id,
-                    directory  => $n->directory->name,
-                    filename   => $n->filename,
-                    last_seen  => $n->last_seen_time || 'never',
-                    last_match => $n->last_matched_time || 'never',
-                };
-                if (my $last_seen_module_id = $n->last_seen_module_id) {
-                    $hash->{last_seen_link} = $self->url_for(
-                        'admin_needle_module',
-                        module_id => $last_seen_module_id,
-                        needle_id => $n->id
-                    );
-                }
-                if (my $last_matched_module_id = $n->last_matched_module_id) {
-                    $hash->{last_match_link} = $self->url_for(
-                        'admin_needle_module',
-                        module_id => $last_matched_module_id,
-                        needle_id => $n->id
-                    );
-                }
-                push(@data, $hash);
-            }
-            return \@data;
+            my $needle_dirs = $self->schema->resultset('NeedleDirs');
+            my $needles     = $self->schema->resultset('Needles');
+            my %paths;
+            [map { $self->_prepare_data_table($_, \%paths, $needle_dirs, $needles) } shift->all];
         },
     );
 }
@@ -115,7 +133,7 @@ sub module {
     my $needle = $schema->resultset('Needles')->find($self->param('needle_id'))->name;
 
     my $index = 1;
-    for my $detail (@{$module->details}) {
+    for my $detail (@{$module->results->{details}}) {
         last if $detail->{needle} eq $needle;
         last if grep { $needle eq $_->{name} } @{$detail->{needles} || []};
         $index++;
@@ -148,4 +166,3 @@ sub delete {
 }
 
 1;
-# vim: set sw=4 et:

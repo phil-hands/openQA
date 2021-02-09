@@ -34,7 +34,8 @@ function renderCommentHeading(comment, commentId) {
     abbr_link.prop('class', 'comment-anchor');
     abbr_link.append(renderDate(comment.created));
     heading.append(comment.userName, ' wrote ', abbr_link);
-    if(comment.created !== comment.updated) {
+    // add a margin of 1000ms to prevent erroneous update detected if off by 1
+    if ((new Date(comment.updated).getTime() - 1000) >= (new Date(comment.created))) {
         heading.append(' (last edited ', renderDate(comment.updated), ')');
     }
     return heading;
@@ -45,7 +46,7 @@ function deleteComment(deleteButton) {
     var author = deleteButton.data('author');
     var url = deleteButton.data('delete-url');
 
-    if(window.confirm("Do you really want to delete the comment written by " + author + "?")) {
+    if (window.confirm("Do you really want to delete the comment written by " + author + "?")) {
         $.ajax({
             url: url,
             method: 'DELETE',
@@ -69,7 +70,7 @@ function updateComment(form) {
     var textElement = editorForm.find('[name="text"]');
     var markdown = markdownElement.html();
     var text = textElement.val();
-    if(text.length) {
+    if (text.length) {
         textElement.hide();
         markdownElement.show();
         markdownElement.html('<em>Loading…</em>');
@@ -113,7 +114,7 @@ function addComment(form, insertAtBottom) {
     var textElement = editorForm.find('[name="text"]');
     var text = textElement.val();
 
-    if(text.length) {
+    if (text.length) {
         var url = form.action;
         $.ajax({
             url: url,
@@ -131,14 +132,14 @@ function addComment(form, insertAtBottom) {
                         commentRow.find('[name="text"]').val(response.text);
                         commentRow.find('.markdown').html(response.renderedMarkdown);
                         var nextElement;
-                        if(!insertAtBottom) {
+                        if (!insertAtBottom) {
                             nextElement = $('.comment-row').first();
                         }
-                        if(!nextElement || !nextElement.length) {
+                        if (!nextElement || !nextElement.length) {
                             nextElement = $('#comment-row-template');
                         }
                         commentRow.insertBefore(nextElement);
-                        $('html, body').animate({scrollTop: commentRow.offset().top}, 1000);
+                        $('html, body').animate({ scrollTop: commentRow.offset().top }, 1000);
                         textElement.val('');
                         $('a[href="#comments"]').html('Comments (' + $('.comment-row').length + ')');
                     },

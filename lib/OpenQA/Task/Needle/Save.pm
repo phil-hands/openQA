@@ -17,6 +17,8 @@ package OpenQA::Task::Needle::Save;
 use Mojo::Base 'Mojolicious::Plugin';
 
 use File::Copy;
+use Encode 'encode_utf8';
+use OpenQA::Git;
 use OpenQA::Jobs::Constants;
 use OpenQA::Utils;
 use Mojo::JSON 'decode_json';
@@ -41,6 +43,8 @@ sub _json_validation {
     if (!exists $djson->{tags} || !exists $djson->{tags}[0]) {
         die 'no tag defined';
     }
+    my @not_ocr_area = grep { $_->{type} ne 'ocr' } @{$djson->{area}};
+    die 'Cannot create a needle with only OCR areas' if scalar(@not_ocr_area) == 0;
 
     my $areas = $djson->{area};
     foreach my $area (@$areas) {
@@ -63,12 +67,12 @@ sub _save_needle {
 
     # prevent multiple save_needle and delete_needles tasks to run in parallel
     return $minion_job->finish({error => 'Another save or delete needle job is ongoing. Try again later.'})
-      unless my $guard = $app->minion->guard('limit_needle_task', 300);
+      unless my $guard = $app->minion->guard('limit_needle_task', 7200);
 
     my $schema       = $app->schema;
     my $openqa_job   = $schema->resultset('Jobs')->find($args->{job_id});
     my $user         = $schema->resultset('Users')->find($args->{user_id});
-    my $needle_json  = $args->{needle_json};
+    my $needle_json  = encode_utf8($args->{needle_json});
     my $imagedir     = $args->{imagedir};
     my $imagedistri  = $args->{imagedistri};
     my $imagename    = $args->{imagename};
@@ -108,9 +112,9 @@ sub _save_needle {
     }
 
     # ensure needle dir is up-to-date
-    my $save_via_git = ($app->config->{global}->{scm} || '') eq 'git';
-    if ($save_via_git) {
-        my $error = set_to_latest_git_master({dir => $needledir});
+    my $git = OpenQA::Git->new({app => $app, dir => $needledir, user => $user});
+    if ($git->enabled) {
+        my $error = $git->set_to_latest_master;
         if ($error) {
             $app->log->error($error);
             return $minion_job->fail({error => _format_git_error($needlename, $error)});
@@ -144,12 +148,10 @@ sub _save_needle {
     return $minion_job->fail({error => "<strong>Error creating/updating needle:</strong><br>$!."}) unless $success;
 
     # commit needle in Git repository
-    if ($save_via_git) {
-        my $error = commit_git(
+    if ($git->enabled) {
+        my $error = $git->commit(
             {
-                dir     => $needledir,
                 add     => ["$needledir/$needlename.json", "$needledir/$needlename.png"],
-                user    => $user,
                 message => sprintf("%s for %s", $needlename, $openqa_job->name),
             });
         if ($error) {

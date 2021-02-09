@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2014-2017 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,41 +12,25 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '10';
 use OpenQA::Test::Case;
-use OpenQA::Client;
+use OpenQA::Test::Client 'client';
 use Mojo::IOLoop;
-use OpenQA::Scheduler;
 
-# create Test DBus bus and service for fake WebSockets and Scheduler call
-my $sh = OpenQA::Scheduler->new;
+OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 04-products.pl');
+my $t = client(Test::Mojo->new('OpenQA::WebAPI'), apikey => 'ARTHURKEY01', apisecret => 'EXCALIBUR');
 
-OpenQA::Test::Case->new->init_data;
-
-my $t = Test::Mojo->new('OpenQA::WebAPI');
-
-# XXX: Test::Mojo loses it's app when setting a new ua
-# https://github.com/kraih/mojo/issues/598
-my $app = $t->app;
-$t->ua(OpenQA::Client->new(apikey => 'ARTHURKEY01', apisecret => 'EXCALIBUR')->ioloop(Mojo::IOLoop->singleton));
-$t->app($app);
-
-my $get = $t->get_ok('/api/v1/machines')->status_is(200);
+$t->get_ok('/api/v1/machines')->status_is(200);
 is_deeply(
-    $get->tx->res->json,
+    $t->tx->res->json,
     {
         'Machines' => [
             {
@@ -85,41 +68,47 @@ is_deeply(
                     }]}]
     },
     "Initial machines"
-) || diag explain $get->tx->res->json;
+) || diag explain $t->tx->res->json;
 
 
-my $res = $t->post_ok('/api/v1/machines', form => {name => "testmachine"})->status_is(400);    # missing backend
-$res = $t->post_ok('/api/v1/machines', form => {backend => "kde/usb"})->status_is(400);        #missing name
+$t->post_ok('/api/v1/machines', form => {name => "testmachine"})->status_is(400)
+  ->json_is('/error', 'Missing parameter: backend');
+$t->post_ok('/api/v1/machines', form => {backend => "kde/usb"})->status_is(400)
+  ->json_is('/error', 'Missing parameter: name');
+$t->post_ok('/api/v1/machines', form => {})->status_is(400)->json_is('/error', 'Missing parameter: backend, name');
 
-$res
-  = $t->post_ok('/api/v1/machines',
+$t->post_ok('/api/v1/machines',
     form => {name => "testmachine", backend => "qemu", "settings[TEST]" => "val1", "settings[TEST2]" => "val1"})
   ->status_is(200);
-my $machine_id = $res->tx->res->json->{id};
+my $machine_id = $t->tx->res->json->{id};
+my $event      = OpenQA::Test::Case::find_most_recent_event($t->app->schema, 'table_create');
+is_deeply(
+    [sort keys %$event],
+    ['backend', 'description', 'id', 'name', 'settings', 'table'],
+    'machine event was logged correctly'
+);
 
-$res = $t->get_ok('/api/v1/machines', form => {name => "testmachine"})->status_is(200);
-is($res->tx->res->json->{Machines}->[0]->{id}, $machine_id);
+$t->get_ok('/api/v1/machines', form => {name => "testmachine"})->status_is(200);
+is($t->tx->res->json->{Machines}->[0]->{id}, $machine_id);
 
-$res
-  = $t->post_ok('/api/v1/machines',
+$t->post_ok('/api/v1/machines',
     form => {name => "testmachineQ", backend => "qemu", "settings[TEST]" => "'v'al1", "settings[TEST2]" => "va'l\'1"})
   ->status_is(200);
-$res = $t->get_ok('/api/v1/machines', form => {name => "testmachineQ"})->status_is(200);
-is($res->tx->res->json->{Machines}->[0]->{settings}->[0]->{value}, "'v'al1");
-is($res->tx->res->json->{Machines}->[0]->{settings}->[1]->{value}, "va'l\'1");
+$t->get_ok('/api/v1/machines', form => {name => "testmachineQ"})->status_is(200);
+is($t->tx->res->json->{Machines}->[0]->{settings}->[0]->{value}, "'v'al1");
+is($t->tx->res->json->{Machines}->[0]->{settings}->[1]->{value}, "va'l\'1");
 
 $t->post_ok('/api/v1/machines', form => {name => "testmachineZ", backend => "qemu", "settings[TE'S\'T]" => "'v'al1"})
   ->status_is(200);
-$res = $t->get_ok('/api/v1/machines', form => {name => "testmachineQ"})->status_is(200);
-is($res->tx->res->json->{Machines}->[0]->{settings}->[0]->{key},   "TEST");
-is($res->tx->res->json->{Machines}->[0]->{settings}->[0]->{value}, "'v'al1");
+$t->get_ok('/api/v1/machines', form => {name => "testmachineQ"})->status_is(200);
+is($t->tx->res->json->{Machines}->[0]->{settings}->[0]->{key},   "TEST");
+is($t->tx->res->json->{Machines}->[0]->{settings}->[0]->{value}, "'v'al1");
 
-$res
-  = $t->post_ok('/api/v1/machines', form => {name => "testmachine", backend => "qemu"})->status_is(400); #already exists
+$t->post_ok('/api/v1/machines', form => {name => "testmachine", backend => "qemu"})->status_is(400);    #already exists
 
-$get = $t->get_ok("/api/v1/machines/$machine_id")->status_is(200);
+$t->get_ok("/api/v1/machines/$machine_id")->status_is(200);
 is_deeply(
-    $get->tx->res->json,
+    $t->tx->res->json,
     {
         'Machines' => [
             {
@@ -137,14 +126,14 @@ is_deeply(
                     }]}]
     },
     "Add machine"
-) || diag explain $get->tx->res->json;
+) || diag explain $t->tx->res->json;
 
-$res = $t->put_ok("/api/v1/machines/$machine_id",
+$t->put_ok("/api/v1/machines/$machine_id",
     form => {name => "testmachine", backend => "qemu", "settings[TEST2]" => "val1"})->status_is(200);
 
-$get = $t->get_ok("/api/v1/machines/$machine_id")->status_is(200);
+$t->get_ok("/api/v1/machines/$machine_id")->status_is(200);
 is_deeply(
-    $get->tx->res->json,
+    $t->tx->res->json,
     {
         'Machines' => [
             {
@@ -158,16 +147,74 @@ is_deeply(
                     }]}]
     },
     "Delete machine variable"
-) || diag explain $get->tx->res->json;
+) || diag explain $t->tx->res->json;
 
-$res = $t->delete_ok("/api/v1/machines/$machine_id")->status_is(200);
-$res = $t->delete_ok("/api/v1/machines/$machine_id")->status_is(404);    #not found
+$t->delete_ok("/api/v1/machines/$machine_id")->status_is(200);
+$t->delete_ok("/api/v1/machines/$machine_id")->status_is(404);    #not found
 
-# switch to operator (percival) and try some modifications
-$app = $t->app;
-$t->ua(
-    OpenQA::Client->new(apikey => 'PERCIVALKEY02', apisecret => 'PERCIVALSECRET02')->ioloop(Mojo::IOLoop->singleton));
-$t->app($app);
+subtest 'trim whitespace characters' => sub {
+    $t->post_ok(
+        '/api/v1/machines',
+        form => {
+            name                => " create_with_space ",
+            backend             => " qemu ",
+            "settings[ TEST ]"  => " test value  ",
+            "settings[TEST2  ]" => " test value2  ",
+        })->status_is(200);
+    my $id = $t->tx->res->json->{id};
+    $t->get_ok("/api/v1/machines/$id")->status_is(200);
+    $t->json_is(
+        '' => {
+            'Machines' => [
+                {
+                    'backend'  => 'qemu',
+                    'id'       => $id,
+                    'name'     => 'create_with_space',
+                    'settings' => [
+                        {
+                            'key'   => 'TEST',
+                            'value' => 'test value'
+                        },
+                        {
+                            'key'   => 'TEST2',
+                            'value' => 'test value2'
+                        }]}]
+        },
+        'trim whitespace characters when create table'
+    )->or(sub { diag explain $t->tx->res->json });
+
+    $t->put_ok(
+        "/api/v1/machines/$id",
+        form => {
+            name               => "  update_with_space ",
+            backend            => "qemu ",
+            "settings[ TEST ]" => " new test value  ",
+            "settings[ TEST3]" => "  new test value3 ",
+        })->status_is(200);
+    $t->get_ok("/api/v1/machines/$id")->status_is(200);
+    $t->json_is(
+        '' => {
+            'Machines' => [
+                {
+                    'backend'  => 'qemu',
+                    'id'       => $id,
+                    'name'     => 'update_with_space',
+                    'settings' => [
+                        {
+                            'key'   => 'TEST',
+                            'value' => 'new test value'
+                        },
+                        {
+                            'key'   => 'TEST3',
+                            'value' => 'new test value3'
+                        }]}]
+        },
+        'trim whitespace characters when update table'
+    )->or(sub { diag explain $t->tx->res->json });
+};
+
+# switch to operator (default client) and try some modifications
+client($t);
 $t->post_ok('/api/v1/machines',
     form => {name => "testmachine", backend => "qemu", "settings[TEST]" => "val1", "settings[TEST2]" => "val1"})
   ->status_is(403);

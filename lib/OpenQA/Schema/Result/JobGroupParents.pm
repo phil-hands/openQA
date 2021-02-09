@@ -1,4 +1,4 @@
-# Copyright (C) 2016-2018 SUSE LLC
+# Copyright (C) 2016-2019 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::JobGroupParents;
 
@@ -21,7 +20,9 @@ use warnings;
 
 use base 'DBIx::Class::Core';
 
-use OpenQA::Schema::JobGroupDefaults;
+use OpenQA::App;
+use OpenQA::Markdown 'markdown_to_html';
+use OpenQA::JobGroupDefaults;
 use OpenQA::Utils 'parse_tags_from_comments';
 use Class::Method::Modifiers;
 
@@ -37,8 +38,12 @@ __PACKAGE__->add_columns(
         data_type   => 'text',
         is_nullable => 0,
     },
-    default_size_limit_gb => {
+    size_limit_gb => {
         data_type   => 'integer',
+        is_nullable => 1,
+    },
+    exclusively_kept_asset_size => {
+        data_type   => 'bigint',
         is_nullable => 1,
     },
     default_keep_logs_in_days => {
@@ -94,13 +99,8 @@ sub _get_column_or_default {
     if (defined(my $own_value = $self->get_column($column))) {
         return $own_value;
     }
-    return $OpenQA::Utils::app->config->{default_group_limits}->{$setting};
+    return OpenQA::App->singleton->config->{default_group_limits}->{$setting};
 }
-
-around 'default_size_limit_gb' => sub {
-    my ($orig, $self) = @_;
-    return $self->_get_column_or_default('default_size_limit_gb', 'asset_size_limit');
-};
 
 around 'default_keep_logs_in_days' => sub {
     my ($orig, $self) = @_;
@@ -124,12 +124,12 @@ around 'default_keep_important_results_in_days' => sub {
 
 around 'default_priority' => sub {
     my ($orig, $self) = @_;
-    return $self->get_column('default_priority') // OpenQA::Schema::JobGroupDefaults::PRIORITY;
+    return $self->get_column('default_priority') // OpenQA::JobGroupDefaults::PRIORITY;
 };
 
 around 'carry_over_bugrefs' => sub {
     my ($orig, $self) = @_;
-    return $self->get_column('carry_over_bugrefs') // OpenQA::Schema::JobGroupDefaults::CARRY_OVER_BUGREFS;
+    return $self->get_column('carry_over_bugrefs') // OpenQA::JobGroupDefaults::CARRY_OVER_BUGREFS;
 };
 
 sub matches_nested {
@@ -157,11 +157,9 @@ sub jobs {
 }
 
 sub rendered_description {
-    my ($self) = @_;
-
-    return unless $self->description;
-    my $m = CommentsMarkdownParser->new;
-    return Mojo::ByteStream->new($m->markdown($self->description));
+    my $self = shift;
+    return undef unless my $desc = $self->description;
+    return Mojo::ByteStream->new(markdown_to_html($desc));
 }
 
 sub tags {

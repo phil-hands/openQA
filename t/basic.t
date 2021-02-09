@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2017 SUSE LLC
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,44 +13,16 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN { unshift @INC, 'lib'; }
-
-use Mojo::Base -strict;
-use FindBin;
-use lib "$FindBin::Bin/lib";
-use Test::More;
+use Test::Most;
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+
+use FindBin;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Test::Database;
-use Mojo::File qw(tempdir path);
+use OpenQA::Test::TimeLimit '8';
 
 OpenQA::Test::Database->new->create(skip_fixtures => 1);
+Test::Mojo->new('OpenQA::WebAPI')->get_ok('/')->status_is(200)->content_like(qr/Welcome to openQA/i);
 
-my $t = Test::Mojo->new('OpenQA::WebAPI');
-$t->get_ok('/')->status_is(200)->content_like(qr/Welcome to openQA/i);
-
-my $tempdir = tempdir;
-
-sub test_auth_method_startup {
-    my $auth = shift;
-
-    my @conf = ("[auth]\n", "method = \t  $auth \t\n");
-    $ENV{OPENQA_CONFIG} = $tempdir;
-    $tempdir->child("openqa.ini")->spurt(@conf);
-
-    no warnings 'redefine';
-    my $t = Test::Mojo->new('OpenQA::WebAPI');
-    ok($t->app->config->{auth}->{method} eq $auth, "started successfully with auth $auth");
-}
-
-OpenQA::Test::Database->new->create(skip_fixtures => 1);
-
-for my $a (qw(Fake OpenID iChain)) {
-    test_auth_method_startup($a);
-}
-
-eval { test_auth_method_startup('nonexistant') };
-ok($@, 'refused to start with non existant auth module');
-
-
-done_testing();
+done_testing;

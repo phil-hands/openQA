@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2018 SUSE Linux GmbH
+# Copyright (C) 2015-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,15 +16,20 @@
 package OpenQA::WebAPI::Controller::API::V1::Job;
 use Mojo::Base 'Mojolicious::Controller';
 
-use OpenQA::Utils;
+use OpenQA::Utils qw(:DEFAULT assetdir);
+use OpenQA::JobSettings;
 use OpenQA::Jobs::Constants;
 use OpenQA::Resource::Jobs;
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Events;
+use OpenQA::Scheduler::Client;
+use OpenQA::Log qw(log_error log_info);
 use Try::Tiny;
 use DBIx::Class::Timestamps 'now';
 use Mojo::Asset::Memory;
 use Mojo::File 'path';
+
+use constant JOB_QUERY_LIMIT => 10000;
 
 =pod
 
@@ -50,6 +55,35 @@ List jobs in the system, including related information for each job such as the 
 associated, assigned worker id, children and parents, job id, group id, name, priority,
 result, settings, state and times of startup and finish of the job.
 
+These options are currently available:
+
+=over 4
+
+=item latest
+
+  latest => 1
+
+De-duplicate so that for the same DISTRI, VERSION, BUILD, TEST, FLAVOR, ARCH and MACHINE
+only the latest job is returned.
+
+=item scope
+
+  scope => relevant
+
+Only pending, not obsoleted jobs are included in the results.
+
+  scope => current
+
+Clones are excluded from the results.
+
+=item limit
+
+  limit => 100
+
+Limit the number of jobs.
+
+=back
+
 =back
 
 =cut
@@ -57,9 +91,19 @@ result, settings, state and times of startup and finish of the job.
 sub list {
     my $self = shift;
 
+    my $validation = $self->validation;
+    $validation->optional('scope')->in('current', 'relevant');
+    $validation->optional('limit')->num(0);
+    $validation->optional('latest')->num(1);
+
+    my $limit = $validation->param('limit') // JOB_QUERY_LIMIT;
+    return $self->render(json => {error => 'Limit exceeds maximum'}, status => 400) unless $limit <= JOB_QUERY_LIMIT;
+    return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
+
     my %args;
+    $args{limit} = $limit;
     my @args = qw(build iso distri version flavor maxage scope group
-      groupid limit page before after arch hdd_1 test machine worker_class
+      groupid page before after arch hdd_1 test machine worker_class
       failed_modules modules modules_result);
     for my $arg (@args) {
         next unless defined(my $value = $self->param($arg));
@@ -83,7 +127,7 @@ sub list {
     my $schema = $self->schema;
     my $rs     = $schema->resultset('Jobs')->complex_query(%args);
     my @jobarray;
-    if (defined $self->param('latest')) {
+    if (defined $validation->param('latest')) {
         @jobarray = $rs->latest_jobs;
     }
     else {
@@ -156,10 +200,11 @@ So this works in the same way as the test results overview in the GUI.
 
 sub overview {
     my $self = shift;
-    my ($search_args, $groups) = OpenQA::Utils::compose_job_overview_search_args($self);
-    my $failed_modules = OpenQA::Utils::param_hash($self, 'failed_modules');
-    my $states         = OpenQA::Utils::param_hash($self, 'state');
-    my $results        = OpenQA::Utils::param_hash($self, 'result');
+
+    my ($search_args, $groups) = $self->compose_job_overview_search_args;
+    my $failed_modules = $self->param_hash('failed_modules');
+    my $states         = $self->param_hash('state');
+    my $results        = $self->param_hash('result');
 
     my @jobs = $self->schema->resultset('Jobs')->complex_query(%$search_args)->latest_jobs;
 
@@ -193,8 +238,9 @@ is mandatory and should be the name of the test.
 =cut
 
 sub create {
-    my $self   = shift;
-    my $params = $self->req->params->to_hash;
+    my $self         = shift;
+    my $params       = $self->req->params->to_hash;
+    my $is_clone_job = delete $params->{is_clone_job} // 0;
 
     # job_create expects upper case keys
     my %up_params = map { uc $_ => $params->{$_} } keys %$params;
@@ -206,18 +252,29 @@ sub create {
 
     my $json = {};
     my $status;
+    my $job_settings = \%params;
+    if (!$is_clone_job) {
+        my $result = $self->_generate_job_setting(\%params);
+        return $self->render(json => {error => $result->{error_message}}, status => 400)
+          if defined $result->{error_message};
+        $job_settings = $result->{settings_result};
+    }
     try {
-        my $job = $self->schema->resultset('Jobs')->create_from_settings(\%params);
-        $self->emit_event('openqa_job_create', {id => $job->id, %params});
-        $json->{id} = $job->id;
+        my $downloads = create_downloads_list($job_settings);
+        my $schema    = $self->schema;
+        $schema->txn_do(
+            sub {
+                my $job    = $schema->resultset('Jobs')->create_from_settings($job_settings);
+                my $job_id = $job->id;
+                $self->emit_event(openqa_job_create => {id => $job_id, %params});
+                $json->{id} = $job_id;
 
-        # enqueue gru jobs
-        my $downloads = create_downloads_list(\%params);
-        my $gru       = $self->gru;
-        $gru->enqueue_download_jobs($downloads, [$job->id]);
-        $gru->enqueue_limit_assets;
-        $job->calculate_blocked_by;
-        wakeup_scheduler;
+                # enqueue gru jobs
+                push @{$downloads->{$_}}, [$job_id] for keys %$downloads;
+                $self->gru->enqueue_download_jobs($downloads);
+                $job->calculate_blocked_by;
+                OpenQA::Scheduler::Client->singleton->wakeup;
+            });
     }
     catch {
         $status = 400;
@@ -232,8 +289,8 @@ sub create {
 =item show()
 
 Shows details for a specific job, such as the assets associated, assigned worker id,
-children and parents, job id, group id, name, priority, result, settings, state and times
-of startup and finish of the job.
+children and parents, job id, group id, name, parent group id and name, priority, result,
+settings, state and times of startup and finish of the job.
 
 =back
 
@@ -245,7 +302,7 @@ sub show {
     my $details = $self->stash('details') || 0;
     my $job     = $self->schema->resultset("Jobs")->search({'me.id' => $job_id}, {prefetch => 'settings'})->first;
     if ($job) {
-        $self->render(json => {job => $job->to_hash(assets => 1, deps => 1, details => $details)});
+        $self->render(json => {job => $job->to_hash(assets => 1, deps => 1, details => $details, parent_group => 1)});
     }
     else {
         $self->reply->not_found;
@@ -265,7 +322,7 @@ Deletes a job from the system.
 sub destroy {
     my $self = shift;
 
-    my $job = find_job($self, $self->stash('jobid')) or return;
+    return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
     $self->emit_event('openqa_job_delete', {id => $job->id});
     $job->delete;
     $self->render(json => {result => 1});
@@ -283,7 +340,7 @@ Sets priority for a given job.
 
 sub prio {
     my ($self) = @_;
-    my $job = find_job($self, $self->stash('jobid')) or return;
+    return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
     my $res = $job->set_prio($self->param('prio'));
 
     # Referencing the scalar will result in true or false
@@ -303,7 +360,7 @@ Updates result of a job in the system. Replaced in favor of done.
 
 sub result {
     my ($self) = @_;
-    my $job    = find_job($self, $self->stash('jobid')) or return;
+    return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
     my $result = $self->param('result');
 
     my $res = $job->update({result => $result});
@@ -328,56 +385,76 @@ id must match the id of the worker assigned to the job identified by the job id.
 sub update_status {
     my ($self) = @_;
 
-    if (!$self->req->json) {
-        $self->render(json => {error => 'No status information provided'}, status => 400);
-        return;
-    }
+    return $self->render(json => {error => 'No status information provided'}, status => 400)
+      unless my $json = $self->req->json;
 
-    my $status = $self->req->json->{status};
+    my $status = $json->{status};
     my $job_id = $self->stash('jobid');
-    my $job    = find_job($self, $job_id);
+    my $job    = $self->schema->resultset('Jobs')->find($job_id);
     if (!$job) {
         my $err = 'Got status update for non-existing job: ' . $job_id;
-        OpenQA::Utils::log_info($err);
-        $self->render(json => {error => $err}, status => 400);
-        return;
+        log_info($err);
+        return $self->render(json => {error => $err}, status => 400);
     }
 
-    if (!exists $status->{worker_id}) {
-        my $err = 'Got status update for job ' . $job_id . ' but does not contain a worker id!';
-        OpenQA::Utils::log_info($err);
-        $self->render(json => {error => $err}, status => 400);
-        return;
+    my $worker_id = $status->{worker_id};
+    if (!defined $worker_id) {
+        my $err = "Got status update for job $job_id but does not contain a worker id!";
+        log_info($err);
+        return $self->render(json => {error => $err}, status => 400);
     }
 
+    # find worker
+    # - use either the worker which is known to execute the current job right now
+    # - or use the assigned worker if the job is still running
     my $worker = $job->worker;
-    if (!$worker || $worker->id != $status->{worker_id}) {
-        my $err
-          = "Got status update for job $job_id with unexpected worker ID $status->{worker_id}"
-          . ' (expected '
-          . ($worker ? $worker->id : 'none') . ')';
-        OpenQA::Utils::log_info($err);
-        $self->render(json => {error => $err}, status => 400);
-        return;
+    my $use_assigned_worker;
+    if (!$worker && !defined $job->t_finished) {
+        if (my $assigned_worker = $job->assigned_worker) {
+            $worker              = $assigned_worker;
+            $use_assigned_worker = 1;
+        }
+        else {
+            my $job_status = $job->status_info;
+            my $err        = "Got status update for job $job_id and worker $worker_id but there is"
+              . " not even a worker assigned to this job (job is $job_status)";
+            log_info($err);
+            return $self->render(json => {error => $err}, status => 400);
+        }
     }
 
+    if (!$worker || $worker->id != $worker_id) {
+        my $expected_worker_id = $worker ? $worker->id : 'no updates anymore';
+        my $job_status         = $job->status_info;
+        my $err
+          = "Got status update for job $job_id with unexpected worker ID $worker_id"
+          . " (expected $expected_worker_id, job is $job_status)";
+        log_info($err);
+        return $self->render(json => {error => $err}, status => 400);
+    }
+
+    # update worker and job status
     my $ret;
     try {
+        $worker->update({job_id => $job->id}) if $use_assigned_worker;
+        $worker->seen;
         $ret = $job->update_status($status);
     }
     catch {
+        # uncoverable statement
         my $error_message = $_;
-        my $worker_name   = $worker->name;
+        # uncoverable statement
+        my $worker_name = $worker->name;
+        # uncoverable statement
         $ret = {error => $error_message};
-        OpenQA::Utils::log_error(
-            "Unexpected error when updating job $job_id executed by worker $worker_name: $error_message");
+        # uncoverable statement
+        log_error("Unexpected error when updating job $job_id executed by worker $worker_name: $error_message");
     };
     if (!$ret || $ret->{error} || $ret->{error_status}) {
         $ret = {} unless $ret;
         $ret->{error}        //= 'Unable to update status';
         $ret->{error_status} //= 400;
-        $self->render(json => {error => $ret->{error}}, status => $ret->{error_status});
-        return;
+        return $self->render(json => {error => $ret->{error}}, status => $ret->{error_status});
     }
     $self->render(json => $ret);
 }
@@ -396,7 +473,7 @@ Columns group_id and priority cannot be set.
 sub update {
     my ($self) = @_;
 
-    my $job  = find_job($self, $self->stash('jobid')) or return;
+    return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
     my $json = $self->req->json;
     return $self->render(json => {error => 'No updates provided (must be provided as JSON)'}, status => 400)
       unless $json;
@@ -454,34 +531,44 @@ sub create_artefact {
     my ($self) = @_;
 
     my $jobid = int($self->stash('jobid'));
-    my $job   = find_job($self, $jobid);
+    my $job   = $self->schema->resultset('Jobs')->find($jobid);
     if (!$job) {
-        OpenQA::Utils::log_info('Got artefact for non-existing job: ' . $jobid);
+        log_info('Got artefact for non-existing job: ' . $jobid);
         return $self->render(json => {error => "Specified job $jobid does not exist"}, status => 404);
     }
-    if (!$job->worker) {
-        OpenQA::Utils::log_info(
-            'Got artefact for job with no worker assigned (maybe running job already considered dead): ' . $jobid);
-        $self->render(json => {error => 'No worker assigned'}, status => 404);
-        return;
-    }
+
     # mark the worker as alive
-    $job->worker->seen;
+    if (my $worker = $job->worker) {
+        $worker->seen;
+    }
+    else {
+        log_info('Got artefact for job with no worker assigned (maybe running job already considered dead): ' . $jobid);
+        return $self->render(json => {error => 'No worker assigned'}, status => 404);
+    }
+
+    # validate parameters
+    my $validation = $self->validation;
+    $validation->required('file');
+    $validation->upload unless $self->param('local');
+    $validation->required('md5')->like(qr/^[a-fA-F0-9]{32}$/) if $self->param('image');
+    if ($self->param('extra_test')) {
+        $validation->required('type');
+        $validation->required('script');
+    }
+    return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
     if ($self->param('image')) {
-        $job->store_image($self->param('file'), $self->param('md5'), $self->param('thumb') // 0);
-        $self->render(text => "OK");
-        return;
+        $job->store_image($validation->param('file'), $validation->param('md5'), $self->param('thumb') // 0);
+        return $self->render(text => "OK");
     }
     elsif ($self->param('extra_test')) {
         return $self->render(text => "OK")
-          if $job->parse_extra_tests($self->param('file'), $self->param('type'), $self->param('script'));
+          if $job->parse_extra_tests($validation->param('file'), $validation->param('type'),
+            $validation->param('script'));
         return $self->render(text => "FAILED");
     }
     elsif ($self->param('asset')) {
         $self->render_later;    # XXX: Not really needed, but in case of upstream changes
-        my @ioloop_evs = qw(events);
-        my @evs        = @{Mojo::IOLoop->singleton}{@ioloop_evs};
 
         # See: https://mojolicious.org/perldoc/Mojolicious/Guides/FAQ#What-does-Connection-already-closed-mean
         my $tx = $self->tx;     # NOTE: Keep tx around as long operations could make it disappear
@@ -489,9 +576,9 @@ sub create_artefact {
         return Mojo::IOLoop->subprocess(
             sub {
                 die "Transaction empty" if $tx->is_empty;
-                @{Mojo::IOLoop->singleton}{@ioloop_evs} = @evs;
                 OpenQA::Events->singleton->emit('chunk_upload.start' => $self);
-                my ($e, $fname, $type, $last) = $job->create_asset($self->param('file'), $self->param('asset'));
+                my ($e, $fname, $type, $last)
+                  = $job->create_asset($validation->param('file'), $self->param('asset'), $self->param('local'));
                 OpenQA::Events->singleton->emit('chunk_upload.end' => ($self, $e, $fname, $type, $last));
                 die "$e" if $e;
                 return $fname, $type, $last;
@@ -502,7 +589,7 @@ sub create_artefact {
                 # So worker can keep retrying if it was caused by network failures
                 $self->app->log->debug($e) if $e;
 
-                $self->render(json => {error => 'Failed receiving chunk: ' . $e}, status => 500) and return if $e;
+                $self->render(json => {error => 'Failed receiving asset: ' . $e}, status => 500) and return if $e;
                 my $fname = $results[0];
                 my $type  = $results[1];
                 my $last  = $results[2];
@@ -512,7 +599,7 @@ sub create_artefact {
                 return $self->render(json => {status => 'ok'});
             });
     }
-    if ($job->create_artefact($self->param('file'), $self->param('ulog'))) {
+    if ($job->create_artefact($validation->param('file'), $self->param('ulog'))) {
         $self->render(text => "OK");
     }
     else {
@@ -534,16 +621,24 @@ that has been partially uploaded.
 
 sub upload_state {
     my ($self) = @_;
-    my $file   = $self->param('filename');
-    my $state  = $self->param('state');
-    my $scope  = $self->param('scope');
+
+    my $validation = $self->validation;
+    $validation->required('filename');
+    $validation->required('state');
+    # private or public, handled as an event in Upload.pm
+    $validation->required('scope');
+    return $self->reply->validation_error if $validation->has_error;
+
+    my $file   = $validation->param('filename');
+    my $state  = $validation->param('state');
+    my $scope  = $validation->param('scope') // 'private';
     my $job_id = $self->stash('jobid');
 
     $file = sprintf("%08d-%s", $job_id, $file) if $scope ne 'public';
 
     if ($state eq 'fail') {
         $self->app->log->debug("FAIL chunk upload of $file");
-        path($OpenQA::Utils::assetdir, 'tmp', $scope)->list_tree({dir => 1})->each(
+        path(assetdir(), 'tmp', $scope)->list_tree({dir => 1})->each(
             sub {
                 $_->remove_tree if -d $_ && $_->basename eq $file . '.CHUNKS';
             });
@@ -563,72 +658,147 @@ Updates result of a job in the system.
 
 sub done {
     my ($self) = @_;
+    return undef unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
 
-    my $job    = find_job($self, $self->stash('jobid')) or return;
-    my $result = $self->param('result');
-    my $newbuild;
-    $newbuild = 1 if defined $self->param('newbuild');
+    my $validation = $self->validation;
+    # This must be within the RESULTS constant. We're not checking it here, though,
+    # because the done() function in Schema/Result/Jobs.pm already validates it.
+    $validation->optional('result');
+    $validation->optional('reason');
+    $validation->optional('newbuild')->num(1);
+    $validation->optional('worker_id')->num(0, undef);
+    return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
+    # check whether the specified worker matches the actually assigned one; refuse the update if not
+    if (my $specified_worker_id = $validation->param('worker_id')) {
+        my $assigned_worker_id = $job->assigned_worker_id;
+        my $msg                = (
+            defined $assigned_worker_id
+            ? (
+                $assigned_worker_id != $specified_worker_id
+                ? "Refusing to set result because job is currently assigned to worker $assigned_worker_id)."
+                : undef
+              )
+            : 'Refusing to set result because job has already been re-scheduled.'
+        );
+        return $self->render(status => 400, json => {error => $msg}) if $msg;
+    }
+
+    my $result   = $validation->param('result');
+    my $reason   = $validation->param('reason');
+    my $newbuild = defined $validation->param('newbuild') ? 1 : undef;
     my $res;
-    if ($newbuild) {
-        $res = $job->done(result => $result, newbuild => $newbuild);
+    try {
+        $res = $job->done(result => $result, reason => $reason, newbuild => $newbuild);
     }
-    else {
-        $res = $job->done(result => $result);
-    }
+    catch {
+        $self->render(status => 400, json => {error => $_});
+    };
+    return undef unless $res;
 
     # use $res as a result, it is recomputed result by scheduler
-    $self->emit_event('openqa_job_done', {id => $job->id, result => $res, newbuild => $newbuild});
+    $self->emit_event('openqa_job_done', {id => $job->id, result => $res, reason => $reason, newbuild => $newbuild});
 
     # See comment in prio
-    $self->render(json => {result => \$res});
+    $self->render(json => {result => \$res, reason => \$reason});
 }
 
-=over 4
+sub _restart {
+    my ($self, %args) = @_;
 
-=item restart()
+    my $dup_route  = $args{duplicate_route_compatibility};
+    my @flags      = qw(force skip_aborting_jobs skip_parents skip_children skip_ok_result_children);
+    my $validation = $self->validation;
+    $validation->optional('prio')->num;
+    $validation->optional('dup_type_auto')->num(0);    # recorded within the event; for informal purposes only
+    $validation->optional('jobid')->num(0);
+    $validation->optional('jobs');
+    $validation->optional($_)->num(0) for @flags;
+    return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
-Restart job or jobs. Used for both apiv1_restart and apiv1_restart_jobs
-
-=back
-
-=cut
-
-sub restart {
-    my ($self) = @_;
     my $jobs = $self->param('jobid');
+    my $single_job_id;
     if ($jobs) {
         $self->app->log->debug("Restarting job $jobs");
-        $jobs = [$jobs];
+        $jobs          = [$jobs];
+        $single_job_id = $jobs->[0];
     }
     else {
         $jobs = $self->every_param('jobs');
         $self->app->log->debug("Restarting jobs @$jobs");
     }
 
-    my @res = OpenQA::Resource::Jobs::job_restart($jobs);
-    wakeup_scheduler;
+    my $auto   = defined $validation->param('dup_type_auto') ? int($validation->param('dup_type_auto')) : 0;
+    my @params = map { $validation->param($_) ? ($_ => 1) : () } @flags;
+    push @params, prio               => int($validation->param('prio')) if defined $validation->param('prio');
+    push @params, skip_aborting_jobs => 1 if $dup_route && !defined $validation->param('skip_aborting_jobs');
+    push @params, force              => 1 if $dup_route && !defined $validation->param('force');
 
+    my $res = OpenQA::Resource::Jobs::job_restart($jobs, @params);
+    OpenQA::Scheduler::Client->singleton->wakeup;
+
+    my $duplicates = $res->{duplicates};
     my @urls;
-    for (my $i = 0; $i < @res; $i++) {
-        my $r = $res[$i];
-        $self->emit_event('openqa_job_restart', {id => $jobs->[$i], result => $r});
-
-        my $url = {};
-        for my $k (keys %$r) {
-            my $u = $self->url_for('test', testid => $r->{$k});
-            $url->{$k} = $u;
-        }
-        push @urls, $url;
+    for (my $i = 0; $i < @$duplicates; $i++) {
+        my $result = $duplicates->[$i];
+        $self->emit_event(openqa_job_restart => {id => $jobs->[$i], result => $result, auto => $auto});
+        push @urls, {map { $_ => $self->url_for('test', testid => $result->{$_}) } keys %$result};
     }
-    $self->render(json => {result => \@res, test_url => \@urls});
+
+    my $clone_id = ($dup_route && $single_job_id) ? ($duplicates->[0] // {})->{$single_job_id} : undef;
+    $self->render(
+        json => {
+            result   => $duplicates,
+            test_url => \@urls,
+            defined $clone_id   ? (id          => $clone_id)        : (),
+            @{$res->{warnings}} ? (warnings    => $res->{warnings}) : (),
+            @{$res->{errors}}   ? (errors      => $res->{errors})   : (),
+            $res->{enforceable} ? (enforceable => 1)                : (),
+        });
 }
+
+=over 4
+
+=item restart()
+
+Restart job(s).
+
+Use force=1 to force the restart (e.g. despite missing assets).
+Use prio=X to set the priority of the new jobs.
+Use skip_aborting_jobs=1 to prevent aborting the old jobs if they would still be running.
+Use skip_parents=1 to prevent restarting parent jobs.
+Use skip_children=1 to prevent restarting child jobs.
+Use skip_ok_result_children=1 to prevent restarting passed/softfailed child jobs.
+
+Used for both apiv1_restart and apiv1_restart_jobs
+
+=back
+
+=cut
+
+sub restart { shift->_restart }
+
+=over 4
+
+=item duplicate()
+
+The same as the restart route except that running jobs are not aborted and there's no check for missing assets
+by default. This route is only supposed to be used by the worker itself when it is already in the process of
+aborting the job.
+
+=back
+
+=cut
+
+sub duplicate { shift->_restart(duplicate_route_compatibility => 1) }
 
 =over 4
 
 =item cancel()
 
-Cancel job or jobs. Used for both apiv1_cancel and apiv1_cancel_jobs
+Cancel job or jobs.
+
+Used for both apiv1_cancel and apiv1_cancel_jobs
 
 =back
 
@@ -640,7 +810,7 @@ sub cancel {
 
     my $res;
     if ($jobid) {
-        my $job = find_job($self, $self->stash('jobid')) or return;
+        return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
         $job->cancel;
         $self->emit_event('openqa_job_cancel', {id => int($jobid)});
     }
@@ -651,45 +821,6 @@ sub cancel {
     }
 
     $self->render(json => {result => $res});
-}
-
-=over 4
-
-=item duplicate()
-
-Creates a new job as a duplicate of an existing one given its job id.
-
-=back
-
-=cut
-
-sub duplicate {
-    my ($self) = @_;
-
-    my $jobid = int($self->param('jobid'));
-    my $job   = find_job($self, $self->stash('jobid')) or return;
-    my $args;
-    if (defined $self->param('prio')) {
-        $args->{prio} = int($self->param('prio'));
-    }
-    if (defined $self->param('dup_type_auto')) {
-        $args->{dup_type_auto} = 1;
-    }
-
-    my $dup = $job->auto_duplicate($args);
-    if ($dup) {
-        $self->emit_event(
-            'openqa_job_duplicate',
-            {
-                id     => $job->id,
-                auto   => $args->{dup_type_auto} // 0,
-                result => $dup->id
-            });
-        $self->render(json => {id => $dup->id});
-    }
-    else {
-        $self->render(json => {});
-    }
 }
 
 =over 4
@@ -708,5 +839,65 @@ sub whoami {
     $self->render(json => {id => $jobid});
 }
 
+=over 4
+
+=item _generate_job_setting()
+
+Create job for product matching the contents of the DISTRI, VERSION, FLAVOR and ARCH, MACHINE
+settings, and returns a job's settings. Internal method used in the B<create()> method.
+
+=back
+
+=cut
+
+sub _generate_job_setting {
+    my ($self, $args) = @_;
+    my $schema = $self->schema;
+
+    my %settings;    # Machines, product and test suite settings for the job
+    my @classes;     # Populated with WORKER_CLASS settings from machines and products
+    my %params = (input_args => $args, settings => \%settings);
+
+    # Populated with Product settings if there are DISTRI, VERSION, FLAVOR, ARCH in arguments.
+    if (   defined $args->{DISTRI}
+        && defined $args->{VERSION}
+        && defined $args->{FLAVOR}
+        && defined $args->{ARCH})
+    {
+        my $products = $schema->resultset('Products')->search(
+            {
+                distri  => $args->{DISTRI},
+                version => $args->{VERSION},
+                arch    => $args->{ARCH},
+                flavor  => $args->{FLAVOR},
+            });
+        if (my $product = $products->next) {
+            $params{product} = $product;
+        }
+    }
+
+    # Populated with machine settings if there is MACHINE in arguments.
+    if (defined $args->{MACHINE}) {
+        my $machines = $schema->resultset('Machines')->search(
+            {
+                name => $args->{MACHINE},
+            });
+        if (my $machine = $machines->next) {
+            $params{machine} = $machine;
+        }
+    }
+
+    # TEST is mandatory, so populate with TestSuite settings.
+    my $test_suites = $schema->resultset('TestSuites')->search(
+        {
+            name => $args->{TEST},
+        });
+    if (my $test_suite = $test_suites->next) {
+        $params{test_suite} = $test_suite;
+    }
+
+    my $error_message = OpenQA::JobSettings::generate_settings(\%params);
+    return {error_message => $error_message, settings_result => \%settings};
+}
+
 1;
-# vim: set sw=4 et:

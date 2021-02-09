@@ -22,7 +22,6 @@ use OpenQA::Parser::Result::OpenQA;
 use Mojo::DOM;
 
 has include_results => 0;
-has [qw(_dom)];
 
 # Override to use specific OpenQA Result class.
 sub _add_single_result { shift->generated_tests_results->add(OpenQA::Parser::Result::OpenQA->new(@_)) }
@@ -47,10 +46,9 @@ sub _add_result {
 sub parse {
     my ($self, $xml) = @_;
     confess "No XML given/loaded" unless $xml;
-    $self->_dom(Mojo::DOM->new($xml));
-    confess "Failed parsing XML" unless @{$self->_dom->tree} > 2;
+    my $dom = Mojo::DOM->new($xml);
+    confess "Failed parsing XML" unless @{$dom->tree} > 2;
 
-    my $dom = $self->_dom();
     my @tests;
     for my $ts ($dom->find('testsuite')->each) {
         my $ts_category = $ts->{package};
@@ -61,7 +59,7 @@ sub parse {
         $ts_category =~ s/\..*$//;
         $ts_name     =~ s/^[^.]*\.//;
         $ts_name     =~ s/\./_/;
-        if ($ts->{id} =~ /^[0-9]+$/) {
+        if (($ts->{id} // '') =~ /^[0-9]+$/) {
             # make sure that the name is unique
             # prepend numeric $ts->{id}, start counting from 1
             $ts_name = ($ts->{id} + 1) . '_' . $ts_name;
@@ -75,7 +73,12 @@ sub parse {
             });
 
         my $ts_result = 'ok';
-        $ts_result = 'fail' if $ts->{failures} || $ts->{errors};
+        if ($ts->{failures} || $ts->{errors}) {
+            $ts_result = 'fail';
+        }
+        elsif ($ts->{softfailures}) {
+            $ts_result = 'softfail';
+        }
 
         my $result = {
             result  => $ts_result,
@@ -94,11 +97,17 @@ sub parse {
                 $tc_result = $tc->{status};
                 $tc_result =~ s/^success$/ok/;
                 $tc_result =~ s/^skipped$/missing/;
-                $tc_result =~ s/^error$/unknown/;     # error in the testsuite itself
-                $tc_result =~ s/^failure$/fail/;      # test failed
+                $tc_result =~ s/^error$/unknown/;          # error in the testsuite itself
+                $tc_result =~ s/^failure$/fail/;           # test failed
+                $tc_result =~ s/^softfail.*$/softfail/;    # test softfailed
             }
 
-            $result->{result} = 'fail' if $tc_result eq 'fail';
+            if ($tc_result eq 'fail') {
+                $result->{result} = 'fail';
+            }
+            elsif ($tc_result eq 'softfail' && $result->{result} ne 'fail') {
+                $result->{result} = 'softfail';
+            }
 
             my $details = {result => $tc_result};
             my $text_fn = "$ts_category-$ts_name-$num";
@@ -167,8 +176,9 @@ With the attribute C<include_result()> set to true, it will include inside the
 results the respective test that generated it (inside the C<test()> attribute).
 See also L<OpenQA::Parser::Result::OpenQA>.
 
-JUnit format is specific for slenkins tests. If you wish to use generic JUnit format,
-use XUnit format instead.
+This JUnit format was originally used for slenkins tests but is now used for
+different purposes. If you wish to use generic JUnit format it is still
+recommend to use XUnit format instead.
 
 =head1 ATTRIBUTES
 

@@ -28,9 +28,21 @@ organization on GitHub].
 
 This document describes the general operation and usage of openQA. The main goal
 is to provide a general overview of the tool, with all the information needed to
-become a happy user. More advanced topics like installation, administration or
-development of new tests are covered by further documents available in the
-https://github.com/os-autoinst/openQA[official repository].
+become a happy user.
+
+For a quick start, if you already have an openQA instance available you can
+refer to the section
+<<UsersGuide.asciidoc#_cloning_existing_jobs_openqa_clone_job,Cloning existing jobs - openqa-clone-job>>
+directly to trigger a new test based on already existing job. For a quick
+installation refer directly to
+<<Installing.asciidoc#_openqa_quick_bootstrap,openQA quick bootstrap>>.
+
+For the installation of openQA in general see the
+<<Installing.asciidoc#installing,Installation Guide>>, as a user of an
+existing instance see the <<UsersGuide.asciidoc#usersguide,Users Guide>>.
+More advanced topics can be found in other documents. All documents are also
+available in the https://github.com/os-autoinst/openQA[official repository].
+
 
 == Architecture
 [id="architecture"]
@@ -43,26 +55,25 @@ several components that are hosted in separate repositories as shown in
 .openQA architecture
 image::images/openqa_architecture.png[openQA architecture]
 
-The heart of the test engine is a standalone application called
-'os-autoinst' (blue). In each execution, this application creates a
-virtual machine and uses it to run a set of test scripts (red).
-'os-autoinst' generates a video, screenshots and a JSON file with
-detailed results.
+The heart of the test engine is a standalone application called 'os-autoinst'
+(blue). In each execution, this application creates a virtual machine and uses
+it to run a set of test scripts (red).  'os-autoinst' generates a video,
+screenshots and a JSON file with detailed results.
 
-'openQA' (green) on the other hand provides a web based user
-interface and infrastructure to run 'os-autoinst' in a distributed
-way. The web interface also provides a JSON based REST-like API for
-external scripting and for use by the worker program. Workers
-fetch data and input files from openQA for os-autoinst to run the
-tests. A host system can run several workers. The openQA web
-application takes care of distributing test jobs among workers. Web
-application and workers don't have to run on the same machine but
-can be connected via network instead.
+'openQA' (green) on the other hand provides a web based user interface and
+infrastructure to run 'os-autoinst' in a distributed way. The web interface
+also provides a JSON based REST-like API for external scripting and for use by
+the worker program. Workers fetch data and input files from openQA for
+os-autoinst to run the tests. A host system can run several workers. The openQA
+web application takes care of distributing test jobs among workers. Web
+application and workers can run on the same machine as well as connected via
+network on multiple machines within the same network or distributed. Running
+the web application as well as the workers in the cloud is perfectly possible.
 
 Note that the diagram shown above is simplified. There exists
-link:images/architecture.svg[a more sophisticated version]
-which is more complete and detailed. (The diagram can be edited via
-its underlying link:images/architecture.graphml[GraphML file].)
+link:images/architecture.svg[a more sophisticated version] which is more
+complete and detailed. (The diagram can be edited via its underlying
+link:images/architecture.graphml[GraphML file].)
 
 == Basic concepts
 [id="concepts"]
@@ -99,7 +110,8 @@ distri:: a test distribution but also sometimes referring to a _product_
 multiple _test modules_ in a folder structure that compose _test suites_, e.g.
 "opensuse" (test distribution, short for "os-autoinst-distri-opensuse")
 
-product:: the main "system under test" (SUT), e.g. "openSUSE"
+product:: the main "system under test" (SUT), e.g. "openSUSE", also called
+"Medium Types" in the web interface of openQA
 
 job group:: equivalent to _product_, used in context of the webUI
 
@@ -114,7 +126,7 @@ arch:: an architecture variant of a _product_, e.g. "x86_64"
 machine:: additional variant of machine, e.g. used for "64bit", "uefi", etc.
 
 scenario:: A composition of
-+<distri>-<version>-<flavor>-<arch>-<test_suite>@<machine>+, e.g.
+`<distri>-<version>-<flavor>-<arch>-<test_suite>@<machine>`, e.g.
 "openSUSE-Tumbleweed-DVD-x86_64-gnome@64bit", nicknamed _koala_
 
 build:: Different versions of a product as tested, can be considered a
@@ -130,31 +142,41 @@ returns an overall result. Every one of those executions is called a 'job'.
 Every job is labeled with a numeric identifier and has several associated
 'settings' that will drive its behavior.
 
-A job goes through several states:
+A job goes through several states. Here is (an incomplete list) of these
+states:
 
-* *scheduled* Initial state for recently created jobs. Queued for future
+* *scheduled* Initial state for newly created jobs. Queued for future
   execution.
-* *running* In progress.
-* *cancelled* The job was explicitly cancelled by the user or was replaced by a
-  clone (see below).
-* *done* Execution finished.
+* *setup*/*running*/*uploading* In progress.
+* *cancelled* The job was explicitly cancelled by the user or was
+  replaced by a clone (see below) and the worker has not acknowledged the
+  cancellation yet.
+* *done* The worker acknowledged that the execution finished or the web UI
+  considers the job as abandoned by the worker.
 
-Jobs in state 'done' have typically gone through a whole sequence of steps
-(called 'testmodules') each one with its own result. But in addition to those
-partial results, a finished job also provides an overall result from the
-following list.
+Jobs in the final states 'cancelled' and 'done' have typically gone through a
+whole sequence of steps (called 'testmodules') each one with its own result.
+But in addition to those partial results, a finished job also provides an
+overall result from the following list.
 
-* *none* For jobs that have not reached the 'done' state.
+* *none* For jobs that have not reached one of the final states.
 * *passed* No critical check failed during the process. It does not necessarily
   mean that all testmodules were successful or that no single assertion failed.
 * *failed* At least one assertion considered to be critical was not satisfied at some
   point.
 * *softfailed* At least one known, non-critical issue has been found. That could be
   that workaround needles are in place, a softfailure has been recorded explicitly
-  via +record_soft_failure+ (from os-autoinst) or a job failure has been ignored
-  explicitly via a <<UsersGuide.asciidoc#https://github.com/os-autoinst/openQA/blob/master/docs/UsersGuide.asciidoc#show-bug-or-label-icon-on-overview-if-labeled-gh550,job label>>.
-* *incomplete* The job is no longer running but no result was provided. Either
-  it was cancelled while running or it crashed.
+  via `record_soft_failure` (from os-autoinst) or a job failure has been ignored
+  explicitly via a <<UsersGuide.asciidoc#_show_bug_or_label_icon_on_overview_if_labeled_gh550,job label>>.
+* *timeout_exceeded* The job was aborted because `MAX_JOB_TIME` has been exceeded, see
+  <<WritingTests.asciidoc#_changing_timeout,Changing timeout>> for details.
+* *skipped* Dependencies failed so the job was not started.
+* *obsoleted* The job was superseded by scheduling a new product.
+* *parallel_failed*/*parallel_restarted* The job could not continue because a job
+  which is supposed to run in parallel failed or was restarted.
+* *user_cancelled*/*user_restarted* The job was cancelled/restarted by the user.
+* *incomplete* The test execution failed due to an unexpected error, e.g. the network
+  connection to the worker was lost.
 
 Sometimes, the reason of a failure is not an error in the tested operating system
 itself, but an outdated test or a problem in the execution of the job for some
@@ -258,9 +280,11 @@ blog post] about the subject by the openQA development team.
 
 
 === Job groups
-A job can belong to a job group. Those job groups are displayed on the index page
-and in the +Job Groups+ menu on the navigation bar. From there the job group overview
-pages can be accessed. Besides the test results the job group overview pages provide
+
+A job can belong to a job group. Those job groups are displayed on the index
+page when there are recent test results in these job groups and in the `Job
+Groups` menu on the navigation bar. From there the job group overview pages
+can be accessed. Besides the test results the job group overview pages provide
 a description about the job group and allow commenting.
 
 Job groups have properties. These properties are mostly cleanup related. The
@@ -274,7 +298,7 @@ the index page.
 
 === Cleanup
 IMPORTANT: openQA automatically deletes data that it considers "old" based on
-different settings. For example job data is deleted from old jobs by the +gru+ task.
+different settings. For example job data is deleted from old jobs by the `gru` task.
 
 The following cleanup settings can be done on job-group-level:
 
@@ -290,7 +314,7 @@ keep important results for:: How long results of an important job are retained a
   it finished
 
 The defaults for those values are defined in
-https://github.com/os-autoinst/openQA/blob/master/lib/OpenQA/Schema/JobGroupDefaults.pm[lib/OpenQA/Schema/JobGroupDefaults.pm].
+https://github.com/os-autoinst/openQA/blob/master/lib/OpenQA/JobGroupDefaults.pm[lib/OpenQA/JobGroupDefaults.pm].
 
 *NOTE* Deletion of job results includes deletion of logs and will cause the job to
 be completely removed from the database.
@@ -302,204 +326,13 @@ the mentioned cleanup properties.
 == Using the client script
 :openqa-personal-configuration: ~/.config/openqa/client.conf
 
-Just as the worker uses an API key+secret every user of the +client script+
+Just as the worker uses an API key+secret every user of the `client script`
 must do the same. The same API key+secret as previously created can be used or
 a new one created over the webUI.
 
 The personal configuration should be stored in a file
 `{openqa-personal-configuration}` in the same format as previously described for
-the +client.conf+, i.e. sections for each machine, e.g. `localhost`.
-
-== Using job templates to automate jobs creation
-[id="job_templates"]
-
-=== The problem
-
-When testing an operating system, especially when doing continuous testing,
-there is always a certain combination of jobs, each one with its own
-settings, that needs to be run for every revision. Those combinations can be
-different for different 'flavors' of the same revision, like running a different
-set of jobs for each architecture or for the Full and the Lite versions. This
-combinational problem can go one step further if openQA is being used for
-different kinds of tests, like running some simple pre-integration tests
-for some snapshots combined with more comprehensive post-integration tests for
-release candidates.
-
-This section describes how an instance of openQA can be configured using the
-options in the admin area to automatically create all the required jobs for each
-revision of your operating system that needs to be tested. If you are starting
-from scratch, you should probably go through the following order:
-
-. Define machines in 'Machines' menu
-. Define medium types (products) you have in 'Medium Types' menu
-. Specify various collections of tests you want to run in the 'Test suites'
-  menu
-. Go to the template matrix in 'Job templates' menu and decide what
-  combinations do make sense and need to be tested
-
-Machines, mediums and test suites can all set various configuration variables.
-Job templates define how the test suites, mediums and machines should be
-combined in various ways to produce individual 'jobs'. All the variables
-from the test suite, medium and machine for the 'job' are combined and made
-available to the actual test code run by the 'job', along with variables
-specified as part of the job creation request. Certain variables also influence
-openQA's and/or os-autoinst's own behavior in terms of how it configures the
-environment for the job. Variables that influence os-autoinst's behavior
-are documented in the file +doc/backend_vars.asciidoc+ in the os-autoinst
-repository.
-
-In openQA we can parametrize a test to describe for what product it will
-run and for what kind of machines it will be executed. For example, a
-test like KDE can be run for any product that has KDE installed, and
-can be tested in x86-64 and i586 machines. If we write this as a
-triples, we can create a list like this to characterize KDE tests:
-
-  (Product,             Test Suite, Machine)
-  (openSUSE-DVD-x86_64, KDE,        64bit)
-  (openSUSE-DVD-x86_64, KDE,        Laptop-64bit)
-  (openSUSE-DVD-x86_64, KDE,        USBBoot-64bit)
-  (openSUSE-DVD-i586,   KDE,        32bit)
-  (openSUSE-DVD-i586,   KDE,        Laptop-32bit)
-  (openSUSE-DVD-i586,   KDE,        USBBoot-32bit)
-  (openSUSE-DVD-i586,   KDE,        64bit)
-  (openSUSE-DVD-i586,   KDE,        Laptop-64bit)
-  (openSUSE-DVD-i586,   KDE,        USBBoot-64bit)
-
-For every triplet, we need to configure a different instance of
-os-autoinst with a different set of parameters.
-
-=== Medium Types (products)
-
-A medium type (product) in openQA is a simple description without any concrete
-meaning. It basically consists of a name and a set of variables that
-define or characterize this product in os-autoinst.
-
-Some example variables used by openSUSE are:
-
-* +ISO_MAXSIZE+ contains the maximum size of the product. There is a
-  test that checks that the current size of the product is less or
-  equal than this variable.
-* +DVD+ if it is set to 1, this indicates that the medium is a DVD.
-* +LIVECD+ if it is set to 1, this indicates that the medium is a live
-  image (can be a CD or USB)
-* +GNOME+ this variable, if it is set to 1, indicates that it is a GNOME
-  only distribution.
-* +PROMO+ marks the promotional product.
-* +RESCUECD+ is set to 1 for rescue CD images.
-
-=== Test Suites
-
-This is the form where we define the different tests that we created for
-openQA. A test consists of a name, a priority and a set of variables that are
-used inside this particular test. The priority is used in the scheduler to
-choose the next job. If multiple jobs are scheduled and their requirements for
-running them are fulfilled the ones with a lower value for the priority are
-triggered. The id is the second sorting key: Of two jobs with equal
-requirements and same priority the one with lower id is triggered first.
-
-Some sample variables used by openSUSE are:
-
-* +BTRFS+ if set, the file system will be BtrFS.
-* +DESKTOP+ possible values are 'kde' 'gnome' 'lxde' 'xfce' or
-  'textmode'. Used to indicate the desktop selected by the user during
-  the test.
-* +DOCRUN+ used for documentation tests.
-* +DUALBOOT+ dual boot testing, needs HDD_1 and HDDVERSION.
-* +ENCRYPT+ encrypt the home directory via YaST.
-* +HDDVERSION+ used together with HDD_1 to set the operating system
-  previously installed on the hard disk.
-* +INSTALLONLY+ only basic installation.
-* +INSTLANG+ installation language. Actually used only in documentation
-  tests.
-* +LIVETEST+ the test is on a live medium, do not install the distribution.
-* +LVM+ select LVM volume manager.
-* +NICEVIDEO+ used for rendering a result video for use in show rooms,
-  skipping ugly and boring tests.
-* +NOAUTOLOGIN+ unmark autologin in YaST
-* +NUMDISKS+ total number of disks in QEMU.
-* +REBOOTAFTERINSTALL+ if set to 1, will reboot after the installation.
-* +SCREENSHOTINTERVAL+ used with NICEVIDEO to improve the video quality.
-* +SPLITUSR+ a YaST configuration option.
-* +TOGGLEHOME+ a YaST configuration option.
-* +UPGRADE+ upgrade testing, need HDD_1 and HDDVERSION.
-* +VIDEOMODE+ if the value is 'text', the installation will be done in
-  text mode.
-
-Some of the variables usually set in test suites that influence openQA
-and/or os-autoinst's own behavior are:
-
-* +HDDMODEL+ variable to set the HDD hardware model
-* +HDDSIZEGB+ hard disk size in GB. Used together with BtrFS variable
-* +HDD_1+ path for the pre-created hard disk
-* +RAIDLEVEL+ RAID configuration variable
-* +QEMUVGA+ parameter to declare the video hardware configuration in QEMU
-
-=== Machines
-
-You need to have at least one machine set up to be able to run any
-tests. Those machines represent virtual machine types that you want to
-test. To make tests actually happen, you have to have an 'openQA
-worker' connected that can fulfill those specifications.
-
-* *Name.* User defined string - only needed for operator to identify the machine
-configuration.
-
-* *Backend.* What backend should be used for this machine. Recommended value is
-+qemu+ as it is the most tested one, but other options (such as +kvm2usb+ or +vbox+)
-are also possible.
-
-* *Variables* Most machine variables influence os-autoinst's behavior in terms
-of how the test machine is set up. A few important examples:
-** +QEMUCPU+ can be 'qemu32' or 'qemu64' and specifies the architecture of the
-   virtual CPU.
-** +QEMUCPUS+ is an integer that specifies the number of cores you wish for.
-** +LAPTOP+ if set to 1, QEMU will create a laptop profile.
-** +USBBOOT+ when set to 1, the image will be loaded through an
-   emulated USB stick.
-
-=== Variable expansion
-
-Any variable defined in Test Suite, Machine or Product table can refer to another
-variable using this syntax: +%NAME%+. When the test job is created, the string
-will be substituted with the value of the specified variable at that time.
-
-For example this variable defined for Test Suite:
-
-[source,sh]
---------------------------------------------------------------------------------
-PUBLISH_HDD_1 = %DISTRI%-%VERSION%-%ARCH%-%DESKTOP%.qcow2
---------------------------------------------------------------------------------
-
-may be expanded to this job variable:
-
-[source,sh]
---------------------------------------------------------------------------------
-PUBLISH_HDD_1 = opensuse-13.1-i586-kde.qcow2
---------------------------------------------------------------------------------
-
-=== Variable precedence
-
-It's possible to define the same variable in multiple places that would all be
-used for a single job - for instance, you may have a variable defined in both
-a test suite and a product that appear in the same job template. The precedence
-order for variables is as follows (from lowest to highest):
-
-* Product
-* Machine
-* Test suite
-* API POST query parameters
-
-That is, variable values set as part of the API request that triggers the jobs will
-'win' over values set at any of the other locations.
-
-If you need to override this precedence - for example, you want the value set in
-one particular test suite to take precedence over a setting of the same value from
-the API request - you can add a leading + to the variable name. For instance, if
-you set ++VARIABLE = foo+ in a test suite, and passed +VARIABLE=bar+ in the API
-request, the test suite setting would 'win' and the value would be foo.
-
-If the same variable is set with a + prefix in multiple places, the same precedence
-order described above will apply to those settings.
+the `client.conf`, i.e. sections for each machine, e.g. `localhost`.
 
 [[get-testing]]
 == Testing openSUSE or Fedora
@@ -514,7 +347,7 @@ this document should help you to get started faster.
 First you need to get actual tests. You can get openSUSE tests and needles (the
 expected results) from
 https://github.com/os-autoinst/os-autoinst-distri-opensuse[GitHub]. It belongs
-into the +/var/lib/openqa/tests/opensuse+ directory. To make it easier, you can just
+into the `/var/lib/openqa/tests/opensuse` directory. To make it easier, you can just
 run
 
 [source,sh]
@@ -553,8 +386,8 @@ following command:
 
 This will load some default settings that were used at some point of time in
 openSUSE production openQA. Therefore those should work reasonably well with
-openSUSE tests and needles. This script uses +/usr/share/openqa/script/load_templates+,
-consider reading its help page (+--help+) for documentation on possible extra arguments.
+openSUSE tests and needles. This script uses `/usr/share/openqa/script/load_templates`,
+consider reading its help page (`--help`) for documentation on possible extra arguments.
 
 For Fedora, similarly, you can call:
 
@@ -564,20 +397,20 @@ For Fedora, similarly, you can call:
 --------------------------------------------------------------------------------
 
 Some Fedora tests require special hard disk images to be present in
-+/var/lib/openqa/share/factory/hdd/fixed+. The +createhdds.py+ script in the
+`/var/lib/openqa/share/factory/hdd/fixed`. The `createhdds.py` script in the
 https://pagure.io/fedora-qa/createhdds[createhdds]
 repository can be used to create these. See the documentation in that repo
 for more information.
 
 === Adding a new ISO to test
 
-To start testing a new ISO put it in +/var/lib/openqa/share/factory/iso+ and call
+To start testing a new ISO put it in `/var/lib/openqa/share/factory/iso` and call
 the following commands:
 
 [source,sh]
 --------------------------------------------------------------------------------
 # Run the first test
-/usr/share/openqa/script/client isos post \
+openqa-cli api -X POST isos \
          ISO=openSUSE-Factory-NET-x86_64-Build0053-Media.iso \
          DISTRI=opensuse \
          VERSION=Factory \
@@ -587,10 +420,10 @@ the following commands:
 --------------------------------------------------------------------------------
 
 If your openQA is not running on port 80 on 'localhost', you can add option
-+--host=http://otherhost:9526+ to specify a different port or host.
+`--host=http://otherhost:9526` to specify a different port or host.
 
 WARNING: Use only the ISO filename in the 'client' command. You must place the
-file in +/var/lib/openqa/share/factory/iso+. You cannot place the file elsewhere and
+file in `/var/lib/openqa/share/factory/iso`. You cannot place the file elsewhere and
 specify its path in the command. However, openQA also supports a
 remote-download feature of assets from trusted domains.
 
@@ -599,7 +432,7 @@ For Fedora, a sample run might be:
 [source,sh]
 --------------------------------------------------------------------------------
 # Run the first test
-/usr/share/openqa/script/client isos post \
+openqa-cli api -X POST isos \
          ISO=Fedora-Everything-boot-x86_64-Rawhide-20160308.n.0.iso \
          DISTRI=fedora \
          VERSION=Rawhide \

@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2017 SUSE LLC
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::ResultSet::Jobs;
 
@@ -23,8 +22,13 @@ use base 'DBIx::Class::ResultSet';
 
 use DBIx::Class::Timestamps 'now';
 use Date::Format 'time2str';
+use OpenQA::App;
+use OpenQA::Log qw(log_debug log_warning);
 use OpenQA::Schema::Result::JobDependencies;
 use Mojo::JSON 'encode_json';
+use Mojo::URL;
+use Time::HiRes 'time';
+use DateTime;
 
 =head2 latest_build
 
@@ -58,17 +62,18 @@ sub latest_build {
     $attrs{order_by} = {-desc => 'me.id'};    # More reliable for tests than t_created
     $attrs{columns}  = qw(BUILD);
 
-    while (my ($k, $v) = each %args) {
+    foreach my $key (keys %args) {
+        my $value = $args{$key};
 
-        if (grep { $k eq $_ } qw(distri version flavor machine arch build test)) {
-            push(@conds, {"me." . uc($k) => $v});
+        if (grep { $key eq $_ } qw(distri version flavor machine arch build test)) {
+            push(@conds, {"me." . uc($key) => $value});
         }
         else {
 
             my $subquery = $schema->resultset("JobSettings")->search(
                 {
-                    key   => uc($k),
-                    value => $v
+                    key   => uc($key),
+                    value => $value
                 });
             push(@conds, {'me.id' => {-in => $subquery->get_column('job_id')->as_query}});
         }
@@ -93,9 +98,9 @@ the return array.
 
 =cut
 sub latest_jobs {
-    my ($self) = @_;
+    my ($self, $until) = @_;
 
-    my @jobs = $self->search(undef, {order_by => ['me.id DESC']});
+    my @jobs = $self->search($until ? {t_created => {'<=' => $until}} : undef, {order_by => ['me.id DESC']});
     my @latest;
     my %seen;
     foreach my $job (@jobs) {
@@ -120,7 +125,13 @@ sub create_from_settings {
     my %new_job_args = (TEST => $settings{TEST});
 
     my $result_source = $self->result_source;
+    my $schema        = $result_source->schema;
+    my $job_settings  = $schema->resultset('JobSettings');
     my $txn_guard     = $result_source->storage->txn_scope_guard;
+
+    my @invalid_keys = grep { $_ =~ /^(PUBLISH_HDD|FORCE_PUBLISH_HDD|STORE_HDD)\S+(\d+)$/ && $settings{$_} =~ /\// }
+      keys %settings;
+    die 'The ' . join(',', @invalid_keys) . ' cannot include / in value' if @invalid_keys;
 
     # assign group ID
     my $group;
@@ -133,39 +144,54 @@ sub create_from_settings {
         $group_args{name} = $group_name unless $group_args{id};
     }
     if (%group_args) {
-        $group = $result_source->schema->resultset('JobGroups')->find(\%group_args);
+        $group = $schema->resultset('JobGroups')->find(\%group_args);
         if ($group) {
             $new_job_args{group_id} = $group->id;
             $new_job_args{priority} = $group->default_priority;
         }
     }
 
-    # handle chained dependencies
-    if ($settings{_START_AFTER_JOBS}) {
-        my $ids = $settings{_START_AFTER_JOBS};    # support array ref or comma separated values
-        $ids = [split(/\s*,\s*/, $ids)] if (ref($ids) ne 'ARRAY');
-        for my $id (@$ids) {
-            push @{$new_job_args{parents}},
-              {
-                parent_job_id => $id,
-                dependency    => OpenQA::JobDependencies::Constants::CHAINED,
-              };
-        }
-        delete $settings{_START_AFTER_JOBS};
-    }
+    # handle dependencies
+    # note: The subsequent code only allows adding existing jobs as parents. Hence it is not
+    #       possible to create cyclic dependencies here.
+    my @dependency_definitions = (
+        {
+            setting_name    => '_START_AFTER_JOBS',
+            dependency_type => OpenQA::JobDependencies::Constants::CHAINED,
+        },
+        {
+            setting_name    => '_START_DIRECTLY_AFTER_JOBS',
+            dependency_type => OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED,
+        },
+        {
+            setting_name    => '_PARALLEL_JOBS',
+            dependency_type => OpenQA::JobDependencies::Constants::PARALLEL,
+        },
+    );
+    for my $dependency_definition (@dependency_definitions) {
+        next unless my $ids = delete $settings{$dependency_definition->{setting_name}};
 
-    # handle parallel dependencies
-    if ($settings{_PARALLEL_JOBS}) {
-        my $ids = $settings{_PARALLEL_JOBS};    # support array ref or comma separated values
+        # support array ref or comma separated values
         $ids = [split(/\s*,\s*/, $ids)] if (ref($ids) ne 'ARRAY');
+
+        my $dependency_type = $dependency_definition->{dependency_type};
         for my $id (@$ids) {
-            push @{$new_job_args{parents}},
-              {
-                parent_job_id => $id,
-                dependency    => OpenQA::JobDependencies::Constants::PARALLEL,
-              };
+            if ($dependency_type eq OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED) {
+                my $parent_worker_class = $job_settings->find({job_id => $id, key => 'WORKER_CLASS'});
+                if ($parent_worker_class = $parent_worker_class ? $parent_worker_class->value : '') {
+                    if (!$settings{WORKER_CLASS}) {
+                        # assume we want to use the worker class from the parent here (and not the default which
+                        # is otherwise assumed)
+                        $settings{WORKER_CLASS} = $parent_worker_class;
+                    }
+                    elsif ($settings{WORKER_CLASS} ne $parent_worker_class) {
+                        die "Specified WORKER_CLASS ($settings{WORKER_CLASS}) does not match the one from"
+                          . " directly chained parent $id ($parent_worker_class)";
+                    }
+                }
+            }
+            push(@{$new_job_args{parents}}, {parent_job_id => $id, dependency => $dependency_type});
         }
-        delete $settings{_PARALLEL_JOBS};
     }
 
     # move important keys from the settings directly to the job
@@ -209,8 +235,7 @@ sub create_from_settings {
     $job->register_assets_from_settings;
 
     if (%group_args && !$group) {
-        OpenQA::Utils::log_warning(
-            'Ignoring invalid group ' . encode_json(\%group_args) . ' when creating new job ' . $job->id);
+        log_warning('Ignoring invalid group ' . encode_json(\%group_args) . ' when creating new job ' . $job->id);
     }
 
     $job->calculate_blocked_by;
@@ -225,7 +250,7 @@ sub complex_query {
     # For args where we accept a list of values, allow passing either an
     # array ref or a comma-separated list
     for my $arg (qw(state ids result failed_modules modules modules_result)) {
-        next unless $args{$arg};
+        next                                    unless $args{$arg};
         $args{$arg} = [split(',', $args{$arg})] unless (ref($args{$arg}) eq 'ARRAY');
     }
 
@@ -283,7 +308,7 @@ sub complex_query {
         push(@conds, {'me.result' => {-in => $args{result}}});
     }
     if ($args{ignore_incomplete}) {
-        push(@conds, {'me.result' => {-not_in => [OpenQA::Jobs::Constants::INCOMPLETE_RESULTS]}});
+        push(@conds, {'me.result' => {-not_in => [OpenQA::Jobs::Constants::NOT_COMPLETE_RESULTS]}});
     }
     my $scope = $args{scope} || '';
     if ($scope eq 'relevant') {
@@ -428,7 +453,7 @@ sub cancel_by_settings {
         while (my $j = $jobs_to_cancel->next) {
             # the value we get from that @important_builds search above
             # could be just BUILD or VERSION-BUILD
-            next if grep ($j->BUILD eq $_, @important_builds);
+            next if grep ($j->BUILD eq $_,                         @important_builds);
             next if grep (join('-', $j->VERSION, $j->BUILD) eq $_, @important_builds);
             push @unimportant_jobs, $j->id;
         }
@@ -463,19 +488,18 @@ sub _cancel_or_deprioritize {
             return 0;
         }
     }
-    return $job->cancel($newbuild);
+    return $job->cancel($newbuild) // 0;
 }
 
 sub next_previous_jobs_query {
     my ($self, $job, $jobid, %args) = @_;
-    my $p_limit     = $args{previous_limit};
-    my $n_limit     = $args{next_limit};
-    my @inc_results = OpenQA::Jobs::Constants::INCOMPLETE_RESULTS;
-    $inc_results[0] = '';
 
-    my @params;
-    push @params, 'done';
-    push @params, @inc_results;
+    my $p_limit = $args{previous_limit};
+    my $n_limit = $args{next_limit};
+    my @params  = (
+        'done',                                      # only consider jobs with state 'done'
+        OpenQA::Jobs::Constants::ABORTED_RESULTS,    # ignore aborted results
+    );
     for (1 .. 2) {
         for my $key (OpenQA::Schema::Result::Jobs::SCENARIO_WITH_MACHINE_KEYS) {
             push @params, $job->get_column($key);
@@ -491,5 +515,55 @@ sub next_previous_jobs_query {
     return $jobs_rs;
 }
 
+
+sub stale_ones {
+    my ($self) = @_;
+
+    my $dt = DateTime->from_epoch(
+        epoch     => time() - OpenQA::App->singleton->config->{global}->{worker_timeout},
+        time_zone => 'UTC'
+    );
+    my %dt_cond      = ('<' => $self->result_source->schema->storage->datetime_parser->format_datetime($dt));
+    my %overall_cond = (
+        state              => [OpenQA::Jobs::Constants::EXECUTION_STATES],
+        assigned_worker_id => {-not => undef},
+        -or                => [
+            'assigned_worker.t_seen' => undef,
+            'assigned_worker.t_seen' => \%dt_cond,
+        ],
+    );
+    my %attrs = (join => 'assigned_worker', order_by => 'job_id');
+    return $self->search(\%overall_cond, \%attrs);
+}
+
+sub mark_job_linked {
+    my ($self, $jobid, $referer_url) = @_;
+
+    my $referer = Mojo::URL->new($referer_url)->host;
+    my $app     = OpenQA::App->singleton;
+    if ($referer && grep { $referer eq $_ } @{$app->config->{global}->{recognized_referers}}) {
+        my $job = $self->find({id => $jobid});
+        return unless $job;
+        my $found    = 0;
+        my $comments = $job->comments;
+        while (my $comment = $comments->next) {
+            if (($comment->label // '') eq 'linked') {
+                $found = 1;
+                last;
+            }
+        }
+        unless ($found) {
+            my $user = $self->result_source->schema->resultset('Users')->search({username => 'system'})->first;
+            $comments->create(
+                {
+                    text    => "label:linked Job mentioned in $referer_url",
+                    user_id => $user->id
+                });
+        }
+    }
+    elsif ($referer) {
+        log_debug("Unrecognized referer '$referer'");
+    }
+}
+
 1;
-# vim: set sw=4 et:

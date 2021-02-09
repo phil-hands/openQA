@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Plugin::REST;
 use Mojo::Base 'Mojolicious::Plugin';
@@ -54,13 +53,6 @@ sub register {
             $self->action_link('post', @_);
         });
 
-    # special anchor tag for delete links
-    $app->helper(
-        link_delete => sub {
-            my $self = shift;
-            $self->action_link('delete', @_);
-        });
-
     # Allow "_method" query parameter to override request method
     $app->hook(
         before_dispatch => sub {
@@ -71,4 +63,3 @@ sub register {
 }
 
 1;
-# vim: set sw=4 et:

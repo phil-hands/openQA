@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2019 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2019-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,32 +12,28 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
-use Mojo::Base -strict;
-use Test::More;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 use Test::MockModule;
-use Test::Exception;
+use OpenQA::Test::TimeLimit '6';
 use OpenQA::Test::Case;
 use OpenQA::Utils;
 
 # init test case
 my $test_case = OpenQA::Test::Case->new;
-$test_case->init_data;
+$test_case->init_data(skip_fixtures => 1);
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
 my $schema             = $t->app->schema;
 my $scheduled_products = $schema->resultset('ScheduledProducts');
+my $users              = $schema->resultset('Users');
+my $user               = $users->create_user('foo');
 my %settings           = (
     distri   => 'openSUSE',
     version  => '15.1',
@@ -46,12 +41,12 @@ my %settings           = (
     arch     => 'x86_64',
     build    => 'foo',
     settings => {some => 'settings'},
-    user_id  => 99901,
+    user_id  => $user->id,
 );
 
 # prevent job creation
 my $scheduled_products_mock = Test::MockModule->new('OpenQA::Schema::Result::ScheduledProducts');
-$scheduled_products_mock->mock(_generate_jobs => sub { return undef; });
+$scheduled_products_mock->redefine(_generate_jobs => sub { return undef; });
 
 my $scheduled_product;
 subtest 'handling assets with invalid name' => sub {

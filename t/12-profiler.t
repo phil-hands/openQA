@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,19 +13,14 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-use strict;
-use warnings;
-
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
-use Test::More;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 use OpenQA::Test::Case;
+use OpenQA::Test::TimeLimit '10';
 
 use File::Temp qw(tempfile);
 
@@ -35,7 +30,7 @@ $ENV{MOJO_LOG_LEVEL}   = 'debug';
 $ENV{OPENQA_SQL_DEBUG} = 'true';
 $ENV{OPENQA_LOGFILE}   = $filename;
 
-OpenQA::Test::Case->new->init_data;
+OpenQA::Test::Case->new->init_data(skip_fixtures => 1);
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
@@ -46,6 +41,6 @@ open(FILE, $filename);
 my @lines = <FILE>;
 close(FILE);
 
-like(join('', @lines), qr/.*debug\] \[DBIx debug\] Took .* seconds executed: SELECT.*/, "seconds in log file");
+like(join('', @lines), qr/.*debug\] \[pid:.*\] \[DBIC\] Took .* seconds: SELECT.*/, "seconds in log file");
 
 done_testing();

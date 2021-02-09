@@ -1,6 +1,5 @@
-#!/usr/bin/env perl -w
-
-# Copyright (C) 2018 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2018-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,22 +14,18 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '8';
 use OpenQA::Test::Case;
 use OpenQA::Client;
 use OpenQA::WebSockets;
 
-OpenQA::Test::Case->new->init_data;
+OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl');
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 $t->app->config->{global}->{base_url} = 'http://example.com';
@@ -72,6 +67,30 @@ $t->get_ok('/admin/influxdb/minion')->status_is(200)->content_is(
 openqa_minion_workers,url=http://example.com active=0i,inactive=1i
 "
 );
+
+subtest 'filter specified minion tasks' => sub {
+    for my $task (qw(obs_rsync_run obs_rsync_update_builds_text)) {
+        $t->app->minion->add_task($task => sub { });
+        my $job_ids = $t->app->minion->enqueue($task);
+    }
+    while (my $tmp_job = $worker->dequeue(0)) { $tmp_job->fail('this is a test'); }
+
+    $t->get_ok('/admin/influxdb/minion')->status_is(200)->content_is(
+        "openqa_minion_jobs,url=http://example.com active=0i,delayed=1i,failed=3i,inactive=1i
+openqa_minion_workers,url=http://example.com active=0i,inactive=1i
+"
+    );
+
+    # Define the filter list, so failed jobs for blocklisted tasks will not be
+    # counted towards the total of failed jobs, i.e. failed=1i instead of failed=3i
+    $t->app->config->{influxdb}->{ignored_failed_minion_jobs} = ['obs_rsync_run', 'obs_rsync_update_builds_text'];
+    $t->get_ok('/admin/influxdb/minion')->status_is(200)->content_is(
+        "openqa_minion_jobs,url=http://example.com active=0i,delayed=1i,failed=1i,inactive=1i
+openqa_minion_workers,url=http://example.com active=0i,inactive=1i
+"
+    );
+};
+
 $worker->unregister;
 
 done_testing();

@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::Secrets;
 
@@ -21,7 +20,7 @@ use warnings;
 
 use base 'DBIx::Class::Core';
 
-use db_helpers;
+use OpenQA::Utils 'random_hex';
 
 __PACKAGE__->table('secrets');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime Timestamps));
@@ -41,11 +40,10 @@ __PACKAGE__->add_unique_constraint([qw(secret)]);
 sub new {
     my ($class, $attrs) = @_;
 
-    $attrs->{secret} = db_helpers::rndhexU(32) unless $attrs->{secret};
+    $attrs->{secret} = random_hex(32) unless $attrs->{secret};
 
     my $new = $class->next::method($attrs);
     return $new;
 }
 
 1;
-# vim: set sw=4 et:

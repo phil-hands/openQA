@@ -1,6 +1,5 @@
-#!/usr/bin/env perl -w
-
-# Copyright (C) 2014 SUSE Linux Products GmbH
+#!/usr/bin/env perl
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,23 +12,17 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-use strict;
-use warnings;
-
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Utils;
 use OpenQA::Test::Database;
-use Test::More;
+use OpenQA::Test::TimeLimit '10';
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 
 OpenQA::Test::Database->new->create(skip_fixtures => 1);
 my $t = Test::Mojo->new('OpenQA::WebAPI');
@@ -52,9 +45,7 @@ subtest 'system user presence' => sub {
 subtest 'new user is admin if no admin is present' => sub {
     my $users  = $t->app->schema->resultset('Users');
     my $admins = $users->search({is_admin => 1});
-    while (my $u = $admins->next) {
-        $u->update({is_admin => 0});
-    }
+    $_->update({is_admin => 0}) while $admins->next;
     ok(!$users->search({is_admin => 1})->all, 'no admin is present');
     my $user = $users->create_user('test_user');
     ok($user->is_admin,    'new user is admin by default if there was no admin');

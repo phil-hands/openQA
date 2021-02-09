@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2019 SUSE Linux Products GmbH
+# Copyright (C) 2014-2019 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,13 +11,12 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Controller::API::V1::JobTemplate;
 use Mojo::Base 'Mojolicious::Controller';
 use Try::Tiny;
-use JSON::Validator;
+use OpenQA::YAML qw(load_yaml dump_yaml);
 
 =pod
 
@@ -94,30 +93,7 @@ sub list {
 
     if (my $error = $@) { return $self->render(json => {error => $error}, status => 404) }
 
-    @templates = map {
-        {
-            id         => $_->id,
-            prio       => $_->prio,
-            group_name => $_->group ? $_->group->name : '',
-            product    => {
-                id      => $_->product_id,
-                arch    => $_->product->arch,
-                distri  => $_->product->distri,
-                flavor  => $_->product->flavor,
-                group   => $_->product->mediagroup,
-                version => $_->product->version
-            },
-            machine => {
-                id   => $_->machine_id,
-                name => $_->machine ? $_->machine->name : ''
-            },
-            test_suite => {
-                id   => $_->test_suite_id,
-                name => $_->test_suite->name
-            }}
-    } @templates;
-
-    $self->render(json => {JobTemplates => \@templates});
+    $self->render(json => {JobTemplates => [map { $_->to_hash } @templates]});
 }
 
 =over 4
@@ -137,74 +113,44 @@ Returns a YAML template representing the job group(s).
 sub schedules {
     my $self = shift;
 
-    my $yaml = $self->get_job_groups($self->param('id'));
-    $self->render(yaml => $yaml);
+    my $single = ($self->param('id') or $self->param('name'));
+    my $yaml   = $self->_get_job_groups($self->param('id'), $self->param('name'));
+
+    if ($single) {
+        # only return the YAML of one group
+        $yaml = (values %$yaml)[0];
+    }
+    my $json_code = sub {
+        return $self->render(json => $yaml);
+    };
+    my $yaml_code = sub {
+        # In the case of a single group we return the template directly
+        # without encoding it to a string.
+        # This is different to the behaviour when JSON is requested.
+        # It is deprecated.
+        unless ($single) {
+            # YAML renderer expects a YAML string
+            $yaml = dump_yaml(string => $yaml);
+        }
+        $self->render(yaml => $yaml);
+    };
+    $self->respond_to(
+        json => $json_code,
+        any  => $yaml_code,
+        yaml => $yaml_code,
+    );
 }
 
-sub get_job_groups {
-    my ($self, $id) = @_;
+sub _get_job_groups {
+    my ($self, $id, $name) = @_;
 
     my %yaml;
-    my $groups = $self->schema->resultset("JobGroups")
-      ->search($id ? {id => $id} : undef, {select => [qw(id name parent_id default_priority)]});
+    my $groups = $self->schema->resultset("JobGroups")->search(
+        $id ? {id => $id} : ($name ? {name => $name} : undef),
+        {select => [qw(id name parent_id default_priority template)]});
     while (my $group = $groups->next) {
-        my %group;
-        my $templates
-          = $self->schema->resultset("JobTemplates")
-          ->search({group_id => $group->id}, {order_by => 'me.test_suite_id'});
-
-        # Always set the hash of test suites to account for empty groups
-        $group{architectures} = {};
-        $group{products}      = {};
-
-        my %machines;
-        # Extract products and tests per architecture
-        while (my $template = $templates->next) {
-            $group{products}{$template->product->name} = {
-                distribution => $template->product->distri,
-                flavor       => $template->product->flavor,
-                version      => $template->product->version
-            };
-            my %test_suite;
-            $test_suite{machine} = $template->machine->name;
-            $machines{$template->product->arch}{$template->machine->name}++;
-            if ($template->prio && $template->prio != $group->default_priority) {
-                $test_suite{priority} = $template->prio;
-            }
-            my $test_suites = $group{architectures}{$template->product->arch}{$template->product->name};
-            push @$test_suites, {$template->test_suite->name => \%test_suite};
-            $group{architectures}{$template->product->arch}{$template->product->name} = $test_suites;
-        }
-
-        # Split off defaults
-        foreach my $arch (keys %{$group{architectures}}) {
-            $group{defaults}{$arch}{priority} = $group->default_priority;
-            my $default_machine
-              = (sort { $machines{$arch}->{$b} <=> $machines{$arch}->{$a} or $b cmp $a } keys %{$machines{$arch}})[0];
-            $group{defaults}{$arch}{machine} = $default_machine;
-
-            foreach my $product (keys %{$group{architectures}->{$arch}}) {
-                my @test_suites;
-                foreach my $test_suite (@{$group{architectures}->{$arch}->{$product}}) {
-                    foreach my $name (keys %$test_suite) {
-                        my $attr = $test_suite->{$name};
-                        if ($attr->{machine} eq $default_machine) {
-                            delete $attr->{machine};
-                        }
-                        if (%$attr) {
-                            $test_suite->{$name} = $attr;
-                            push @test_suites, $test_suite;
-                        }
-                        else {
-                            push @test_suites, $name;
-                        }
-                    }
-                }
-                $group{architectures}{$arch}{$product} = \@test_suites;
-            }
-        }
-
-        $yaml{$group->name} = \%group;
+        # Use stored YAML template from the database if available
+        $yaml{$group->name} = $group->to_yaml;
     }
 
     return \%yaml;
@@ -218,7 +164,66 @@ Updates a job group according to the given YAML template. Test suites are added 
 as needed to reflect the difference to what's specified in the template.
 The given YAML will be validated and results in an error if it doesn't conform to the schema.
 
+=over 8
+
+=item template
+
+A YAML document describing the job template. The template will be validated against the schema.
+
+=item preview
+
+  preview => 1
+
+Performs a dry-run without committing any changes to the database.
+
+=item expand
+
+  expand => 1
+
+Computes the result of expanding aliases, defaults and settings used in the YAML. This can be
+used in tandem with B<preview> to see the effects of hypothetical changes or when saving changes.
+Posting the same document unmodified is also a supported use case.
+
+The response will fill in B<result> with the expanded YAML document.
+
+=item reference
+
+  reference => $reference
+
+If specified, this must be a YAML document matching the last known state. If the actual state of the
+database changes before the update transaction it's considered an error.
+A client can use this to handle editing conflicts between multiple users.
+
+=item schema
+
+  schema => JobTemplates-01.yaml
+
+The schema must be specified to indicate the format of the posted document.
+
+=back
+
 Returns a 400 code on error, or a 303 code and the job template id within a JSON block on success.
+
+The response will have these fields, depending on the options used:
+
+=over
+
+=item B<id>: the ID of the job group
+
+=item B<error>: an array of errors if validation or updating of the YAML document failed
+
+=item B<template>: the YAML document posted as a B<reference> in the original request
+
+=item B<preview>: set to 1 if B<preview> was specified in the original request
+
+=item B<changes>: a diff between the previous and posted YAML document if they mismatch
+
+=item B<result>: the expanded YAML if B<expand> was specified in the original request
+
+=back
+
+Note that an I<openqa_jobtemplate_create> event is emitted with the same fields contained
+in the response if any changes to the database were made.
 
 =back
 
@@ -227,13 +232,22 @@ Returns a 400 code on error, or a 303 code and the job template id within a JSON
 sub update {
     my $self = shift;
 
-    my $yaml   = {};
+    my $validation = $self->validation;
+    # Note: id is a regular param because it's part of the path
+    $validation->required('name') unless $self->param('id');
+    $validation->required('template');
+    $validation->required('schema')->like(qr/^[^.\/]+\.yaml$/);
+    $validation->optional('preview')->num(undef, 1);
+    $validation->optional('expand')->num(undef, 1);
+    $validation->optional('reference');
+    return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
+
+    my $data   = {};
     my $errors = [];
+    my $yaml   = $validation->param('template') // '';
     try {
-        # No objects (aka SafeYAML)
-        $YAML::XS::LoadBlessed = 0;
-        $yaml                  = YAML::XS::Load($self->param('template'));
-        $errors                = $self->app->validate_yaml($yaml, $self->app->log->level eq 'debug');
+        $data   = load_yaml(string => $validation->param('template'));
+        $errors = $self->app->validate_yaml($data, $validation->param('schema'), $self->app->log->level eq 'debug');
     }
     catch {
         # Push the exception to the list of errors without the trailing new line
@@ -246,122 +260,82 @@ sub update {
         return;
     }
 
-    my $job_groups    = $self->schema->resultset("JobGroups");
-    my $job_templates = $self->schema->resultset("JobTemplates");
-    my $machines      = $self->schema->resultset("Machines");
-    my $test_suites   = $self->schema->resultset("TestSuites");
-    my $products      = $self->schema->resultset("Products");
-    foreach my $group (keys %{$yaml}) {
-        my $json = {};
+    my $schema        = $self->schema;
+    my $job_groups    = $schema->resultset('JobGroups');
+    my $job_templates = $schema->resultset('JobTemplates');
+    my $json          = {};
 
-        try {
-            $self->schema->txn_do(
-                sub {
-                    my $group_id = $job_groups->find_or_create({name => $group}, {select => [qw(id name)]})->id;
-                    $json->{id} = $group_id;
+    try {
+        my $id        = $self->param('id');
+        my $name      = $validation->param('name');
+        my $job_group = $job_groups->find($id ? {id => $id} : ($name ? {name => $name} : undef),
+            {select => [qw(id name template)]});
+        die "Job group " . ($name // $id) . " not found\n" unless $job_group;
+        my $group_id = $job_group->id;
+        $json->{job_group_id} = $group_id;
+        # Backwards compatibility: ID used to mean group ID on this route
+        $json->{id} = $group_id;
 
-                    # Add/update job templates from YAML data
-                    # (create test suites if not already present, fail if referenced machine and product is missing)
-                    my @job_template_ids;
-                    my $yaml_group    = $yaml->{$group};
-                    my $yaml_archs    = $yaml_group->{architectures};
-                    my $yaml_products = $yaml_group->{products};
-                    my $yaml_defaults = $yaml_group->{defaults};
-                    foreach my $arch (keys %$yaml_archs) {
-                        my $yaml_products_for_arch = $yaml_archs->{$arch};
-                        my $yaml_defaults_for_arch = $yaml_defaults->{$arch};
-                        foreach my $product_name (keys %$yaml_products_for_arch) {
-                            foreach my $spec (@{$yaml_products_for_arch->{$product_name}}) {
-                                # Get testsuite, machine and prio from YAML data
-                                my $testsuite_name;
-                                my $prio;
-                                my $machine_name;
-                                if (ref $spec eq 'HASH') {
-                                    foreach my $name (keys %$spec) {
-                                        my $attr = $spec->{$name};
-                                        $testsuite_name = $name;
-                                        if ($attr->{priority}) {
-                                            $prio = $attr->{priority};
-                                        }
-                                        if ($attr->{machine}) {
-                                            $machine_name = $attr->{machine};
-                                        }
-                                    }
-                                }
-                                else {
-                                    $testsuite_name = $spec;
-                                }
-
-                                # Assign defaults
-                                $prio         //= $yaml_defaults_for_arch->{priority};
-                                $machine_name //= $yaml_defaults_for_arch->{machine};
-                                die "Machine is empty and there is no default for architecture $arch\n"
-                                  unless $machine_name;
-
-                                # Find machine, product and testsuite
-                                my $machine = $machines->find({name => $machine_name});
-                                die "Machine '$machine_name' is invalid\n" unless $machine;
-                                my $product_spec = $yaml_products->{$product_name};
-                                my $product      = $products->find(
-                                    {
-                                        arch    => $arch,
-                                        distri  => $product_spec->{distribution},
-                                        flavor  => $product_spec->{flavor},
-                                        version => $product_spec->{version},
-                                    });
-                                die "Product '$product_name' is invalid\n" unless $product;
-                                my $test_suite = $test_suites->find({name => $testsuite_name});
-                                die "Testsuite '$testsuite_name' is invalid\n" unless $test_suite;
-
-                                # Create/update job template
-                                my $job_template = $job_templates->find_or_create(
-                                    {
-                                        group_id      => $group_id,
-                                        product_id    => $product->id,
-                                        machine_id    => $machine->id,
-                                        test_suite_id => $test_suite->id,
-                                    });
-                                $job_template->update({prio => $prio}) if (defined $prio);
-                                push(@job_template_ids, $job_template->id);
-
-                                # Stop iterating if there were errors with this test suite
-                                last if (@$errors);
-                            }
-                        }
-                    }
-
-                    # Drop entries we haven't touched in add/update loop
-                    $job_templates->search(
-                        {
-                            id       => {'not in' => \@job_template_ids},
-                            group_id => $group_id,
-                        })->delete();
-
-                    # Preview mode: Get the expected YAML and rollback the result
-                    if ($self->param('preview')) {
-                        $json->{template} = YAML::XS::Dump($self->get_job_groups($json->{id}));
-                        $self->schema->txn_rollback;
-                    }
-                });
-        }
-        catch {
-            # Push the exception to the list of errors without the trailing new line
-            push @$errors, substr($_, 0, -1);
-        };
-
-        if (@$errors) {
-            $json->{error} = \@$errors;
-            $self->app->log->error(@$errors);
-            $self->respond_to(json => {json => $json, status => 400},);
-            return;
+        if (my $reference = $validation->param('reference')) {
+            my $template = $job_group->to_yaml;
+            $json->{template} = $template;
+            # Compare with no regard for trailing whitespace
+            chomp $template;
+            chomp $reference;
+            die "Template was modified\n" unless $template eq $reference;
         }
 
-        $self->emit_event('openqa_jobtemplate_create', $json);
-        $self->respond_to(json => {json => $json});
+        my $job_template_names = $job_group->template_data_from_yaml($data);
+        if ($validation->param('expand')) {
+            # Preview mode: Get the expected YAML without changing the database
+            $json->{result} = $job_group->expand_yaml($job_template_names);
+        }
 
-        # Process only one group
-        last;
+        $schema->txn_do(
+            sub {
+                my @job_template_ids;
+                foreach my $key (sort keys %$job_template_names) {
+                    push @job_template_ids,
+                      $job_templates->create_or_update_job_template($group_id, $job_template_names->{$key});
+                }
+                $json->{ids} = \@job_template_ids;
+
+                # Drop entries we haven't touched in add/update loop
+                $job_templates->search(
+                    {
+                        id       => {'not in' => \@job_template_ids},
+                        group_id => $group_id,
+                    })->delete();
+
+                if (my $diff = $job_group->text_diff($yaml)) {
+                    $json->{changes} = $diff;
+                }
+
+                # Preview mode: Get the expected YAML and rollback the result
+                if ($validation->param('preview')) {
+                    $json->{preview} = int($validation->param('preview'));
+                    $self->schema->txn_rollback;
+                }
+                else {
+                    # Store the original YAML template after all changes have been made
+                    $job_group->update({template => $yaml});
+                }
+            });
     }
+    catch {
+        # Push the exception to the list of errors without the trailing new line
+        push @$errors, substr($_, 0, -1);
+    };
+
+    if (@$errors) {
+        $json->{error} = \@$errors;
+        $self->app->log->error(@$errors);
+        $self->respond_to(json => {json => $json, status => 400},);
+        return;
+    }
+
+    $self->emit_event('openqa_jobtemplate_create', $json) unless $validation->param('preview');
+    $self->respond_to(json => {json => $json});
 }
 
 =over 4
@@ -383,104 +357,91 @@ sub create {
     my $self = shift;
 
     my $error;
-    my $id;
-    my $affected_rows;
+    my @ids;
 
-    my $validation      = $self->validation;
-    my $is_number_regex = qr/^[0-9]+$/;
-    my $has_product_id  = $validation->optional('product_id')->like($is_number_regex)->is_valid;
+    my $validation     = $self->validation;
+    my $has_product_id = $validation->optional('product_id')->num(0)->is_valid;
 
     # validate/read priority
-    my $prio_regex = qr/^(inherit|[0-9]+)$/;
+    my $prio_regex = qr/^(inherit|[0-9]+)\z/;
     if ($has_product_id) {
         $validation->optional('prio')->like($prio_regex);
     }
     else {
         $validation->required('prio')->like($prio_regex);
     }
-    my $prio = $self->param('prio');
+    $validation->optional('prio_only')->num(1);
+    my $prio = $validation->param('prio');
     $prio = ((!$prio || $prio eq 'inherit') ? undef : $prio);
 
-    my $schema = $self->schema;
+    my $schema   = $self->schema;
+    my $group_id = $self->param('group_id');
+    my $group    = $schema->resultset("JobGroups")->find({id => $group_id});
 
-    if ($has_product_id) {
-        for my $param (qw(machine_id group_id test_suite_id)) {
-            $validation->required($param)->like($is_number_regex);
-        }
-
-        if ($validation->has_error) {
-            $error = "wrong parameter:";
-            for my $k (qw(product_id machine_id test_suite_id group_id)) {
-                $error .= ' ' . $k if $validation->has_error($k);
-            }
-        }
-        else {
-            my $values = {
-                prio          => $prio,
-                product_id    => $self->param('product_id'),
-                machine_id    => $self->param('machine_id'),
-                group_id      => $self->param('group_id'),
-                test_suite_id => $self->param('test_suite_id')};
-            eval { $id = $schema->resultset("JobTemplates")->create($values)->id };
-            $error = $@;
-        }
+    if ($group && $group->template) {
+        # An existing group with a YAML template must not be updated manually
+        $error = 'Group "' . $group->name . '" must be updated through the YAML template';
     }
-    elsif ($self->param('prio_only')) {
-        for my $param (qw(group_id test_suite_id)) {
-            $validation->required($param)->like($is_number_regex);
+    elsif ($has_product_id) {
+        for my $param (qw(machine_id group_id test_suite_id)) {
+            $validation->required($param)->num(0);
         }
+        return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
-        if ($validation->has_error) {
-            $error = "wrong parameter:";
-            for my $k (qw(group_id test_suite_id prio)) {
-                $error .= ' ' . $k if $validation->has_error($k);
-            }
+        my $values = {
+            prio          => $prio,
+            product_id    => $validation->param('product_id'),
+            machine_id    => $validation->param('machine_id'),
+            group_id      => $group_id,
+            test_suite_id => $validation->param('test_suite_id')};
+        eval { push @ids, $schema->resultset("JobTemplates")->create($values)->id };
+        $error = $@;
+    }
+    elsif ($validation->param('prio_only')) {
+        for my $param (qw(group_id test_suite_id)) {
+            $validation->required($param)->num(0);
         }
-        else {
-            eval {
-                $affected_rows = $schema->resultset("JobTemplates")->search(
-                    {
-                        group_id      => $self->param('group_id'),
-                        test_suite_id => $self->param('test_suite_id'),
-                    }
-                )->update(
-                    {
-                        prio => $prio,
-                    });
-            };
-            $error = $@;
-        }
+        return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
+
+        eval {
+            my $job_templates = $schema->resultset("JobTemplates")->search(
+                {
+                    group_id      => $group_id,
+                    test_suite_id => $validation->param('test_suite_id'),
+                });
+            push @ids, $_->id for $job_templates->all;
+            $job_templates->update(
+                {
+                    prio => $prio,
+                });
+        };
+        $error = $@;
     }
     else {
         for my $param (qw(group_name machine_name test_suite_name arch distri flavor version)) {
             $validation->required($param);
         }
-
-        if ($validation->has_error) {
-            $error = "wrong parameter:";
-            for my $k (qw(group_name machine_name test_suite_name arch distri flavor version)) {
-                $error .= ' ' . $k if $validation->has_error($k);
-            }
-        }
-        else {
-            my $values = {
-                product => {
-                    arch    => $self->param('arch'),
-                    distri  => $self->param('distri'),
-                    flavor  => $self->param('flavor'),
-                    version => $self->param('version')
-                },
-                group      => {name => $self->param('group_name')},
-                machine    => {name => $self->param('machine_name')},
-                prio       => $prio,
-                test_suite => {name => $self->param('test_suite_name')}};
-            eval { $id = $schema->resultset("JobTemplates")->create($values)->id };
-            $error = $@;
-        }
+        return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
+        my $values = {
+            product => {
+                arch    => $validation->param('arch'),
+                distri  => $validation->param('distri'),
+                flavor  => $validation->param('flavor'),
+                version => $validation->param('version')
+            },
+            group      => {name => $validation->param('group_name')},
+            machine    => {name => $validation->param('machine_name')},
+            prio       => $prio,
+            test_suite => {name => $validation->param('test_suite_name')}};
+        eval { push @ids, $schema->resultset("JobTemplates")->create($values)->id };
+        $error = $@;
     }
 
     my $status;
-    my $json = {};
+    my $json = {ids => \@ids};
+    $json->{job_group_id} = $group_id if $group_id;
+    # Backwards compatibility: ID for a single job template
+    $json->{id} = $ids[0] if scalar @ids == 1;
 
     if ($error) {
         $self->app->log->error($error);
@@ -488,14 +449,7 @@ sub create {
         $status = 400;
     }
     else {
-        if (defined($affected_rows)) {
-            $json->{affected_rows} = $affected_rows;
-            $self->emit_event('openqa_jobtemplate_create', {affected_rows => $affected_rows});
-        }
-        else {
-            $json->{id} = $id;
-            $self->emit_event('openqa_jobtemplate_create', {id => $id});
-        }
+        $self->emit_event(openqa_jobtemplate_create => $json);
     }
 
     $self->respond_to(
@@ -528,25 +482,36 @@ sub destroy {
     my $job_templates = $self->schema->resultset('JobTemplates');
 
     my $status;
+    my $error;
     my $json = {};
 
-    my $rs;
-    eval { $rs = $job_templates->search({id => $self->param('job_template_id')})->delete };
-    my $error = $@;
+    my $job_template = $job_templates->find({id => $self->param('job_template_id')});
+    if ($job_template && $job_template->group->template) {
+        # A test suite that is part of a group with a YAML template must not be deleted manually
+        $error  = 'Test suites in group "' . $job_template->group->name . '" must be updated through the YAML template';
+        $status = 400;
+    }
+    elsif ($job_template) {
+        my $rs;
+        eval { $rs = $job_template->delete };
+        $error = $@;
 
-    if ($rs) {
-        if ($rs == 0) {
-            $status = 404;
-            $error  = 'Not found';
-        }
-        else {
+        if ($rs) {
             $json->{result} = int($rs);
             $self->emit_event('openqa_jobtemplate_delete', {id => $self->param('job_template_id')});
         }
+        else {
+            $status = 400;
+        }
     }
     else {
+        $status = 404;
+        $error  = 'Not found';
+    }
+
+    if ($error) {
+        $self->app->log->error($error);
         $json->{error} = $error;
-        $status = 400;
     }
     $self->respond_to(
         json => {json => $json, status => $status},

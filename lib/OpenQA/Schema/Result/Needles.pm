@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2017 SUSE LLC
+# Copyright (C) 2015-2019 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::Needles;
 
@@ -26,11 +25,11 @@ use DBIx::Class::Timestamps 'now';
 use File::Basename;
 use Cwd 'realpath';
 use File::Spec::Functions 'catdir';
+use OpenQA::App;
+use OpenQA::Git;
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
-use OpenQA::Utils qw(log_error commit_git);
-
-use db_helpers;
+use OpenQA::Utils qw(locate_needle);
 
 __PACKAGE__->table('needles');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime Timestamps));
@@ -104,22 +103,22 @@ sub update_needle_cache {
     }
 }
 
-# save the needle informations
+# save the needle information
 # be aware that giving the optional needle_cache hash ref, makes you responsible
 # to call update_needle_cache after a loop
 sub update_needle {
     my ($filename, $module, $matched, $needle_cache) = @_;
 
-    my $schema = OpenQA::Scheduler::Scheduler::schema();
+    # assume that path of the JSON file is relative to the job's needle dir or (to support legacy versions
+    # of os-autoinst) relative to the "share dir" (the $bmwqemu::vars{PRJDIR} variable in legacy os-autoinst)
+    my $needle_dir;
+    unless (-f $filename) {
+        return undef unless $filename = locate_needle($filename, $needle_dir = $module->job->needle_dir);
+    }
+
+    my $schema = OpenQA::Schema->singleton;
     my $guard  = $schema->txn_scope_guard;
 
-    if (!-f $filename) {
-        $filename = catdir($OpenQA::Utils::sharedir, $filename);
-        if (!-f $filename) {
-            log_error(
-                "Needle file $filename not found where expected. Check $OpenQA::Utils::prjdir for distri symlinks");
-        }
-    }
     my $needle;
     if ($needle_cache) {
         $needle = $needle_cache->{$filename};
@@ -127,7 +126,7 @@ sub update_needle {
     if (!$needle) {
         # create a canonical path out of it
         my $realpath       = realpath($filename);
-        my $needledir_path = realpath($module->job->needle_dir());
+        my $needledir_path = realpath($needle_dir // $module->job->needle_dir);
         my $dir;
         my $basename;
         if (index($realpath, $needledir_path) != 0) {    # leave old behaviour as it is
@@ -190,17 +189,17 @@ sub remove {
 
     my $fname      = $self->path;
     my $screenshot = $fname =~ s/.json$/.png/r;
-    my $app        = $OpenQA::Utils::app;
+    my $app        = OpenQA::App->singleton;
     $app->log->debug("Remove needle $fname and $screenshot");
 
-    if (($app->config->{global}->{scm} || '') eq 'git') {
+    my $git = OpenQA::Git->new({app => $app, dir => $self->directory->path, user => $user});
+    if ($git->enabled) {
         my $directory = $self->directory;
-        my $args      = {
-            dir     => $self->directory->path,
-            rm      => [$fname, $screenshot],
-            user    => $user,
-            message => sprintf("Remove %s/%s", $directory->name, $self->filename)};
-        my $error = commit_git($args);
+        my $error     = $git->commit(
+            {
+                rm      => [$fname, $screenshot],
+                message => sprintf("Remove %s/%s", $directory->name, $self->filename),
+            });
         return $error if $error;
     }
     else {

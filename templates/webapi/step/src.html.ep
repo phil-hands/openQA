@@ -1,0 +1,13 @@
+% layout 'codemirror';
+
+% content_for 'title' => begin
+  % title $moduleid;
+%end
+
+% content_for 'src_code' => begin
+  Test module:
+    %= link_to url_for('src_step', format => 'txt') => begin
+    <code><%= $scriptpath %></code>
+    % end
+    <textarea class="code" id="script"><%= $script %></textarea>
+% end

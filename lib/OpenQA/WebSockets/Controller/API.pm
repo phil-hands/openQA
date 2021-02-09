@@ -1,4 +1,4 @@
-# Copyright (C) 2019 SUSE LLC
+# Copyright (C) 2019-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,17 +16,12 @@
 package OpenQA::WebSockets::Controller::API;
 use Mojo::Base 'Mojolicious::Controller';
 
+use OpenQA::Constants qw(WORKER_COMMAND_GRAB_JOB WORKER_COMMAND_GRAB_JOBS);
 use OpenQA::WebSockets;
-
-sub is_worker_connected {
-    my $self      = shift;
-    my $worker_id = $self->param('worker_id');
-    my $bool      = OpenQA::WebSockets::ws_is_worker_connected($worker_id);
-    $self->render(json => {connected => $bool ? \1 : \0});
-}
+use OpenQA::WebSockets::Model::Status;
 
 sub send_msg {
-    my $self = shift;
+    my ($self) = @_;
 
     my $data      = $self->req->json;
     my $worker_id = $data->{worker_id};
@@ -39,9 +34,18 @@ sub send_msg {
 }
 
 sub send_job {
-    my $self   = shift;
+    my ($self) = @_;
+
     my $job    = $self->req->json;
-    my $result = OpenQA::WebSockets::ws_send_job($job);
+    my $result = OpenQA::WebSockets::ws_send_job($job, {type => WORKER_COMMAND_GRAB_JOB, job => $job});
+    $self->render(json => {result => $result});
+}
+
+sub send_jobs {
+    my ($self) = @_;
+
+    my $job_info = $self->req->json;
+    my $result = OpenQA::WebSockets::ws_send_job($job_info, {type => WORKER_COMMAND_GRAB_JOBS, job_info => $job_info});
     $self->render(json => {result => $result});
 }
 

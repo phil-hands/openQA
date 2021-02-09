@@ -1,4 +1,4 @@
-# Copyright (C) 2015 SUSE Linux GmbH
+# Copyright (C) 2015 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,73 +14,6 @@
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA;
-
-use strict;
-use warnings;
-
-use OpenQA::Scheduler;
-use OpenQA::WebSockets;
-use OpenQA::WebAPI;
-
-use POSIX ':sys_wait_h';
-
-my %pids;
-
-sub _run {
-    my ($component, $start_routine) = @_;
-    my $child = fork();
-    if ($child) {
-        $pids{$component} = $child;
-        print STDERR "$component started with pid $child\n";
-    }
-    else {
-        $start_routine->();
-        exit;
-    }
-}
-
-sub _stopAll {
-    for (keys %pids) {
-        my $pid = $pids{$_};
-        my $ret;
-        print STDERR "stopping $_ with pid $pid\n";
-        kill POSIX::SIGTERM => $pid;
-        for my $i (1 .. 5) {
-            $ret = waitpid($pid, WNOHANG);
-            last if ($ret == $pid);
-            sleep 1;
-        }
-        next if ($ret == $pid);
-        kill POSIX::SIGKILL => $pid;
-    }
-    %pids = ();
-}
-
-sub run {
-    # if ARGV is not daemon||prefork => don't start the whole stack
-    my $deamonize = $ARGV[0] =~ /daemon|prefork/;
-    if ($deamonize) {
-        # start Mojo::IOLoop @ Scheduler
-        _run('scheduler', \&OpenQA::Scheduler::run);
-        # start Mojo::Lite @ WebSockets
-        _run('websockets', \&OpenQA::WebSockets::run);
-        # start Mojolicious @ WebAPI
-        _run('webapi', \&OpenQA::WebAPI::run);
-
-        $SIG{ALRM} = \&_stopAll;
-        $SIG{TERM} = \&_stopAll;
-        $SIG{INT}  = \&_stopAll;
-        $SIG{HUP}  = \&_stopAll;
-
-        # wait for any children to finish
-        waitpid(-1, 0);
-        # and stop the rest if not already stopped
-        _stopAll;
-    }
-    else {
-        OpenQA::WebAPI::run;
-    }
-}
+use Mojo::Base -strict;
 
 1;
-# vim: set sw=4 et:

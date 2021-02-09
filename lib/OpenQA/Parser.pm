@@ -64,7 +64,7 @@ sub load {
     croak "You need to specify a file" if !$file;
     my $file_content = $self->_read_file($file);
     confess "Failed reading file $file" if !$file_content;
-    $self->content($file_content) if $self->include_content;
+    $self->content($file_content)       if $self->include_content;
     $self->parse($file_content);
     $self;
 }
@@ -204,9 +204,9 @@ sub deserialize { shift->_load_tree(Storable::thaw(shift)) }
 sub to_json   { encode_json shift->_build_tree }
 sub from_json { shift->_load_tree(decode_json shift) }
 
-sub save         { my $s = shift; path(@_)->spurt($s->serialize); $s }
-sub save_to_json { my $s = shift; path(@_)->spurt($s->to_json);   $s }
-sub from_file    { shift->new()->deserialize(path(pop)->slurp()) }
+sub save           { my $s = shift; path(@_)->spurt($s->serialize); $s }
+sub save_to_json   { my $s = shift; path(@_)->spurt($s->to_json);   $s }
+sub from_file      { shift->new()->deserialize(path(pop)->slurp()) }
 sub from_json_file { shift->new()->from_json(path(pop)->slurp()) }
 
 *p = \&parser;

@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2018 SUSE LLC
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Controller::Running;
 use Mojo::Base 'Mojolicious::Controller';
@@ -20,10 +19,13 @@ use Mojo::Base 'Mojolicious::Controller';
 use Mojo::Util 'b64_encode';
 use Mojo::File 'path';
 use Mojo::JSON qw(encode_json decode_json);
+use OpenQA::Constants qw(WORKER_COMMAND_LIVELOG_STOP WORKER_COMMAND_LIVELOG_START);
+use OpenQA::Log qw(log_debug log_error);
 use OpenQA::Utils;
 use OpenQA::WebSockets::Client;
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
+use Try::Tiny;
 
 sub init {
     my ($self, $page_name) = @_;
@@ -35,14 +37,14 @@ sub init {
     }
 
     # succeed if the job has a worker
-    if ($job->worker) {
-        $self->stash('job', $job);
+    if (my $worker = $job->worker) {
+        $self->stash({job => $job, worker => $worker});
         return 1;
     }
 
     # return the state as JSON for status route
     if ($page_name && $page_name eq 'status') {
-        $self->render(json => {state => $job->state});
+        $self->render(json => {state => $job->state, result => $job->result});
         return 0;
     }
 
@@ -58,11 +60,10 @@ sub status {
     my $self = shift;
     return 0 unless $self->init('status');
 
-    my $job      = $self->stash('job');
-    my $workerid = $job->worker_id;
-    my $results  = {workerid => $workerid, state => $job->state};
-    my $r        = $job->modules->find({result => 'running'});
-    $results->{running} = $r->name() if $r;
+    my $job            = $self->stash('job');
+    my $results        = {workerid => $job->worker_id, state => $job->state, result => $job->result};
+    my $running_module = $job->modules->find({result => 'running'}, {order_by => {-desc => 't_updated'}, rows => 1});
+    $results->{running} = $running_module->name if $running_module;
     $self->render(json => $results);
 }
 
@@ -78,7 +79,7 @@ sub edit {
 'The test has no currently running module so opening the needle editor is not possible. Likely results have not been uploaded yet so reloading the page might help.',
     ) unless ($running_module);
 
-    my $details = $running_module->details();
+    my $details = $running_module->results->{details};
     my $stepid  = scalar(@{$details});
     return $self->render_specific_not_found(
         $page_name,
@@ -99,8 +100,9 @@ sub streamtext {
     $start_hook->($worker, $job);
     $self->render_later;
     Mojo::IOLoop->stream($self->tx->connection)->timeout(900);
-    $self->res->code(200);
-    $self->res->headers->content_type("text/event-stream");
+    my $res = $self->res;
+    $res->code(200);
+    $res->headers->content_type('text/event-stream');
 
     # Try to open the log file and keep the filehandle
     # if the open fails, continue, well check later
@@ -122,36 +124,28 @@ sub streamtext {
         seek $log, 0, 1;
     }
 
-    # Now we set up a recurring timer to check for new lines from the
-    # logfile and send them to the client, plus a utility function to
-    # close the connection if anything goes wrong.
-    my $id;
-    my $doclose = sub {
-        Mojo::IOLoop->remove($id);
+    # Check for new lines from the logfile using recurring timer
+    # Setup utility function to close the connection if something goes wrong
+    my $timer_id;
+    my $close_connection = sub {
+        Mojo::IOLoop->remove($timer_id);
         $close_hook->();
         $self->finish;
         close $log;
-        return;
     };
-    $id = Mojo::IOLoop->recurring(
+    $timer_id = Mojo::IOLoop->recurring(
         1 => sub {
             if (!$ino) {
                 # log file was not yet opened
-                return unless (open($log, '<', $logfile));
+                return unless open($log, '<', $logfile);
                 $ino  = (stat $logfile)[1];
                 $size = -s $logfile;
             }
-            my @st = stat $logfile;
 
             # Zero tolerance for any shenanigans with the logfile, such as
             # truncation, rotation, etc.
-            unless (@st
-                && $st[1] == $ino
-                && $st[3] > 0
-                && $st[7] >= $size)
-            {
-                return $doclose->();
-            }
+            my @st = stat $logfile;
+            return $close_connection->() unless @st && $st[1] == $ino && $st[3] > 0 && $st[7] >= $size;
 
             # If there's new data, read it all and send it out. Then
             # seek to the current position to reset EOF.
@@ -166,11 +160,10 @@ sub streamtext {
             }
         });
 
-    # If the client closes the connection, we can stop monitoring the
-    # logfile.
+    # Stop monitoring the logfile when the connection closes
     $self->on(
         finish => sub {
-            Mojo::IOLoop->remove($id);
+            Mojo::IOLoop->remove($timer_id);
             $close_hook->($worker, $job);
         });
 }
@@ -193,56 +186,74 @@ sub streaming {
 
     $self->render_later;
     Mojo::IOLoop->stream($self->tx->connection)->timeout(900);
-    $self->res->code(200);
-    $self->res->headers->content_type('text/event-stream');
+    my $res = $self->res;
+    $res->code(200);
+    $res->headers->content_type('text/event-stream');
 
-    my $job      = $self->stash('job');
-    my $worker   = $job->worker;
-    my $lastfile = '';
-    my $basepath = $worker->get_property('WORKER_TMPDIR');
+    my $job_id    = $self->stash('job')->id;
+    my $worker    = $self->stash('worker');
+    my $worker_id = $worker->id;
+    my $lastfile  = '';
+    my $basepath  = $worker->get_property('WORKER_TMPDIR');
 
     # Set up a recurring timer to send the last screenshot to the client,
     # plus a utility function to close the connection if anything goes wrong.
-    my $id;
-    my $doclose = sub {
-        Mojo::IOLoop->remove($id);
+    my $timer_id;
+    my $close_connection = sub {
+        Mojo::IOLoop->remove($timer_id);
         $self->finish;
-        return;
     };
-
-    $id = Mojo::IOLoop->recurring(
+    $timer_id = Mojo::IOLoop->recurring(
         0.3 => sub {
             my $newfile = readlink("$basepath/last.png") || '';
-            if ($lastfile ne $newfile) {
-                if (!-l $newfile || !$lastfile) {
-                    my $data = path($basepath, $newfile)->slurp;
-                    $self->write("data: data:image/png;base64," . b64_encode($data, '') . "\n\n");
-                    $lastfile = $newfile;
-                }
-                elsif (!-e $basepath . 'backend.run') {
-                    # Some browsers can't handle mpng (at least after reciving jpeg all the time)
-                    my $data = $self->app->static->file('images/suse-tested.png')->slurp;
-                    $self->write("data: data:image/png;base64," . b64_encode($data, '') . "\n\n");
-                    $doclose->();
-                }
+            return if $lastfile eq $newfile;
+            if (!-l $newfile || !$lastfile) {
+                my $data = path($basepath, $newfile)->slurp;
+                $self->write("data: data:image/png;base64," . b64_encode($data, '') . "\n\n");
+                $lastfile = $newfile;
+            }
+            elsif (!-e $basepath . 'backend.run') {
+                # Some browsers can't handle mpng (at least after reciving jpeg all the time)
+                my $data = $self->app->static->file('images/suse-tested.png')->slurp;
+                $self->write("data: data:image/png;base64," . b64_encode($data, '') . "\n\n");
+                $close_connection->();
             }
         });
 
     # ask worker to create live stream
-    OpenQA::Utils::log_debug('Asking the worker to start providing livestream');
+    log_debug('Asking the worker to start providing livestream');
 
     my $client = OpenQA::WebSockets::Client->singleton;
     $self->tx->once(
         finish => sub {
-            Mojo::IOLoop->remove($id);
+            Mojo::IOLoop->remove($timer_id);
+
+            # skip if the worker is not present anymore or already working on a different job
+            # note: This is of course not entirely race-free. The worker will ignore messages which
+            #       are not relevant anymore. This is merely to keep those messages to a minimum.
+            my $worker = OpenQA::Schema->singleton->resultset('Workers')->find($worker_id);
+            return undef unless $worker;
+            return undef unless defined $worker->job_id && $worker->job_id == $job_id;
+
             # ask worker to stop live stream
-            OpenQA::Utils::log_debug('Asking the worker to stop providing livestream');
-            $client->send_msg($worker->id, 'livelog_stop', $job->id);
+            log_debug("Asking worker $worker_id to stop providing livestream");
+            try {
+                $client->send_msg($worker_id, WORKER_COMMAND_LIVELOG_STOP, $job_id);
+            }
+            catch {
+                log_error("Unable to ask worker to stop providing livestream: $_");
+            };
         },
     );
-
-    $client->send_msg($worker->id, 'livelog_start', $job->id);
+    try {
+        $client->send_msg($worker_id, WORKER_COMMAND_LIVELOG_START, $job_id);
+    }
+    catch {
+        my $error = "Unable to ask worker $worker_id to start providing livestream: $_";
+        $self->render(json => {error => $error}, status => 500);
+        $close_connection->();
+        log_error($error);
+    };
 }
 
 1;
-# vim: set sw=4 et:

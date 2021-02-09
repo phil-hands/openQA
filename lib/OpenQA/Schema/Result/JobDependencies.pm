@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::JobDependencies;
 
@@ -20,8 +19,6 @@ use strict;
 use warnings;
 
 use base 'DBIx::Class::Core';
-
-use db_helpers;
 
 use OpenQA::JobDependencies::Constants;
 
@@ -51,12 +48,7 @@ sub sqlt_deploy_hook {
 
 sub to_string {
     my ($self) = @_;
-
-    my %deps = (
-        OpenQA::JobDependencies::Constants::CHAINED  => "Chained",
-        OpenQA::JobDependencies::Constants::PARALLEL => "Parallel"
-    );
-    return $deps{$self->dependency};
+    return OpenQA::JobDependencies::Constants::display_name($self->dependency);
 }
 
 1;

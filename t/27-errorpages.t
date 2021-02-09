@@ -1,4 +1,4 @@
-# Copyright (C) 2017 SUSE LLC
+# Copyright (C) 2017-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,32 +11,28 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
-use Mojo::Base -strict;
-use Test::More;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 use OpenQA::Test::Case;
+use OpenQA::Test::TimeLimit '10';
 
 # init test case
 my $test_case = OpenQA::Test::Case->new;
-$test_case->init_data;
+$test_case->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 05-job_modules.pl');
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
 subtest '404 error page' => sub {
-    my $get = $t->get_ok('/unavailable_page')->status_is(404);
-    my $dom = $get->tx->res->dom;
+    $t->get_ok('/unavailable_page')->status_is(404);
+    my $dom = $t->tx->res->dom;
     is_deeply([$dom->find('h1')->map('text')->each], ['Page not found'],   'correct page');
     is_deeply([$dom->find('h2')->map('text')->each], ['Available routes'], 'available routes shown');
-    ok(index($get->tx->res->text, 'Each entry contains the') >= 0, 'description shown');
+    ok(index($t->tx->res->text, 'Each entry contains the') >= 0, 'description shown');
 };
 
 subtest 'error pages shown for OpenQA::WebAPI::Controller::Step' => sub {

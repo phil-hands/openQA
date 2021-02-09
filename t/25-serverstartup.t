@@ -1,4 +1,4 @@
-# Copyright (C) 2017-2018 SUSE LLC
+# Copyright (C) 2017-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,9 +13,9 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
+use Test::Most;
 
+BEGIN {
     package OpenQA::FakePlugin::Fuzz;
     use Mojo::Base -base;
 
@@ -27,13 +27,12 @@ BEGIN {
     };
 }
 
-use strict;
-use warnings;
 use FindBin;
-use lib "$FindBin::Bin/lib";
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
+use OpenQA::Test::TimeLimit '8';
+use OpenQA::Log 'setup_log';
 use OpenQA::Setup;
 use OpenQA::Utils;
-use Test::More;
 use Mojolicious;
 use Mojo::File qw(tempfile path);
 
@@ -41,7 +40,7 @@ subtest 'Setup logging to file' => sub {
     local $ENV{OPENQA_LOGFILE} = undef;
     my $tempfile = tempfile;
     my $app      = Mojolicious->new(config => {logging => {file => $tempfile}});
-    OpenQA::Setup::setup_log($app);
+    setup_log($app);
     $app->attr('log_name', sub { return "test"; });
 
     my $log = $app->log;
@@ -62,7 +61,7 @@ subtest 'Setup logging to STDOUT' => sub {
     local $ENV{OPENQA_LOGFILE} = undef;
     my $buffer = '';
     my $app    = Mojolicious->new();
-    OpenQA::Setup::setup_log($app);
+    setup_log($app);
     $app->attr('log_name', sub { return "test"; });
     {
         open my $handle, '>', \$buffer;
@@ -83,7 +82,7 @@ subtest 'Setup logging to STDOUT' => sub {
 subtest 'Setup logging to file (ENV)' => sub {
     local $ENV{OPENQA_LOGFILE} = tempfile;
     my $app = Mojolicious->new(config => {logging => {file => "/tmp/ignored_foo_bar"}});
-    OpenQA::Setup::setup_log($app);
+    setup_log($app);
     $app->attr('log_name', sub { return "test"; });
 
     my $log = $app->log;
@@ -101,7 +100,7 @@ subtest 'Setup logging to file (ENV)' => sub {
     ok !-e "/tmp/ignored_foo_bar";
 
     $app = Mojolicious->new();
-    OpenQA::Setup::setup_log($app);
+    setup_log($app);
     $app->attr('log_name', sub { return "test"; });
 
     $log = $app->log;
@@ -189,10 +188,4 @@ sub configuration_fields {
         bazzer => {
             realfoo => 1
         }};
-}
-
-package db_profiler;
-no warnings 'redefine';
-sub enable_sql_debugging {
-    1;
 }

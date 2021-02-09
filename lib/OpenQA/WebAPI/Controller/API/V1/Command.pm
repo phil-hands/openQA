@@ -1,4 +1,4 @@
-# Copyright (C) 2015 SUSE Linux GmbH
+# Copyright (C) 2015 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,7 +17,6 @@ package OpenQA::WebAPI::Controller::API::V1::Command;
 use Mojo::Base 'Mojolicious::Controller';
 
 use OpenQA::Utils;
-use OpenQA::IPC;
 
 =pod
 
@@ -64,4 +63,3 @@ sub create {
 }
 
 1;
-# vim: set sw=4 et:

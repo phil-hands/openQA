@@ -1,0 +1,34 @@
+pull_request_rules:
+  - name: automatic merge
+    conditions:
+      - "#approved-reviews-by>=2"
+      - "#changes-requested-reviews-by=0"
+      # https://doc.mergify.io/examples.html#require-all-requested-reviews-to-be-approved
+      - "#review-requested=0"
+      - -label~=^acceptance-tests-needed|not-ready
+      - base=master
+      # wait explicitly for one of the final checks to show up to be on the
+      # safe side even in case of checks not reporting back at all
+      - "status-success=codecov/project"
+      # wait for OBS package build as well which is triggered independantly
+      # See https://progress.opensuse.org/issues/55346 for details
+      - "status-success=OBS Package Build"
+    actions:
+      merge:
+        method: merge
+  - name: automatic merge on special label
+    conditions:
+      - -label~=^acceptance-tests-needed|not-ready
+      - "label=merge-fast"
+      - base=master
+      - "status-success=OBS Package Build"
+      - "status-success=codecov/project"
+    actions:
+      merge:
+        method: merge
+  - name: ask to resolve conflict
+    conditions:
+      - conflict
+    actions:
+      comment:
+        message: This pull request is now in conflicts. Could you fix it? 🙏

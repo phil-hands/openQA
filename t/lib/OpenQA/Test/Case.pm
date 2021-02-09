@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Test::Case;
 use Mojo::Base -base;
@@ -25,9 +24,10 @@ use Date::Format 'time2str';
 use Mojo::JSON 'decode_json';
 
 sub new {
-    my $self = shift->SUPER::new;
+    my ($class, %options) = @_;
+    my $self = $class->SUPER::new;
 
-    $ENV{OPENQA_CONFIG} = 't/data';
+    $ENV{OPENQA_CONFIG} = $options{config_directory} // 't/data';
 
     return $self;
 }
@@ -35,17 +35,10 @@ sub new {
 sub init_data {
     my ($self, %options) = @_;
 
-    # This should result in the 't' directory, even if $0 is in a subdirectory
-    my ($tdirname) = $0 =~ qr/((.*\/t\/|^t\/)).+$/;
     my $schema = OpenQA::Test::Database->new->create(%options);
 
-    # ARGL, we can't fake the current time and the db manages
-    # t_started so we have to override it manually
-    my $r = $schema->resultset("Jobs")->search({id => 99937})->update(
-        {
-            t_created => time2str('%Y-%m-%d %H:%M:%S', time - 540000, 'UTC'),    # 150 hours ago;
-        });
-
+    # This should result in the 't' directory, even if $0 is in a subdirectory
+    my ($tdirname) = $0 =~ qr/((.*\/t\/|^t\/)).+$/;
     OpenQA::Test::Testresults->new->create(directory => $tdirname . 'testresults');
     return $schema;
 }
@@ -79,10 +72,10 @@ sub trim_whitespace {
 sub find_most_recent_event {
     my ($schema, $event) = @_;
 
-    my $results
-      = $schema->resultset('AuditEvents')->search({event => $event}, {limit => 1, order_by => {-desc => 'id'}});
-    return $results ? decode_json($results->next->event_data) : undef;
+    my $result
+      = $schema->resultset('AuditEvents')->find({event => $event}, {rows => 1, order_by => {-desc => 'id'}});
+    return undef unless $result;
+    return decode_json($result->event_data);
 }
 
 1;
-# vim: set sw=4 et:

@@ -1,7 +1,6 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2014 SUSE Linux Products GmbH
-# Copyright (C) 2016 SUSE LLC
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,16 +15,12 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    use FindBin qw($Bin);
-    use lib "$Bin/../lib";
-}
+use FindBin qw($RealBin);
+use lib "$RealBin/../lib";
 
 use strict;
 use warnings;
 use aliased 'DBIx::Class::DeploymentHandler' => 'DH';
-use FindBin;
-use lib "$FindBin::Bin/../lib";
 use OpenQA::Schema;
 use Getopt::Long;
 use IO::Dir;
@@ -37,20 +32,19 @@ my $upgrade_database = 0;
 my $help             = 0;
 my $force            = 0;
 my $user;
+my $default_script_directory = "$FindBin::RealBin/../dbicdh";
+my $script_directory         = $default_script_directory;
 
 my $result = GetOptions(
     "help"             => \$help,
     "prepare_upgrades" => \$prepare_upgrades,
     "upgrade_database" => \$upgrade_database,
     "user=s"           => \$user,
+    "dir=s"            => \$script_directory,
     "force"            => \$force
 );
 
-if (!$prepare_upgrades and !$upgrade_database) {
-    $help = 1;
-}
-
-if ($help) {
+sub usage {
     print "Usage: $0 [flags]\n\n";
     print "  --prepare_upgrades : Create the deployment files used to upgrade the database.\n";
     print "                       Don't forget to increase the version before using this\n";
@@ -59,9 +53,14 @@ if ($help) {
     print "                       to actually upgrade a database.\n";
     print "  --force            : Force overwriting existing data.\n";
     print "  --user=login       : Change uid before connecting the DB.\n";
+    print "  --dir=directory    : Create deployment and migration scripts in this directory.\n";
+    print "                       Default is '$default_script_directory'\n";
     print "  --help             : This help message.\n";
-    exit;
+    exit $_[0];
 }
+
+usage 0 if $help;
+usage 1 unless $result or $prepare_upgrades or $upgrade_database;
 
 if ($user) {
     my $uid = getpwnam($user) || die "No such login $user";
@@ -74,8 +73,7 @@ if ($user) {
 
 my $schema = OpenQA::Schema::connect_db(check => 0);
 
-my $script_directory = "$FindBin::Bin/../dbicdh";
-my @databases        = qw( PostgreSQL );
+my @databases = qw( PostgreSQL );
 
 if ($prepare_upgrades) {
     my $dh = DH->new(
@@ -108,8 +106,4 @@ if ($prepare_upgrades) {
     $dh->prepare_upgrade({from_version => $prev_version, to_version => $version});
 }
 
-if ($upgrade_database) {
-    OpenQA::Schema::deployment_check($schema, $force);
-}
-
-# vim: set sw=4 sts=4 et:
+$schema->deploy($force) if $upgrade_database;

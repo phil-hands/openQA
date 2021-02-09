@@ -1,12 +1,4 @@
-var testStatus = {
-    modlist_initialized: 0,
-    jobid: null,
-    running: null,
-    workerid: null,
-    status_url: null,
-    details_url: null,
-    img_reload_time: 0
-};
+// jshint esversion: 6
 
 // holds elements relevant for live stream, live log and serial output
 // (populated in initLivelogAndTerminal() and initLivestream())
@@ -16,123 +8,160 @@ var liveViewElements = [];
 // (initialized in initLivelogAndTerminal())
 var logElements;
 
-// Update global variable testStatus
-function updateTestStatus(newStatus) {
-    if (newStatus.state != 'running') {
-        setTimeout(reloadPage, 2000);
+// Reload broken thumbnails (that didn't exist yet when being requested) every 7th time
+function reloadBrokenThumbnails(force) {
+    if (!force && testStatus.img_reload_time++ % 7 !== 0) {
         return;
     }
-    testStatus.workerid = newStatus.workerid;
+    $('.links img').each(function() {
+        if (this.naturalWidth >= 1) {
+            return;
+        }
+        if (!this.retries) {
+            this.retries = 0;
+        }
+        if (this.retries <= 3) {
+            this.retries++;
+            this.src = this.src.split('?')[0] + '?' + Date.now();
+        }
+    });
+}
 
-    // Reload broken thumbnails (that didn't exist yet when being requested) every 7 sec
-    if (testStatus.img_reload_time++ % 7 == 0) {
-        $(".links img").each(function() {
-            if (this.naturalWidth < 1) {
-                if (!this.retries) {
-                    this.retries = 0;
-                }
-                if (this.retries <= 3) {
-                    this.retries++;
-                    this.src = this.src.split("?")[0]+"?"+Date.now();
-                }
-            }
-        });
+// Update global variable testStatus
+function updateTestStatus(newStatus) {
+    // handle state transitions
+    const currentState = testStatus.state;
+    const newState = newStatus.state;
+    const stateChanged = newStatus.state !== currentState;
+    testStatus.workerid = newStatus.workerid;
+    if (stateChanged) {
+        handleJobStateTransition(currentState, newState, newStatus.result);
     }
 
-    // skip further updating if the currently running module didn't change and there
+    // skip further updating (which is only relevant once the job is running)
+    if (newState !== 'running' && newState !== 'uploading' && newState !== 'done') {
+        return;
+    }
+
+    // skip if details and live tabs have not been loaded yet
+    if (!tabConfiguration.live.hasContents) {
+        console.log('Skipping test status update; details and running tabs have not been loaded yet');
+        return;
+    }
+
+    reloadBrokenThumbnails();
+
+    // skip further updating if the state and the currently running module didn't change and there
     // are no details for the currently running module are available
     // note: use of '==' (rather than '===') makes a difference here to consider null and undefined as equal
-    if (testStatus.running == newStatus.running &&
+    if (!stateChanged && testStatus.running == newStatus.running &&
         !developerMode.detailsForCurrentModuleUploaded) {
         return;
     }
 
+    const detailsTab = tabConfiguration.details;
+    if (!detailsTab.panelElement) {
+        detailsTab.panelElement = document.getElementById('details');
+    }
+
     // redraw module list if a new module have been started
-    $.ajax(testStatus.details_url).done(function(data) {
-        if (data.length <= 0) {
-            console.log("ERROR: modlist empty");
+    $.ajax(detailsTab.panelElement.dataset.src).done(function(data) {
+        if (typeof data !== 'object') {
+            console.log('No details for current job available.');
+            return;
+        }
+        const snippets = data.snippets;
+        if (typeof snippets !== 'object') {
+            console.log('No snippets for current job available.');
             return;
         }
 
-        // create DOM elements from the HTML data
-        var dataDom = $(data);
-
-        // update module selection for developer mode
-        var moduleSelectOnPage = $('#developer-pause-at-module');
-        var newModuleSelect = dataDom.filter('#developer-pause-at-module');
-        if (moduleSelectOnPage.length && newModuleSelect.length) {
-            moduleSelectOnPage.replaceWith(newModuleSelect);
-            updateModuleSelection(newModuleSelect.find('option'), developerMode.currentModuleIndex);
-        }
-
-        // skip if the row of the running module is not present in the result table
-        var runningRow = dataDom.find('.resultrunning');
-        if (!runningRow.length) {
+        // show embedded logfile (autoinst-log.txt) if there are no test modules are available and skip further processing
+        const modules = data.modules;
+        if (!Array.isArray(modules)) {
+            if (typeof snippets.header === 'string') {
+                detailsTab.panelElement.innerHTML = snippets.header;
+                loadEmbeddedLogFiles();
+            }
             return;
         }
 
-        // handle case when the results table doesn't exist yet
-        var newResults = dataDom.filter('#results');
-        if (!$("#results").length) {
-            $("#details").append(newResults);
-            console.log("Missing results table created");
+        // update module selection for developer mode if new modules appeared
+        const moduleSelect = document.getElementById('developer-pause-at-module');
+        if (moduleSelect && moduleSelect.dataset.moduleCount != modules.length) {
+            // remove previous options
+            let child = moduleSelect.firstChild;
+            while (child) {
+                let nextSibling = child.nextSibling;
+                if (child.id !== 'developer-no-module') {
+                    moduleSelect.removeChild(child);
+                }
+                child = nextSibling;
+            }
+            // insert new options
+            let currentCategory = null;
+            let currentOptgroup = null;
+            modules.forEach(function(module) {
+                if (!module.name) {
+                    return;
+                }
+                if (module.category && module.category !== currentCategory) {
+                    currentOptgroup = document.createElement('optgroup');
+                    currentCategory = currentOptgroup.label = module.category;
+                    moduleSelect.appendChild(currentOptgroup);
+                }
+                const option = document.createElement('option');
+                option.appendChild(document.createTextNode(module.name));
+                (currentOptgroup || moduleSelect).appendChild(option);
+            });
+            moduleSelect.dataset.moduleCount = modules.length;
+            updateModuleSelection($(moduleSelect).find('option'), developerMode.currentModuleIndex);
+        }
+
+        // handle case when results table has not been created yet or no modules are present yet
+        const resultsTable = document.getElementById('results');
+        if (!resultsTable || !Array.from(resultsTable.tBodies).find(tbody => tbody.rows.length > 0)) {
+            detailsTab.renderContents(data);
+            detailsTab.hasContents = true;
             testStatus.running = newStatus.running;
             updateDeveloperMode();
             return;
         }
 
         // update existing results table
-        var running_tr = $('td.result.resultrunning').parent();
-        var result_tbody = running_tr.parent();
-        var first_tr_to_update = running_tr.index();
-        var new_trs = newResults.find('tbody > tr');
-        var printed_running = false;
-        var missing_results = false;
-        result_tbody.children().slice(first_tr_to_update).each(function() {
-            var tr = $(this);
-            var new_tr = new_trs.eq(tr.index());
-            if (new_tr.find('.resultrunning').length == 1) {
-                printed_running = true;
+        const previewContainer = document.getElementById('preview_container_out');
+        const resultCells = resultsTable.getElementsByClassName('result');
+        modules.forEach(function(module, moduleIndex) {
+            const resultCell = resultCells[moduleIndex];
+            if (!resultCell) {
+                return;
             }
-            // every row above the currently running module must have results
-            if (!printed_running && new_tr.find('.links').length > 0 && new_tr.find('.links').children().length == 0) {
-                missing_results = true;
-                console.log("Missing results in row - trying again");
-            }
-        });
-
-        if (!missing_results) {
-            var previewContainer = $('#preview_container_out');
-
-            result_tbody.children().slice(first_tr_to_update).each(function() {
-                var tr = $(this);
-
-                // detatch the preview container if it is contained by the row to be relaced
-                var previewLinkIndex = -1;
-                if ($.contains(this, previewContainer[0])) {
-                    previewLinkIndex = $('.current_preview').index();
-                    previewContainer.detach();
-                }
-
-                // replace the old tr element with the new one
-                tr.replaceWith(new_trs.eq(tr.index()));
-
-                // re-attach the preview container if possible
-                if (previewLinkIndex < 0) {
+            // re-render only test modules when the result is so far unknown (but the result is now known) or running
+            const resultClassList = resultCell.classList;
+            if (resultClassList.contains('resultunknown')) {
+                if (!module.result || module.result === 'none') {
                     return;
                 }
-                var newPreviewLinks = new_trs.find('.links_a');
-                if (previewLinkIndex < newPreviewLinks.length) {
-                    var newPreviewLink = newPreviewLinks.eq(previewLinkIndex);
-                    newPreviewLink.addClass('current_preview');
-                    previewContainer.insertAfter(newPreviewLink);
-                } else {
-                    previewContainer.hide().appendTo('body');
-                }
-            });
-            testStatus.running = newStatus.running;
-            developerMode.detailsForCurrentModuleUploaded = false;
-            updateDeveloperMode();
+            } else if (!resultClassList.contains('resultrunning')) {
+                return;
+            }
+            // detatch the preview container if it is contained by the row to be relaced
+            const resultRow = resultCell.parentNode;
+            if ($.contains(resultRow, previewContainer)) {
+                previewContainer.style.display = 'none';
+                document.body.appendChild(previewContainer);
+            }
+            // actually update the row
+            resultRow.replaceWith(renderModuleRow(module, snippets));
+        });
+
+        testStatus.running = newStatus.running;
+        developerMode.detailsForCurrentModuleUploaded = false;
+        updateDeveloperMode();
+
+        // reload broken thumbnails one last time
+        if (newState === 'done') {
+            reloadBrokenThumbnails(true);
         }
 
     }).fail(function() {
@@ -144,29 +173,26 @@ function sendCommand(command) {
     var wid = testStatus.workerid;
     if (wid == null) return false;
     var url = $('#canholder').data('url').replace('WORKERID', wid);
-    $.ajax({url: url,
-            type: 'POST',
-            data: { command: command },
-            success: function(resp) {
-                setTimeout(function() { updateStatus(); }, 0);
-            }});
+    $.ajax({
+        url: url,
+        type: 'POST',
+        data: { command: command },
+        success: function(resp) {
+            setTimeout(function() { updateStatus(); }, 0);
+        }
+    });
 }
 
 function updateStatus() {
-    $.ajax(testStatus.status_url).
-        done(function(status) {
-            updateTestStatus(status);
-            setTimeout(function() { updateStatus(); }, 5000);
-        }).fail(function() {
-            setTimeout(reloadPage, 5000);
-        });
-}
-
-function initStatus(jobid, status_url, details_url) {
-    testStatus.jobid = jobid;
-    testStatus.status_url = status_url;
-    testStatus.details_url = details_url;
-    updateStatus();
+    $.ajax(testStatus.status_url).done(function(status) {
+        updateTestStatus(status);
+        // continue polling for job state updates until the job state is done
+        if (testStatus.state !== 'done') {
+            setTimeout(updateStatus, 5000);
+        }
+    }).fail(function() {
+        setTimeout(reloadPage, 5000);
+    });
 }
 
 /********* LIVE LOG *********/
@@ -174,18 +200,13 @@ function initStatus(jobid, status_url, details_url) {
 // global vars for livelog
 var scrolldown;
 
-// checkbox callback
-function setScrolldown() {
-    scrolldown = $(this).prop('checked');
-    scrollToBottomOfLiveLog();
-}
-
 // scrolls to bottom of live log (if enabled)
 function scrollToBottomOfLiveLog() {
-    var livelog = $('#livelog')[0];
-    if (scrolldown) {
-        livelog.scrollTop = livelog.scrollHeight;
+    if (!scrolldown) {
+        return;
     }
+    const livelog = document.getElementById('livelog');
+    livelog.scrollTop = livelog.scrollHeight;
 }
 
 function removeDataListener(elem) {
@@ -238,8 +259,12 @@ function addDataListener(elem, callback) {
 
 function initLivelogAndTerminal() {
     // init scrolldown for live log
-    scrolldown = true;
-    $('#scrolldown').attr('checked', true);
+    const scrolldownCheckbox = document.getElementById('scrolldown');
+    scrolldownCheckbox.checked = scrolldown = true;
+    scrolldownCheckbox.onchange = function() {
+        scrolldown = this.checked;
+        scrollToBottomOfLiveLog();
+    };
 
     // find log elements
     logElements = [{
@@ -253,33 +278,28 @@ function initLivelogAndTerminal() {
 
     // enable expanding/collapsing live log/terminal
     $.each(logElements, function(index, value) {
-            liveViewElements.push(value);
-            value.panel.bodyVisible = false;
-            value.panel.find('.card-header').on('click', function() {
-                    // toggle visiblity
-                    var body = value.panel.find('.card-body');
-                    body.toggle(200);
-                    value.panel.bodyVisible = !value.panel.bodyVisible;
+        liveViewElements.push(value);
+        value.panel.bodyVisible = false;
+        value.panel.find('.card-header').on('click', function() {
+            // toggle visiblity
+            var body = value.panel.find('.card-body');
+            body.toggle(200);
+            value.panel.bodyVisible = !value.panel.bodyVisible;
 
-                    // toggle receiving updates
-                    if (value.panel.bodyVisible) {
-                        addDataListener(value.log, value.callback);
+            // toggle receiving updates
+            if (value.panel.bodyVisible) {
+                addDataListener(value.log, value.callback);
 
-                        // scroll to bottom of panel when expanding
-                        $('html,body').animate({
-                            scrollTop: value.panel.offset().top + value.panel.height()
-                        });
-                    } else {
-                        removeDataListener(value.log);
-                    }
+                // scroll to bottom of panel when expanding
+                $('html,body').animate({
+                    scrollTop: value.panel.offset().top + value.panel.height()
                 });
+            } else {
+                removeDataListener(value.log);
+            }
+        });
     });
 }
-
-
-/********* LIVE LOG END *********/
-
-/********* LIVE STREAM *********/
 
 // global vars for livestream
 var last_event;
@@ -304,38 +324,109 @@ function initLivestream() {
         loadCanvas(livestream, event.data);
         last_event = event;
     };
-    liveViewElements.push({log: livestream});
+    liveViewElements.push({ log: livestream });
 }
 
-/********* LIVE STREAM END *********/
+function disableLivestream() {
+    const livestreamElement = liveViewElements[liveViewElements.length - 1];
+    if (livestreamElement && livestreamElement.log.attr('id') === 'livestream') {
+        removeDataListener(livestreamElement.log);
+        liveViewElements.pop();
+    }
+    document.getElementById('canholder').remove();
+}
 
-// initialize elements for live stream, live log and serial output but does not
-// start to consume any streams (called in setupResult() if state is running)
-function setupRunning(jobid, status_url, details_url) {
-  initLivelogAndTerminal();
-  initLivestream();
-  initStatus(jobid, status_url, details_url);
-  $('#scrolldown').change(setScrolldown);
+// does further initialization for jobs which are not done (and therefore the status might still change)
+function setupRunning(jobid, status_url) {
+    handleJobStateTransition(undefined, testStatus.state, testStatus.result);
+    testStatus.jobid = jobid;
+    testStatus.status_url = status_url;
+    updateStatus();
+}
+
+function refreshInfoPanel() {
+    const infoPanel = document.getElementById('info_box');
+    $.ajax({
+        url: infoPanel.dataset.src,
+        method: 'GET',
+        success: function(response) {
+            infoPanel.innerHTML = response;
+            const infoBoxContent = document.getElementById('info-box-content');
+            if (!infoBoxContent) {
+                return;
+            }
+            // update favicon, class of info panel, timeago and popover elements
+            document.getElementById('favicon-16').href = infoBoxContent.dataset['faviconUrl-16'];
+            document.getElementById('favicon-svg').href = infoBoxContent.dataset.faviconUrlSvg;
+            setInfoPanelClassName(testStatus.state, testStatus.result);
+            const infoBoxJQuery = $(infoBoxContent);
+            infoBoxJQuery.find('.timeago').timeago();
+            infoBoxJQuery.find('[data-toggle="popover"]').popover({ html: true });
+            setupResultButtons();
+        },
+        error: function(xhr, ajaxOptions, thrownError) {
+            addFlash('danger', 'Unable to update the info panel.' +
+                ' <a class="btn btn-primary" href="javascript: refreshInfoPanel();">Retry</a>'
+            );
+        },
+    });
+}
+
+function handleJobStateTransition(oldJobState, newJobState, newJobResult) {
+    testStatus.state = newJobState;
+    testStatus.result = newJobResult;
+
+    // show the live tab by default for running jobs (instead of details)
+    if (newJobState === 'running') {
+        // avoid overriding explicitly specified tab/step
+        if (!location.hash || location.hash === '#') {
+            $("[href='#live']").tab('show');
+        } else {
+            // ensure the live tab is loaded even when not showing it initially because it is needed to
+            // process the test status updates
+            activateTab('live');
+        }
+        // load contents of the details tab as well as it is updated continuously while the test is running
+        activateTab('details');
+    }
+    // go back from the live tab to the details tab if job is done
+    if (newJobState === 'done' && tabConfiguration.live.isActive) {
+        $("[href='#details']").tab('show');
+    }
+    // disable the developer mode and livestream (but *not* livelog) if the job is not running anymore
+    if (oldJobState === 'running') {
+        disableDeveloperMode();
+    }
+
+    // add/remove tabs to show only tabs relevant for the current job state
+    showRelevantTabNavElements();
+
+    // update info panel (on top of the page)
+    if (oldJobState === undefined) {
+        setInfoPanelClassName(testStatus.state, testStatus.result); // just set the class on initial page load
+    } else {
+        refreshInfoPanel();
+    }
 }
 
 // starts consuming streams for live stream, live log and serial output
 // (called when live view tab is shown)
 function resumeLiveView() {
-  $.each(liveViewElements, function(index, value) {
-    // skip streams which are shown in an expandible pannel which is currently collapsed
-    if(value.panel && !value.panel.bodyVisible) {
-      return;
-    }
-    addDataListener(value.log, value.callback);
-  });
+    $.each(liveViewElements, function(index, value) {
+        // skip streams which are shown in an expandible pannel which is currently collapsed
+        if (value.panel && !value.panel.bodyVisible) {
+            return;
+        }
+        addDataListener(value.log, value.callback);
+    });
 }
 
 // stops consuming streams for live stream, live log and serial output
 // (called when any tab except the live view tab is shown)
 function pauseLiveView() {
-  $.each(liveViewElements, function(index, value) {
-    removeDataListener(value.log);
-  });
+    $.each(liveViewElements, function(index, value) {
+        removeDataListener(value.log);
+    });
 }
 
 //
@@ -345,37 +436,38 @@ function pauseLiveView() {
 // define state for developer mode
 var developerMode = {
     // state of the page elements and the web socket connection to web UI
-    develWsUrl: undefined,                  // URL for developer session web socket connection
-    statusOnlyWsUrl: undefined,             // URL for status-only web socket connection
-    wsConnection: undefined,                // current WebSocket object
-    hasWsError: false,                      // whether an web socket error occurred (cleared when we finally receive a message from os-autoinst)
-    useDeveloperWsRoute: undefined,         // whether the developer web socket route is used
-    isConnected: false,                     // whether connected to any web socket route
-    badConfiguration: false,                // whether there's a bad/unrecoverable configuration issue so it makes no sense to continue re-connecting
-    ownSession: false,                      // whether the development session belongs to us
-    panelExpanded: false,                   // whether the panel is supposed to be expanded
-    panelActuallyExpanded: false,           // whether the panel is currently expanded
-    panelExplicitelyCollapsed: false,          // whether the panel has been explicitely collapsed since the page has been opened
-    reconnectAttempts: 0,                   // number of (re)connect attempts (reset to 0 when we finally receive a message from os-autoinst)
-    currentModuleIndex: undefined,          // the index of the current module
+    develWsUrl: undefined, // URL for developer session web socket connection
+    statusOnlyWsUrl: undefined, // URL for status-only web socket connection
+    wsConnection: undefined, // current WebSocket object
+    hasWsError: false, // whether an web socket error occurred (cleared when we finally receive a message from os-autoinst)
+    useDeveloperWsRoute: undefined, // whether the developer web socket route is used
+    isConnected: false, // whether connected to any web socket route
+    badConfiguration: false, // whether there's a bad/unrecoverable configuration issue so it makes no sense to continue re-connecting
+    ownSession: false, // whether the development session belongs to us
+    panelExpanded: false, // whether the panel is supposed to be expanded
+    panelActuallyExpanded: false, // whether the panel is currently expanded
+    panelExplicitelyCollapsed: false, // whether the panel has been explicitely collapsed since the page has been opened
+    reconnectAttempts: 0, // number of (re)connect attempts (reset to 0 when we finally receive a message from os-autoinst)
+    currentModuleIndex: undefined, // the index of the current module
 
     // state of the test execution (comes from os-autoinst cmd srv through the openQA ws proxy)
-    currentModule: undefined,               // name of the current module, eg. "installation-welcome"
-    moduleToPauseAt: undefined,             // name of the module to pause at, eg. "installation-welcome"
-    pauseOnScreenMismatch: undefined,       // 'assert_screen' (to pause on assert_screen timeout) or 'check_screen' (to pause on assert/check_screen timeout)
-    pauseOnNextCommand: undefined,          // whether to pause on the next command (current command *not* affected, eg. *no* timeouts skipped or failures suppressed)
-    isPaused: undefined,                    // if paused the reason why as a string; otherwise something which evaluates to false
-    currentApiFunction: undefined,          // the currently executed API function (eg. assert_screen)
-    outstandingImagesToUpload: undefined,   // number of images which still need to be uploaded by the worker
-    outstandingFilesToUpload: undefined,    // number of other files which still need to be uploaded by the worker
-    uploadingUpToCurrentModule: undefined,  // whether the worker will upload up to the current module (happens when paused in the middle of a module)
+    currentModule: undefined, // name of the current module, eg. "installation-welcome"
+    moduleToPauseAt: undefined, // name of the module to pause at, eg. "installation-welcome"
+    pauseOnScreenMismatch: undefined, // 'assert_screen' (to pause on assert_screen timeout) or 'check_screen' (to pause on assert/check_screen timeout)
+    pauseOnNextCommand: undefined, // whether to pause on the next command (current command *not* affected, eg. *no* timeouts skipped or failures suppressed)
+    isPaused: undefined, // if paused the reason why as a string; otherwise something which evaluates to false
+    currentApiFunction: undefined, // the currently executed API function (eg. assert_screen)
+    currentApiFunctionArgs: '', // arguments of the currently executed API function (eg. assert_screen)
+    outstandingImagesToUpload: undefined, // number of images which still need to be uploaded by the worker
+    outstandingFilesToUpload: undefined, // number of other files which still need to be uploaded by the worker
+    uploadingUpToCurrentModule: undefined, // whether the worker will upload up to the current module (happens when paused in the middle of a module)
     detailsForCurrentModuleUploaded: false, // whether new test details for the currently running module have been uploaded
-    stoppingTestExecution: undefined,       // if the test execution is being stopped the reason for that; otherwise undefined
+    stoppingTestExecution: undefined, // if the test execution is being stopped the reason for that; otherwise undefined
 
     // state of development session (comes from the openQA ws proxy)
-    develSessionDeveloper: undefined,       // name of the user in possession the development session
-    develSessionStartedAt: undefined,       // time stamp when the development session was created
-    develSessionTabCount: undefined,        // number of open web socket connections by the developer
+    develSessionDeveloper: undefined, // name of the user in possession the development session
+    develSessionStartedAt: undefined, // time stamp when the development session was created
+    develSessionTabCount: undefined, // number of open web socket connections by the developer
 
     // returns whether we're currently connecting
     isConnecting: function() {
@@ -497,7 +589,7 @@ function updateDeveloperPanel() {
         var visibleOn = element.data('visible-on');
         var hiddenOn = element.data('hidden-on');
         var hide = ((hiddenOn && developerMode.prop(hiddenOn)) ||
-                    (visibleOn && !developerMode.prop(visibleOn)));
+            (visibleOn && !developerMode.prop(visibleOn)));
         if (hide) {
             element.hide();
             element.tooltip('hide');
@@ -550,7 +642,7 @@ function updateDeveloperPanel() {
         toPauseAtIndex = 0;
     }
     var moduleToPauseAtStillAhead = (developerMode.moduleToPauseAt &&
-          toPauseAtIndex > currentModuleIndex);
+        toPauseAtIndex > currentModuleIndex);
 
     // update status info
     var statusInfo = 'running';
@@ -574,12 +666,18 @@ function updateDeveloperPanel() {
             statusAppendix = 'currently at: ' + developerMode.currentModule;
             if (developerMode.currentApiFunction) {
                 statusAppendix += ', ' + developerMode.currentApiFunction;
+                if (developerMode.currentApiFunctionArgs) {
+                    statusAppendix += ' ' + developerMode.currentApiFunctionArgs;
+                }
             }
         }
     } else if (developerMode.currentModule) {
         statusInfo = 'current module: ' + developerMode.currentModule;
         if (developerMode.currentApiFunction) {
             statusAppendix += 'at ' + developerMode.currentApiFunction;
+            if (developerMode.currentApiFunctionArgs) {
+                statusAppendix += ' ' + developerMode.currentApiFunctionArgs;
+            }
         }
     }
     if (!developerMode.badConfiguration && developerMode.currentApiFunction) {
@@ -676,7 +774,7 @@ function handlePauseOnMismatchSelected() {
 
     var selectedValue = $('#developer-pause-on-mismatch').val();
     var pauseOn;
-    switch(selectedValue) {
+    switch (selectedValue) {
         case "fail":
             pauseOn = null;
             break;
@@ -802,7 +900,7 @@ function handleMessageFromWebsocketConnection(wsConnection, msg) {
     } catch (ex) {
         console.log("Unable to parse JSON from ws proxy: " + msg.data);
         addLivehandlerFlash('danger', 'unable_to_pare_livehandler_reply',
-                            '<strong>Unable to parse reply from livehandler daemon.</strong>');
+            '<strong>Unable to parse reply from livehandler daemon.</strong>');
         return;
     }
 
@@ -857,94 +955,79 @@ function setupWebsocketConnection() {
 }
 
 // define mapping of backend messages to status variables
-var messageToStatusVariable = [
-    {
-        msg: 'test_execution_paused',
-        statusVar: 'isPaused',
+var messageToStatusVariable = [{
+    msg: 'test_execution_paused',
+    statusVar: 'isPaused',
+}, {
+    msg: 'paused',
+    action: function(value, wholeMessage) {
+        developerMode.isPaused = wholeMessage.reason ? wholeMessage.reason : 'unknown';
     },
-    {
-        msg: 'paused',
-        action: function(value, wholeMessage) {
-            developerMode.isPaused = wholeMessage.reason ? wholeMessage.reason : 'unknown';
-        },
+}, {
+    msg: 'pause_test_name',
+    statusVar: 'moduleToPauseAt',
+}, {
+    msg: 'set_pause_at_test',
+    statusVar: 'moduleToPauseAt',
+}, {
+    msg: 'pause_on_screen_mismatch',
+    statusVar: 'pauseOnScreenMismatch',
+}, {
+    msg: 'set_pause_on_screen_mismatch',
+    statusVar: 'pauseOnScreenMismatch',
+}, {
+    msg: 'pause_on_next_command',
+    statusVar: 'pauseOnNextCommand',
+}, {
+    msg: 'set_pause_on_next_command',
+    statusVar: 'pauseOnNextCommand',
+}, {
+    msg: 'current_test_full_name',
+    statusVar: 'currentModule',
+}, {
+    msg: 'developer_id',
+    action: function(value) {
+        developerMode.ownSession = (developerMode.ownUserId && developerMode.ownUserId == value);
     },
-    {
-        msg: 'pause_test_name',
-        statusVar: 'moduleToPauseAt',
+}, {
+    msg: 'developer_name',
+    statusVar: 'develSessionDeveloper',
+}, {
+    msg: 'developer_session_started_at',
+    statusVar: 'develSessionStartedAt',
+}, {
+    msg: 'developer_session_tab_count',
+    statusVar: 'develSessionTabCount',
+}, {
+    msg: 'developer_session_is_yours',
+    statusVar: 'ownSession',
+}, {
+    msg: 'resume_test_execution',
+    action: function() {
+        developerMode.isPaused = false;
     },
-    {
-        msg: 'set_pause_at_test',
-        statusVar: 'moduleToPauseAt',
-    },
-    {
-        msg: 'pause_on_screen_mismatch',
-        statusVar: 'pauseOnScreenMismatch',
-    },
-    {
-        msg: 'set_pause_on_screen_mismatch',
-        statusVar: 'pauseOnScreenMismatch',
-    },
-    {
-        msg: 'pause_on_next_command',
-        statusVar: 'pauseOnNextCommand',
-    },
-    {
-        msg: 'set_pause_on_next_command',
-        statusVar: 'pauseOnNextCommand',
-    },
-    {
-        msg: 'current_test_full_name',
-        statusVar: 'currentModule',
-    },
-    {
-        msg: 'developer_id',
-        action: function(value) {
-            developerMode.ownSession = (developerMode.ownUserId && developerMode.ownUserId == value);
-        },
-    },
-    {
-        msg: 'developer_name',
-        statusVar: 'develSessionDeveloper',
-    },
-    {
-        msg: 'developer_session_started_at',
-        statusVar: 'develSessionStartedAt',
-    },
-    {
-        msg: 'developer_session_tab_count',
-        statusVar: 'develSessionTabCount',
-    },
-    {
-        msg: 'developer_session_is_yours',
-        statusVar: 'ownSession',
-    },
-    {
-        msg: 'resume_test_execution',
-        action: function() {
-            developerMode.isPaused = false;
-        },
-    },
-    {
-        msg: 'outstanding_images',
-        statusVar: 'outstandingImagesToUpload',
-    },
-    {
-        msg: 'outstanding_files',
-        statusVar: 'outstandingFilesToUpload',
-    },
-    {
-        msg: 'upload_up_to_current_module',
-        statusVar: 'uploadingUpToCurrentModule',
-    },
-    {
-        msg: 'current_api_function',
-        statusVar: 'currentApiFunction',
-    },
-    {
-        msg: 'stopping_test_execution',
-        statusVar: 'stoppingTestExecution',
-    },
-];
+}, {
+    msg: 'outstanding_images',
+    statusVar: 'outstandingImagesToUpload',
+}, {
+    msg: 'outstanding_files',
+    statusVar: 'outstandingFilesToUpload',
+}, {
+    msg: 'upload_up_to_current_module',
+    statusVar: 'uploadingUpToCurrentModule',
+}, {
+    msg: 'current_api_function',
+    statusVar: 'currentApiFunction',
+    action: function(value, data) {
+        developerMode.currentApiFunctionArgs = '';
+        if ((value === 'assert_screen' || value === 'check_screen') && data.check_screen) {
+            developerMode.currentApiFunctionArgs = data.check_screen.mustmatch;
+        }
+    }
+}, {
+    msg: 'stopping_test_execution',
+    statusVar: 'stoppingTestExecution',
+}, ];
 
 // handles messages received via web socket connection
 function processWsCommand(obj) {
@@ -956,68 +1039,68 @@ function processWsCommand(obj) {
         category = data.category;
     }
 
-    switch(obj.type) {
-    case "error":
-        // handle errors
+    switch (obj.type) {
+        case "error":
+            // handle errors
 
-        // ignore connection errors if there's no running module according to OpenQA::WebAPI::Controller::Running::status
-        // or the test execution is stopped
-        if ((!testStatus.running || developerMode.stoppingTestExecution) && category === 'cmdsrv-connection') {
-            console.log('ignoring error from ws proxy: ' + what);
-            break;
-        }
-        if (category === 'bad-configuration') {
-            developerMode.badConfiguration = true;
-            somethingChanged = true;
-        }
-
-        console.log("Error from ws proxy: " + what);
-        addLivehandlerFlash('danger', 'ws_proxy_error-' + what, '<p>' + what + '</p>');
-        break;
-    case "info":
-        // map info message to internal status variables
-        switch (what) {
-        case "cmdsrvmsg":
-        case "upload progress":
-            // reset error state
-            developerMode.reconnectAttempts = 0;
-            developerMode.hasWsError = false;
-
-            // handle messages from os-autoinst command server
-            $.each(messageToStatusVariable, function(index, msgToStatusValue) {
-                var msg = msgToStatusValue.msg;
-                if (!(msg in data)) {
-                    return;
-                }
-                var statusVar = msgToStatusValue.statusVar;
-                var value = data[msg];
-                if (statusVar) {
-                    developerMode[statusVar] = value;
-                }
-                var action = msgToStatusValue.action;
-                if (action) {
-                    action(value, data);
-                }
+            // ignore connection errors if there's no running module according to OpenQA::WebAPI::Controller::Running::status
+            // or the test execution is stopped
+            if ((!testStatus.running || developerMode.stoppingTestExecution) && category === 'cmdsrv-connection') {
+                console.log('ignoring error from ws proxy: ' + what);
+                break;
+            }
+            if (category === 'bad-configuration') {
+                developerMode.badConfiguration = true;
                 somethingChanged = true;
-            });
+            }
 
+            console.log("Error from ws proxy: " + what);
+            addLivehandlerFlash('danger', 'ws_proxy_error-' + what, '<p>' + what + '</p>');
             break;
-        }
+        case "info":
+            // map info message to internal status variables
+            switch (what) {
+                case "cmdsrvmsg":
+                case "upload progress":
+                    // reset error state
+                    developerMode.reconnectAttempts = 0;
+                    developerMode.hasWsError = false;
 
-        // handle specific info messages
-        switch (what) {
-        case "upload progress":
-            if (developerMode.uploadingUpToCurrentModule &&
-                    developerMode.outstandingImagesToUpload === 0 &&
-                    developerMode.outstandingFilesToUpload === 0) {
-                // receiving an upload progress event with these values means the upload
-                // has been concluded
-                // -> set flag so the next updateTestStatus() will request these details
-                developerMode.detailsForCurrentModuleUploaded = true;
+                    // handle messages from os-autoinst command server
+                    $.each(messageToStatusVariable, function(index, msgToStatusValue) {
+                        var msg = msgToStatusValue.msg;
+                        if (!(msg in data)) {
+                            return;
+                        }
+                        var statusVar = msgToStatusValue.statusVar;
+                        var value = data[msg];
+                        if (statusVar) {
+                            developerMode[statusVar] = value;
+                        }
+                        var action = msgToStatusValue.action;
+                        if (action) {
+                            action(value, data);
+                        }
+                        somethingChanged = true;
+                    });
+
+                    break;
+            }
+
+            // handle specific info messages
+            switch (what) {
+                case "upload progress":
+                    if (developerMode.uploadingUpToCurrentModule &&
+                        developerMode.outstandingImagesToUpload === 0 &&
+                        developerMode.outstandingFilesToUpload === 0) {
+                        // receiving an upload progress event with these values means the upload
+                        // has been concluded
+                        // -> set flag so the next updateTestStatus() will request these details
+                        developerMode.detailsForCurrentModuleUploaded = true;
+                    }
+                    break;
             }
             break;
-        }
-        break;
     }
 
     if (somethingChanged) {
@@ -1035,7 +1118,7 @@ function sendWsCommand(obj) {
     if (!developerMode.wsConnection) {
         console.log("Attempt to send something via ws proxy but not connected.");
         addLivehandlerFlash('danger', 'try_to_send_but_not_connected',
-                            '<strong>Internal error:</strong><p>Attempt to send something via web socket proxy but not connected.</p>');
+            '<strong>Internal error:</strong><p>Attempt to send something via web socket proxy but not connected.</p>');
         return;
     }
     var objAsString = JSON.stringify(obj);
@@ -1074,6 +1157,21 @@ function quitDeveloperSession() {
     developerMode.panelExpanded = false;
     updateDeveloperPanel();
     sendWsCommand({ cmd: "quit_development_session" });
+}
+
+function disableDeveloperMode() {
+    // ensure none of the developer mode functions are called anymore
+    window.developerPanelInitialized = false;
+    if (window.developerMode !== undefined && developerMode.wsConnection !== undefined) {
+        developerMode.wsConnection.close();
+        developerMode.wsConnection = undefined; // this skips all ws handlers and effectively disables reconnects all element updates
+    }
+
+    // remove developer mode elements from the page
+    const developerPanel = document.getElementById('developer-panel');
+    if (developerPanel) {
+        developerPanel.remove();
+    }
 }
 
 // vim: set sw=4 et:

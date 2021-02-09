@@ -1,3 +1,6 @@
+use strict;
+use warnings;
+
 [
     Users => {
         id              => 99901,
@@ -51,4 +54,3 @@
         feature_version => 0,
     },
 ]
-# vim: set sw=4 et:

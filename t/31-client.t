@@ -1,4 +1,4 @@
-# Copyright (C) 2018 SUSE LLC
+# Copyright (C) 2018-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -12,67 +12,82 @@
 #
 # You should have received a copy of the GNU General Public License
 
-use strict;
-use warnings;
+use Test::Most;
+
 use FindBin;
-use lib "$FindBin::Bin/lib", "lib";
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
+use OpenQA::Test::TimeLimit '6';
 
-use Test::More;
 use Test::Mojo;
-use Mojo::URL;
-use Test::Warnings;
-use OpenQA::Client;
-use OpenQA::Client::Archive;
+use Test::MockModule;
+use Test::MockObject;
+use Test::Output;
+use Test::Warnings ':report_warnings';
 use OpenQA::WebAPI;
-use Mojo::File qw(tempfile tempdir path);
 use OpenQA::Test::Case;
+use OpenQA::Script::Client;
 
-# init test case
-OpenQA::Test::Case->new->init_data;
-my $t = Test::Mojo->new('OpenQA::WebAPI');
+subtest 'client instantiation prevented from the daemons itself' => sub {
+    OpenQA::WebSockets::Client::mark_current_process_as_websocket_server;
+    throws_ok(
+        sub {
+            OpenQA::WebSockets::Client->singleton;
+        },
+        qr/is forbidden/,
+        'can not create ws server client from ws server itself'
+    );
 
-# XXX: Test::Mojo loses it's app when setting a new ua
-# https://github.com/kraih/mojo/issues/598
-my $app = $t->app;
-$t->ua(
-    OpenQA::Client->new(apikey => 'PERCIVALKEY02', apisecret => 'PERCIVALSECRET02')->ioloop(Mojo::IOLoop->singleton));
-$t->app($app);
-my $base_url = $t->ua->server->url->to_string;
-
-my $destination = tempdir;
-subtest 'OpenQA::Client:Archive tests' => sub {
-    my $jobid          = 99938;
-    my $limit          = 1024 * 1024;
-    my $limittest_path = path($ENV{OPENQA_BASEDIR}, 'openqa', 'testresults', '00099',
-        '00099938-opensuse-Factory-DVD-x86_64-Build0048-doc', 'ulogs');
-
-    system("dd if=/dev/zero of=$limittest_path/limittest.tar.bz2 bs=1M count=2");
-    ok(-e "$limittest_path/limittest.tar.bz2", "limit test file is created");
-
-    eval {
-        my %options = (
-            archive            => $destination,
-            url                => "/api/v1/jobs/$jobid/details",
-            'asset-size-limit' => $limit,
-            'with-thumbnails'  => 1
-        );
-        my $command = $t->ua->archive->run(\%options);
-    };
-    is($@, '', 'Archive functionality works as expected would perform correctly') or diag explain $@;
-
-    my $file = $destination->child('testresults', 'details-zypper_up.json');
-    ok(-e $file, 'details-zypper_up.json file exists') or diag $file;
-    $file = $destination->child('testresults', 'video.ogv');
-
-    ok(-e $file, 'Test video file exists') or diag $file;
-    $file = $destination->child('testresults', 'ulogs', 'y2logs.tar.bz2');
-
-    ok(-e $file, 'Test uploaded logs file exists') or diag $file;
-    $file = $destination->child('testresults', 'ulogs', 'limittest.tar.bz2');
-
-    ok(!-e $file, 'Test uploaded logs file was not created') or diag $file;
-    is($t->ua->max_response_size, $limit, "Max response size for UA is correct ($limit)");
-
+    OpenQA::Scheduler::Client::mark_current_process_as_scheduler;
+    throws_ok(
+        sub {
+            OpenQA::Scheduler::Client->singleton;
+        },
+        qr/is forbidden/,
+        'can not create scheduler client from scheduler itself'
+    );
 };
+
+is prepend_api_base('jobs'),      '/api/v1/jobs', 'API base prepended';
+is prepend_api_base('/my_route'), '/my_route',    'API base not prepended for absolute paths';
+throws_ok sub { run }, qr/Need \@args/, 'needs arguments parsed from command line';
+
+my %options      = (verbose => 1);
+my $client_mock  = Test::MockModule->new('OpenQA::UserAgent');
+my $code         = 200;
+my $content_type = 'application/json';
+my $headers_mock = Test::MockObject->new()->set_bound(content_type => \$content_type);
+my $json         = {my => 'json'};
+my $code_mock    = Test::MockObject->new()->set_bound(code => \$code)->mock(headers => sub { $headers_mock })
+  ->set_always(json => $json)->set_always(body => 'my: yaml');
+my $res = Test::MockObject->new()->mock(res => sub { $code_mock });
+$client_mock->redefine(
+    new => sub {
+        Test::MockObject->new()->mock(get => sub { $res });
+    });
+
+is run(\%options, qw(jobs)),     $json, 'returns job data';
+is run(\%options, qw(jobs GeT)), $json, 'method can be passed (case in-sensitive)';
+
+is run({%options, 'json-output' => 1}, qw(jobs)), $json, 'returns job data in json mode';
+is run({%options, 'yaml-output' => 1}, qw(jobs)), $json, 'returns job data in yaml mode';
+$content_type = 'text/yaml';
+Test::MockModule->new('OpenQA::Script::Client')->redefine(load_yaml => undef);
+is run(\%options, qw(jobs)), $json, 'returns job data for YAML';
+is run({%options, 'json-output' => 1}, qw(jobs)), $json, 'returns job data in json mode for YAML';
+is run({%options, 'yaml-output' => 1}, qw(jobs)), $json, 'returns job data in yaml mode for YAML';
+
+$code = 201;
+$code_mock->{error} = {message => 'created'};
+my $ret;
+stderr_like { $ret = run(\%options, qw(jobs post test=foo)) } qr/$code.*created/, 'Codes reported';
+is $ret, $json, 'can create job';
+$code = 404;
+$code_mock->{error} = {message => 'Not Found'};
+sub wrong_call { $ret = run(\%options, qw(unknown)) }
+stderr_like \&wrong_call, qr/$code.*Not Found/, 'Error reported';
+is $ret, undef, 'undef shows error';
+$options{json} = 1;
+stderr_like \&wrong_call, qr/$code.*Not Found/, 'Error reported for undocumented "json" parameter';
+is $ret, undef, 'undef shows error for undocumented parameter';
 
 done_testing();

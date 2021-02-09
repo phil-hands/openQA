@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2016 SUSE LLC
+# Copyright (C) 2014-2019 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::Assets;
 
@@ -21,18 +20,19 @@ use warnings;
 
 use base 'DBIx::Class::Core';
 
+use OpenQA::App;
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
+use OpenQA::Log qw(log_info log_error);
 use OpenQA::Utils;
 use Date::Format;
 use Archive::Extract;
 use File::Basename;
 use File::Spec::Functions qw(catfile splitpath);
+use File::Path 'remove_tree';
 use Mojo::UserAgent;
 use Mojo::URL;
 use Try::Tiny;
-
-use db_helpers;
 
 __PACKAGE__->table('assets');
 __PACKAGE__->load_components(qw(Timestamps));
@@ -114,15 +114,18 @@ sub is_fixed {
 sub remove_from_disk {
     my ($self) = @_;
 
-    my $file = $self->disk_file;
-    OpenQA::Utils::log_info("GRU: removing $file");
-    if ($self->type eq 'iso' || $self->type eq 'hdd') {
-        return unless -f $file;
-        unlink($file) || die "can't remove $file";
+    my $type = $self->type;
+    my $name = $self->name;
+    my $file = locate_asset($type, $name, mustexist => 1);
+    if (!defined $file) {
+        log_info("GRU: skipping removal of $type/$name; it does not exist anyways");
+        return undef;
     }
-    elsif ($self->type eq 'repo') {
-        use File::Path 'remove_tree';
-        remove_tree($file) || print "can't remove $file\n";
+    if (-f $file ? unlink($file) : remove_tree($file)) {
+        log_info("GRU: removed $file");
+    }
+    else {
+        log_error("GRU: unable to remove $file");
     }
 }
 
@@ -162,13 +165,16 @@ sub refresh_size {
     return $new_size;
 }
 
-sub hidden {
+# returns whether the specified asset type is considered hidden so it will not be linked by the
+# web UI; configured via 'hide_asset_types' setting
+sub is_type_hidden {
+    my ($type) = @_;
+    return grep { $_ eq $type } split(/ /, OpenQA::App->singleton->config->{global}->{hide_asset_types});
+}
 
-    # 1 if asset should not be linked from the web UI (as set by
-    # 'hide_asset_types' config setting), otherwise 0
+sub hidden {
     my ($self) = @_;
-    my @types = split(/ /, $OpenQA::Utils::app->config->{global}->{hide_asset_types});
-    return grep { $_ eq $self->type } @types;
+    return is_type_hidden($self->type);
 }
 
 1;

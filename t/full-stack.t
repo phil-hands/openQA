@@ -1,6 +1,6 @@
-#! /usr/bin/perl
+#!/usr/bin/env perl
 
-# Copyright (C) 2016-2018 SUSE LLC
+# Copyright (C) 2016-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,290 +13,218 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 # possible reasons why this tests might fail if you run it locally:
 #  * the web UI or any other openQA daemons are still running in the background
 #  * a qemu instance is still running (maybe leftover from last failed test
 #    execution)
 
-use Mojo::Base -strict;
+use Test::Most;
 
-my $tempdir;
 BEGIN {
-    unshift @INC, 'lib';
-    use FindBin;
-    use Mojo::File qw(path tempdir);
-    $tempdir = tempdir;
-    $ENV{OPENQA_BASEDIR} = $tempdir->child('t', 'full-stack.d');
-    $ENV{OPENQA_CONFIG}  = path($ENV{OPENQA_BASEDIR}, 'config')->make_path;
-    # Since tests depends on timing, we require the scheduler to be fixed in its actions.
+    # require the scheduler to be fixed in its actions since tests depends on timing
     $ENV{OPENQA_SCHEDULER_SCHEDULE_TICK_MS}   = 4000;
     $ENV{OPENQA_SCHEDULER_MAX_JOB_ALLOCATION} = 1;
+
     # ensure the web socket connection won't timeout
     $ENV{MOJO_INACTIVITY_TIMEOUT} = 10 * 60;
-    path($FindBin::Bin, "data")->child("openqa.ini")->copy_to(path($ENV{OPENQA_CONFIG})->child("openqa.ini"));
-    path($FindBin::Bin, "data")->child("database.ini")->copy_to(path($ENV{OPENQA_CONFIG})->child("database.ini"));
-    path($FindBin::Bin, "data")->child("workers.ini")->copy_to(path($ENV{OPENQA_CONFIG})->child("workers.ini"));
-    path($ENV{OPENQA_BASEDIR}, 'openqa', 'db')->make_path->child("db.lock")->spurt;
-    # DO NOT SET OPENQA_IPC_TEST HERE
 }
 
-use lib "$FindBin::Bin/lib";
-use Test::More;
+use FindBin;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Output 'stderr_like';
+use Test::Warnings ':report_warnings';
+use autodie ':all';
 use IO::Socket::INET;
 use POSIX '_exit';
-use OpenQA::Worker::Cache::Client;
+use OpenQA::CacheService::Client;
 use Fcntl ':mode';
 use DBI;
+use Mojo::File 'path';
 use Mojo::IOLoop::ReadWriteProcess::Session 'session';
+use OpenQA::Jobs::Constants qw(INCOMPLETE);
+use OpenQA::Utils qw(service_port);
+use OpenQA::SeleniumTest;
 session->enable;
-# optional but very useful
-eval 'use Test::More::Color';
-eval 'use Test::More::Color "foreground"';
 
 use File::Path qw(make_path remove_tree);
 use Module::Load::Conditional 'can_load';
 use OpenQA::Test::Utils
   qw(create_websocket_server create_live_view_handler setup_share_dir),
-  qw(cache_minion_worker cache_worker_service);
+  qw(cache_minion_worker cache_worker_service mock_service_ports setup_fullstack_temp_dir),
+  qw(start_worker stop_service wait_for_or_bail_out);
+use OpenQA::Test::TimeLimit '90';
 use OpenQA::Test::FullstackUtils;
 
-plan skip_all => "set FULLSTACK=1 (be careful)" unless $ENV{FULLSTACK};
-plan skip_all => 'set TEST_PG to e.g. DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
+plan skip_all => 'set FULLSTACK=1 (be careful)'                                 unless $ENV{FULLSTACK};
+plan skip_all => 'set TEST_PG to e.g. "DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
 
-my $workerpid;
-my $wspid;
-my $livehandlerpid;
+my $worker;
+my $ws;
+my $livehandler;
+sub turn_down_stack {
+    stop_service($_) for ($worker, $ws, $livehandler);
+}
+sub stop_worker { stop_service $worker }
+
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless check_driver_modules;
+
+# setup directories
+my $tempdir  = setup_fullstack_temp_dir('full-stack.d');
 my $sharedir = setup_share_dir($ENV{OPENQA_BASEDIR});
 
-sub turn_down_stack {
-    for my $pid ($workerpid, $wspid, $livehandlerpid) {
-        next unless $pid;
-        kill TERM => $pid;
-        waitpid($pid, 0);
-    }
-}
-
-sub kill_worker {
-    # now kill the worker
-    kill TERM => $workerpid;
-    is(waitpid($workerpid, 0), $workerpid, 'WORKER is done');
-    $workerpid = undef;
-}
-
-use OpenQA::SeleniumTest;
-
-# skip if appropriate modules aren't available
-unless (check_driver_modules) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
-}
-
-OpenQA::Test::FullstackUtils::setup_database();
-
-# make sure the assets are prefetched
-ok(Mojolicious::Commands->start_app('OpenQA::WebAPI', 'eval', '1+0'));
-
-# we don't want no fixtures
-my $mojoport = Mojo::IOLoop::Server->generate_port;
-my $wsport   = $mojoport + 1;
-$wspid = create_websocket_server($wsport, 0, 0, 0);
-my $driver       = call_driver(sub { }, {mojoport => $mojoport});
-my $connect_args = OpenQA::Test::FullstackUtils::get_connect_args();
+# initialize database, start daemons
+my $schema = OpenQA::Test::Database->new->create(skip_fixtures => 1, schema_name => 'public', drop_schema => 1);
+ok(Mojolicious::Commands->start_app('OpenQA::WebAPI', 'eval', '1+0'), 'assets are prefetched');
+mock_service_ports;
+my $mojoport = service_port 'websocket';
+$ws = create_websocket_server($mojoport, 0, 0);
+my $driver = call_driver({mojoport => service_port 'webui'});
+$livehandler = create_live_view_handler;
 
 my $resultdir = path($ENV{OPENQA_BASEDIR}, 'openqa', 'testresults')->make_path;
 ok(-d $resultdir, "resultdir \"$resultdir\" exists");
 
-$driver->title_is("openQA", "on main page");
-is($driver->find_element('#user-action a')->get_text(), 'Login', "noone logged in");
-$driver->click_element_ok('Login', 'link_text');
+$driver->title_is('openQA', 'on main page');
+is($driver->find_element('#user-action a')->get_text(), 'Login', 'no one logged in');
+$driver->click_element_ok('Login', 'link_text', 'Login clicked');
 # we're back on the main page
-$driver->title_is("openQA", "back on main page");
+$driver->title_is('openQA', 'back on main page');
 
-# cleak away the tour
-$driver->click_element_ok('dont-notify', 'id');
-$driver->click_element_ok('confirm',     'id');
+# click away the tour
+$driver->click_element_ok('dont-notify', 'id', 'disable tour permanently');
+$driver->click_element_ok('tour-end',    'id', 'confirm dismissing tour');
 
-$livehandlerpid = create_live_view_handler($mojoport);
+schedule_one_job_over_api_and_verify($driver, OpenQA::Test::FullstackUtils::job_setup(PAUSE_AT => 'shutdown'));
 
-my $JOB_SETUP
-  = 'ISO=Core-7.2.iso DISTRI=tinycore ARCH=i386 QEMU=i386 QEMU_NO_KVM=1 '
-  . 'FLAVOR=flavor BUILD=1 MACHINE=coolone QEMU_NO_TABLET=1 INTEGRATION_TESTS=1 '
-  . 'QEMU_NO_FDC_SET=1 CDMODEL=ide-cd HDDMODEL=ide-drive VERSION=1 TEST=core PUBLISH_HDD_1=core-hdd.qcow2 '
-  . 'UEFI_PFLASH_VARS=/usr/share/qemu/ovmf-x86_64.bin';
+sub status_text { find_status_text($driver) }
 
-subtest 'schedule job' => sub {
-    OpenQA::Test::FullstackUtils::client_call("jobs post $JOB_SETUP");
-    OpenQA::Test::FullstackUtils::verify_one_job_displayed_as_scheduled($driver);
-};
+sub show_job_info {
+    my ($job_id) = @_;
+    my $job = $schema->resultset('Jobs')->find($job_id);
+    diag explain 'job info: ', $job ? $job->to_hash : undef;
+}
 
 my $job_name = 'tinycore-1-flavor-i386-Build1-core@coolone';
 $driver->find_element_by_link_text('core@coolone')->click();
 $driver->title_is("openQA: $job_name test results", 'scheduled test page');
 my $job_page_url = $driver->get_current_url();
-like($driver->find_element('#result-row .card-body')->get_text(), qr/State: scheduled/, 'test 1 is scheduled');
-javascript_console_has_no_warnings_or_errors;
+like(status_text, qr/State: scheduled/, 'test 1 is scheduled');
+ok javascript_console_has_no_warnings_or_errors, 'no javascript warnings or errors after test 1 was scheduled';
 
-sub start_worker {
-    $workerpid = fork();
-    if ($workerpid == 0) {
-        exec("perl ./script/worker --instance=1 $connect_args --isotovideo=../os-autoinst/isotovideo --verbose");
-        die "FAILED TO START WORKER";
-    }
-    else {
-        ok($workerpid, "Worker started as $workerpid");
-        OpenQA::Test::FullstackUtils::schedule_one_job;
-    }
+sub start_worker_and_schedule {
+    $worker = start_worker(get_connect_args());
+    ok($worker, "Worker started as $worker");
+    schedule_one_job;
 }
 
-start_worker;
-OpenQA::Test::FullstackUtils::wait_for_job_running($driver, 'fail on incomplete');
+sub autoinst_log { path($resultdir, '00000', sprintf("%08d", shift) . "-$job_name")->child('autoinst-log.txt') }
+
+start_worker_and_schedule;
+ok wait_for_job_running($driver), 'test 1 is running';
 
 subtest 'wait until developer console becomes available' => sub {
     # open developer console
     $driver->get('/tests/1/developer/ws-console');
-    wait_for_ajax;
-
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_available($driver);
+    wait_for_developer_console_available($driver);
 };
 
 subtest 'pause at certain test' => sub {
     # load Selenium::Remote::WDKeys module or skip this test if not available
-    unless (can_load(modules => {'Selenium::Remote::WDKeys' => undef,})) {
-        plan skip_all => 'Install Selenium::Remote::WDKeys to run this test';
-        return;
-    }
-
-    my $log_textarea  = $driver->find_element('#log');
-    my $command_input = $driver->find_element('#msg');
-
-    # send command to pause at shutdown (hopefully the test wasn't so fast it is already in shutdown)
-    $command_input->send_keys('{"cmd":"set_pause_at_test","name":"shutdown"}');
-    $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message(
-        $driver,
-        qr/\"set_pause_at_test\":\"shutdown\"/,
-        'response to set_pause_at_test'
-    );
+    plan skip_all => 'Install Selenium::Remote::WDKeys to run this test'
+      unless can_load(modules => {'Selenium::Remote::WDKeys' => undef,});
 
     # wait until the shutdown test is started and hence the test execution paused
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver,
-        qr/(\"paused\":|\"test_execution_paused\":\".*\")/, 'paused');
+    wait_for_developer_console_like($driver, qr/(\"paused\":|\"test_execution_paused\":\".*\")/, 'paused');
 
     # resume the test execution again
+    my $command_input = $driver->find_element('#msg');
     $command_input->send_keys('{"cmd":"resume_test_execution"}');
     $command_input->send_keys(Selenium::Remote::WDKeys->KEYS->{'enter'});
-    OpenQA::Test::FullstackUtils::wait_for_developer_console_contains_log_message($driver,
-        qr/\"resume_test_execution\":/, 'resume');
+    wait_for_developer_console_like($driver, qr/\"resume_test_execution\":/, 'resume');
 };
 
 $driver->get($job_page_url);
-OpenQA::Test::FullstackUtils::wait_for_result_panel($driver, qr/Result: passed/, 'test 1 is passed');
-
-ok(-s path($resultdir, '00000', "00000001-$job_name")->make_path->child('autoinst-log.txt'), 'log file generated');
-ok(-s path($sharedir, 'factory', 'hdd')->make_path->child('core-hdd.qcow2'), 'image of hdd uploaded');
+ok wait_for_result_panel($driver, qr/Result: passed/), 'test 1 is passed' or show_job_info 1;
+my $autoinst_log = autoinst_log(1);
+ok -s $autoinst_log, 'autoinst log file generated';
+my $worker_log = $autoinst_log->dirname->child('worker-log.txt');
+ok -s $worker_log, 'worker log file generated';
+my $log_content = $worker_log->slurp;
+like $log_content, qr/Uploading autoinst-log\.txt/,                        'autoinst log uploaded';
+like $log_content, qr/Uploading worker-log\.txt/,                          'worker log uploaded';
+like $log_content, qr/core-hdd\.qcow2: local upload \(no chunks needed\)/, 'local upload feature used';
+ok -s path($sharedir, 'factory', 'hdd')->make_path->child('core-hdd.qcow2'), 'image of hdd uploaded';
 my $core_hdd_path = path($sharedir, 'factory', 'hdd')->child('core-hdd.qcow2');
 my @core_hdd_stat = stat($core_hdd_path);
-ok(@core_hdd_stat, 'can stat ' . $core_hdd_path);
-is(S_IMODE($core_hdd_stat[2]), 420, 'exported image has correct permissions (420 -> 0644)');
+ok @core_hdd_stat, 'can stat ' . $core_hdd_path;
+is S_IMODE($core_hdd_stat[2]), 420, 'exported image has correct permissions (420 -> 0644)';
 
-my $post_group_res = OpenQA::Test::FullstackUtils::client_output "job_groups post name='New job group'";
-my $group_id       = ($post_group_res =~ qr/{ *id *=> *([0-9]*) *}\n/);
-ok($group_id, 'regular post via client script');
-OpenQA::Test::FullstackUtils::client_call(
-    "jobs/1 put --json-data '{\"group_id\": $group_id}'",
-    qr/\Q{ job_id => 1 }\E/,
-    'send JSON data via client script'
-);
-OpenQA::Test::FullstackUtils::client_call('jobs/1', qr/group_id *=> *$group_id/, 'group has been altered correctly');
+my $post_group_res = client_output "-X POST job_groups name='New job group'";
+my $group_id       = ($post_group_res =~ qr/id.+([0-9]+)/);
+ok $group_id, 'regular post via client script';
+client_call(qq{-X PUT jobs/1 --json --data '{"group_id":$group_id}'}, qr/job_id.+1/, 'send JSON data via client');
+client_call('jobs/1', qr/group_id.+$group_id/, 'group has been altered correctly');
 
-OpenQA::Test::FullstackUtils::client_call(
-    'jobs/1/restart post',
-    qr|\Qtest_url => [{ 1 => "/tests/2\E|,
-    'client returned new test_url'
-);
-#]} restore syntax highlighting
+client_call('-X POST jobs/1/restart', qr|test_url.+1.+tests.+2|, 'client returned new test_url for test 2');
 $driver->refresh();
-like($driver->find_element('#result-row .card-body')->get_text(), qr/Cloned as 2/, 'test 1 is restarted');
-$driver->click_element_ok('2', 'link_text');
+like status_text, qr/Cloned as 2/, 'test 1 is restarted';
+$driver->click_element_ok('2', 'link_text', 'clicked link to test 2');
 
-OpenQA::Test::FullstackUtils::schedule_one_job;
-OpenQA::Test::FullstackUtils::wait_for_job_running($driver);
+# start a job and stop the worker; the job should be incomplete
+# note: We might not be able to stop the job fast enough so there's a race condition. We could use the pause feature
+#       of the developer mode to prevent that.
+schedule_one_job;
+ok wait_for_job_running($driver), 'job 2 running';
+stop_worker;
+ok wait_for_result_panel($driver, qr/Result: incomplete/), 'test 2 crashed' or show_job_info 2;
+like status_text, qr/Cloned as 3/, 'test 2 is restarted by killing worker';
 
-kill_worker;
-
-OpenQA::Test::FullstackUtils::wait_for_result_panel($driver, qr/Result: incomplete/, 'test 2 crashed');
-like(
-    $driver->find_element('#result-row .card-body')->get_text(),
-    qr/Cloned as 3/,
-    'test 2 is restarted by killing worker'
-);
-
-OpenQA::Test::FullstackUtils::client_call("jobs post $JOB_SETUP MACHINE=noassets HDD_1=nihilist_disk.hda");
+client_call(
+    '-X POST jobs ' . OpenQA::Test::FullstackUtils::job_setup(MACHINE => 'noassets', HDD_1 => 'nihilist_disk.hda'));
 
 subtest 'cancel a scheduled job' => sub {
-    $driver->click_element_ok('All Tests',    'link_text', 'All tests clicked');
+    $driver->click_element_ok('All Tests', 'link_text', 'Clicked All Tests');
+    wait_for_ajax(msg => 'wait for All Tests displayed before looking for 3');
     $driver->click_element_ok('core@coolone', 'link_text', 'clicked on 3');
 
     # it can happen that the test is assigned and needs to wait for the scheduler
     # to detect it as dead before it's moved back to scheduled
-    OpenQA::Test::FullstackUtils::wait_for_result_panel(
-        $driver,
-        qr/State: scheduled/,
-        'Test 3 is scheduled',
-        undef, 0.2,
-    );
+    ok wait_for_result_panel($driver, qr/State: scheduled/, undef, 0.2), 'Test 3 is scheduled' or show_job_info 3;
 
     my @cancel_button = $driver->find_elements('cancel_running', 'id');
     $cancel_button[0]->click();
 };
 
-$driver->click_element_ok('All Tests',     'link_text');
-$driver->click_element_ok('core@noassets', 'link_text');
+$driver->click_element_ok('All Tests', 'link_text', 'Clicked All Tests to go to test 4');
+wait_for_ajax(msg => 'wait for All Tests displayed before looking for 3');
+$driver->click_element_ok('core@noassets', 'link_text', 'clicked on 4');
 $job_name = 'tinycore-1-flavor-i386-Build1-core@noassets';
 $driver->title_is("openQA: $job_name test results", 'scheduled test page');
-like($driver->find_element('#result-row .card-body')->get_text(), qr/State: scheduled/, 'test 4 is scheduled');
+like status_text, qr/State: scheduled/, 'test 4 is scheduled';
 
-javascript_console_has_no_warnings_or_errors;
-start_worker;
+ok javascript_console_has_no_warnings_or_errors, 'no javascript warnings or errors after test 4 was scheduled';
+start_worker_and_schedule;
 
-OpenQA::Test::FullstackUtils::wait_for_result_panel($driver, qr/Result: incomplete/, 'Test 4 crashed as expected');
+ok wait_for_result_panel($driver, qr/Result: incomplete/), 'Test 4 crashed as expected' or show_job_info 4;
 
-# Slurp the whole file, it's not that big anyways
-my $filename = $resultdir . "/00000/00000004-$job_name/autoinst-log.txt";
-# give it some time to be created
-for (my $i = 0; $i < 5; $i++) {
-    last if -s $filename;
-    sleep 1;
-}
-#  The worker is launched with --verbose, so by default in this test the level is always debug
-if (!$ENV{MOJO_LOG_LEVEL} || $ENV{MOJO_LOG_LEVEL} =~ /DEBUG|INFO/i) {
-    ok(-s $filename, 'Test 4 autoinst-log.txt file created');
-    open(my $f, '<', $filename) or die "OPENING $filename: $!\n";
-    my $autoinst_log = do { local ($/); <$f> };
-    close($f);
-
-    like($autoinst_log, qr/result: setup failure/, 'Test 4 state correct: setup failure');
-
-    like((split(/\n/, $autoinst_log))[0], qr/\+\+\+ setup notes \+\+\+/, 'Test 4 correct autoinst setup notes');
-    like((split(/\n/, $autoinst_log))[-1], qr/uploading autoinst-log.txt/,
-        'Test 4 correct autoinst uploading autoinst');
-}
-
-kill_worker;    # Ensure that the worker can be killed with TERM signal
+$autoinst_log = autoinst_log(4);
+wait_for_or_bail_out { -s $autoinst_log } 'autoinst-log.txt';
+$log_content = $autoinst_log->slurp;
+like $log_content, qr/Result: setup failure/, 'Test 4 result correct: setup failure';
+like((split(/\n/, $log_content))[0],  qr/\+\+\+ setup notes \+\+\+/,  'Test 4 correct autoinst setup notes');
+like((split(/\n/, $log_content))[-1], qr/Uploading autoinst-log.txt/, 'Test 4: upload of autoinst-log.txt logged');
+stop_worker;    # Ensure that the worker can be killed with TERM signal
 
 my $cache_location = path($ENV{OPENQA_BASEDIR}, 'cache')->make_path;
-ok(-e $cache_location, "Setting up Cache directory");
+ok -e $cache_location, 'Setting up Cache directory';
 
-open(my $conf, '>', path($ENV{OPENQA_CONFIG})->child("workers.ini")->to_string);
-print $conf <<EOC;
+path($ENV{OPENQA_CONFIG})->child("workers.ini")->spurt(<<EOC);
 [global]
 CACHEDIRECTORY = $cache_location
-CACHELIMIT = 50;
+CACHELIMIT = 50
+LOCAL_UPLOAD = 0
 
 [1]
 WORKER_CLASS = qemu_i386,qemu_x86_64
@@ -304,77 +232,59 @@ WORKER_CLASS = qemu_i386,qemu_x86_64
 [http://localhost:$mojoport]
 TESTPOOLSERVER = $sharedir/tests
 EOC
-close($conf);
-
-ok(-e path($ENV{OPENQA_CONFIG})->child("workers.ini"), "Config file created.");
+ok -e path($ENV{OPENQA_CONFIG})->child("workers.ini"), 'Config file created';
 
 # For now let's repeat the cache tests before extracting to separate test
 subtest 'Cache tests' => sub {
-
     my $cache_service        = cache_worker_service;
     my $worker_cache_service = cache_minion_worker;
 
     my $db_file = $cache_location->child('cache.sqlite');
-    ok(!-e $db_file, "cache.sqlite is not present");
+    ok !-e $db_file, 'cache.sqlite is not present';
 
-    my $filename;
-    open($filename, '>', $cache_location->child("test.file"));
-    print $filename "Hello World";
-    close($filename);
-
-    path($cache_location, "test_directory")->make_path;
+    my $filename = $cache_location->child('test.file')->spurt('Hello World');
+    path($cache_location, 'test_directory')->make_path;
 
     $worker_cache_service->restart->restart;
     $cache_service->restart->restart;
 
-    my $cache_client = OpenQA::Worker::Cache::Client->new;
-
-    sleep 5 and diag "Waiting for cache service to be available"        until $cache_client->available;
-    sleep 5 and diag "Waiting for cache service worker to be available" until $cache_client->available_workers;
-
-    my $job_name = 'tinycore-1-flavor-i386-Build1-core@coolone';
-    OpenQA::Test::FullstackUtils::client_call(
-        'jobs/3/restart post',
-        qr|\Qtest_url => [{ 3 => "/tests/5\E|,
-        'client returned new test_url'
-    );
-    #] restore syntax highlighting in Kate
-
+    my $cache_client                = OpenQA::CacheService::Client->new;
+    my $supposed_cache_service_host = $cache_client->host;
+    wait_for_or_bail_out { $cache_client->info->available } "cache service at $supposed_cache_service_host";
+    wait_for_or_bail_out { $cache_client->info->available_workers } 'cache service worker';
+    $job_name = 'tinycore-1-flavor-i386-Build1-core@coolone';
+    client_call('-X POST jobs ' . OpenQA::Test::FullstackUtils::job_setup(PUBLISH_HDD_1 => ''));
     $driver->get('/tests/5');
-    like($driver->find_element('#result-row .card-body')->get_text(), qr/State: scheduled/, 'test 5 is scheduled')
-      or die;
-    start_worker;
-    OpenQA::Test::FullstackUtils::wait_for_job_running($driver, 1);
-    ok(-e $db_file, "cache.sqlite file created");
-    ok(!-d path($cache_location, "test_directory"), "Directory within cache, not present after deploy");
-    ok(!-e $cache_location->child("test.file"), "File within cache, not present after deploy");
+    like status_text, qr/State: scheduled/, 'test 5 is scheduled' or die;
+    start_worker_and_schedule;
+    ok wait_for_job_running($driver, 1), 'job 5 running' or show_job_info 5;
+    ok -e $db_file, 'cache.sqlite file created';
+    ok !-d path($cache_location, "test_directory"), 'Directory within cache, not present after deploy';
+    ok !-e $cache_location->child("test.file"), 'File within cache, not present after deploy';
 
-    like(
-        readlink(path($ENV{OPENQA_BASEDIR}, 'openqa', 'pool', '1')->child("Core-7.2.iso")),
-        qr($cache_location/localhost/Core-7.2.iso),
-        "iso is symlinked to cache"
-    );
+    my $link = path($ENV{OPENQA_BASEDIR}, 'openqa', 'pool', '1')->child('Core-7.2.iso');
+    wait_for_or_bail_out { -e $link } 'finished download';
 
-    OpenQA::Test::FullstackUtils::wait_for_result_panel($driver, qr/Result: passed/, 'test 5 is passed');
-    kill_worker;
+    my $cached = $cache_location->child('localhost', 'Core-7.2.iso');
+    is $cached->stat->ino, $link->stat->ino, 'iso is hardlinked to cache';
 
-    #  The worker is launched with --verbose, so by default in this test the level is always debug
-    if (!$ENV{MOJO_LOG_LEVEL} || $ENV{MOJO_LOG_LEVEL} =~ /DEBUG|INFO/i) {
-        $filename = path($resultdir, '00000', "00000005-$job_name")->child("autoinst-log.txt");
-        open(my $f, '<', $filename) or die "OPENING $filename: $!\n";
-        my $autoinst_log = do { local ($/); <$f> };
-        close($f);
-
-        like($autoinst_log, qr/Downloading Core-7.2.iso/, 'Test 5, downloaded the right iso.');
-        like($autoinst_log, qr/11116544/,                 'Test 5 Core-7.2.iso size is correct.');
-        like($autoinst_log, qr/result: done/,             'Test 5 result done');
-        like((split(/\n/, $autoinst_log))[0], qr/\+\+\+ setup notes \+\+\+/, 'Test 5 correct autoinst setup notes');
-        like(
-            (split(/\n/, $autoinst_log))[-1],
-            qr/uploading autoinst-log.txt/,
-            'Test 5 correct autoinst uploading autoinst'
-        );
-    }
+    ok wait_for_result_panel($driver, qr/Result: passed/), 'test 5 is passed' or show_job_info 5;
+    stop_worker;
+    $autoinst_log = autoinst_log(5);
+    ok -s $autoinst_log, 'Test 5 autoinst-log.txt file created';
+    my $log_content = $autoinst_log->slurp;
+    like $log_content, qr/Downloading Core-7.2.iso/, 'Test 5, downloaded the right iso';
+    like $log_content, qr/11116544/,                 'Test 5 Core-7.2.iso size is correct';
+    like $log_content, qr/Result: done/,             'Test 5 result done';
+    like((split(/\n/, $log_content))[0], qr/\+\+\+ setup notes \+\+\+/, 'Test 5 correct autoinst setup notes');
+    like((split(/\n/, $log_content))[-1], qr/uploading autoinst-log.txt/i,
+        'Test 5 correct autoinst uploading autoinst');
+    my $worker_log = $autoinst_log->dirname->child('worker-log.txt');
+    ok -s $worker_log, 'worker log file generated';
+    $log_content = $worker_log->slurp;
+    like $log_content,   qr/Uploading autoinst-log\.txt/,       'autoinst log uploaded';
+    like $log_content,   qr/Uploading worker-log\.txt/,         'worker log uploaded';
+    unlike $log_content, qr/local upload \(no chunks needed\)/, 'local upload feature not used';
     my $dbh
       = DBI->connect("dbi:SQLite:dbname=$db_file", undef, undef, {RaiseError => 1, PrintError => 1, AutoCommit => 1});
     my $sql    = "SELECT * from assets order by last_use asc";
@@ -382,146 +292,91 @@ subtest 'Cache tests' => sub {
     my $result = $dbh->selectrow_hashref($sql);
     # We know it's going to be this host because it's what was defined in
     # the worker ini
-    like($result->{filename}, qr/Core-7/, "Core-7.2.iso is the first element");
+    like $result->{filename}, qr/Core-7/, 'Core-7.2.iso is the first element';
 
+    # create assets at same time and in the following seconds after the above
+    my $time = $result->{last_use};
     for (1 .. 5) {
         $filename = $cache_location->child("$_.qcow2");
-        open(my $tmpfile, '>', $filename);
-        print $tmpfile $filename;
-        $sql = "INSERT INTO assets (filename,etag,last_use) VALUES ( ?, 'Not valid', strftime('%s','now'));";
+        path($filename)->spurt($filename);
+        # so that last_use is not the same for every item
+        $time++;
+        $sql = "INSERT INTO assets (filename,etag,last_use) VALUES ( ?, 'Not valid', $time);";
         $sth = $dbh->prepare($sql);
         $sth->bind_param(1, $filename);
         $sth->execute();
-        sleep 1;    # so that last_use is not the same for every item
     }
 
     $sql    = "SELECT * from assets order by last_use desc";
     $sth    = $dbh->prepare($sql);
     $result = $dbh->selectrow_hashref($sql);
-    like($result->{filename}, qr/5.qcow2$/, "file #5 is the newest element");
+    like $result->{filename}, qr/5.qcow2$/, 'file #5 is the newest element';
 
     # Delete image #5 so that it gets cleaned up when the worker is initialized.
     $sql = "delete from assets where filename = ? ";
     $dbh->prepare($sql)->execute($result->{filename});
 
     #simple limit testing.
-    OpenQA::Test::FullstackUtils::client_call(
-        'jobs/5/restart post',
-        qr|\Qtest_url => [{ 5 => "/tests/6\E|,
-        'client returned new test_url'
-    );
-    #] restore syntax highlighting in Kate
-
+    client_call('-X POST jobs/5/restart', qr|test_url.+5.+tests.+6|, 'client returned new test_url for test 6');
     $driver->get('/tests/6');
-    like($driver->find_element('#result-row .card-body')->get_text(), qr/State: scheduled/, 'test 6 is scheduled');
-    start_worker;
-    OpenQA::Test::FullstackUtils::wait_for_result_panel($driver, qr/Result: passed/, 'test 6 is passed');
-    kill_worker;
+    like status_text, qr/State: scheduled/, 'test 6 is scheduled';
+    start_worker_and_schedule;
+    ok wait_for_result_panel($driver, qr/Result: passed/), 'test 6 is passed' or show_job_info 6;
+    stop_worker;
+    $autoinst_log = autoinst_log(6);
+    ok -s $autoinst_log, 'Test 6 autoinst-log.txt file created';
 
-    ok(!-e $result->{filename}, "asset 5.qcow2 removed during cache init");
+    ok !-e $result->{filename}, 'asset 5.qcow2 removed during cache init';
 
     $sql    = "SELECT * from assets order by last_use desc";
     $sth    = $dbh->prepare($sql);
     $result = $dbh->selectrow_hashref($sql);
-
-    like($result->{filename}, qr/Core-7/, "Core-7.2.iso the most recent asset again ");
+    like $result->{filename}, qr/Core-7/, 'Core-7.2.iso the most recent asset again';
 
     #simple limit testing.
-    OpenQA::Test::FullstackUtils::client_call(
-        'jobs/6/restart post',
-        qr|\Qtest_url => [{ 6 => "/tests/7\E|,
-        'client returned new test_url'
-    );
-    #] restore syntax highlighting in Kate
+    client_call('-X POST jobs/6/restart', qr|test_url.+6.+tests.+7|, 'client returned new test_url for test 7');
     $driver->get('/tests/7');
-    like($driver->find_element('#result-row .card-body')->get_text(), qr/State: scheduled/, 'test 7 is scheduled');
-    start_worker;
-    OpenQA::Test::FullstackUtils::wait_for_result_panel($driver, qr/Result: passed/, 'test 7 is passed');
-
-    #  The worker is launched with --verbose, so by default in this test the level is always debug
-    if (!$ENV{MOJO_LOG_LEVEL} || $ENV{MOJO_LOG_LEVEL} =~ /DEBUG|INFO/i) {
-        $filename = path($resultdir, '00000', "00000007-$job_name")->child("autoinst-log.txt");
-        ok(-s $filename, 'Test 7 autoinst-log.txt file created');
-
-        open(my $f, '<', $filename) or die "OPENING $filename: $!\n";
-        my $autoinst_log = do { local ($/); <$f> };
-        close($f);
-
-        like($autoinst_log, qr/Content has not changed/,     'Test 7 Core-7.2.iso has not changed.');
-        like($autoinst_log, qr/\+\+\+\ worker notes \+\+\+/, 'Test 7 correct autoinst worker notes');
-        like((split(/\n/, $autoinst_log))[0], qr/\+\+\+ setup notes \+\+\+/, 'Test 7 correct autoinst setup notes');
-        like(
-            (split(/\n/, $autoinst_log))[-1],
-            qr/uploading autoinst-log.txt/,
-            'Test 7 correct autoinst uploading autoinst'
-        );
-    }
-    OpenQA::Test::FullstackUtils::client_call("jobs post $JOB_SETUP HDD_1=non-existent.qcow2");
-    OpenQA::Test::FullstackUtils::schedule_one_job;
+    like status_text, qr/State: scheduled/, 'test 7 is scheduled';
+    start_worker_and_schedule;
+    ok wait_for_result_panel($driver, qr/Result: passed/), 'test 7 is passed' or show_job_info 7;
+    $autoinst_log = autoinst_log(7);
+    ok -s $autoinst_log, 'Test 7 autoinst-log.txt file created';
+    $log_content = $autoinst_log->slurp;
+    like $log_content, qr/\+\+\+\ worker notes \+\+\+/, 'Test 7 has worker notes';
+    like((split(/\n/, $log_content))[0],  qr/\+\+\+ setup notes \+\+\+/,   'Test 7 has setup notes');
+    like((split(/\n/, $log_content))[-1], qr/uploading autoinst-log.txt/i, 'Test 7 uploaded autoinst-log (as last)');
+    client_call('-X POST jobs ' . OpenQA::Test::FullstackUtils::job_setup(HDD_1 => 'non-existent.qcow2'));
+    schedule_one_job;
     $driver->get('/tests/8');
-    OpenQA::Test::FullstackUtils::wait_for_result_panel($driver, qr/Result: incomplete/, 'test 8 is incomplete');
+    ok wait_for_result_panel($driver, qr/Result: incomplete/), 'test 8 is incomplete' or show_job_info 8;
+    like find_status_text($driver), qr/Failed to download.*non-existent.qcow2/, 'reason for incomplete specified';
 
-    #  The worker is launched with --verbose, so by default in this test the level is always debug
-    if (!$ENV{MOJO_LOG_LEVEL} || $ENV{MOJO_LOG_LEVEL} =~ /DEBUG|INFO/i) {
-        $filename = path($resultdir, '00000', "00000008-$job_name")->child("autoinst-log.txt");
-        ok(-s $filename, 'Test 8 autoinst-log.txt file created');
+    subtest 'log shown within details tab (without page reload)' => sub {
+        $driver->find_element_by_link_text('Details')->click();
+        wait_for_ajax(msg => 'autoinst log embedded within "Details" tab');
+        ok my $log = $driver->find_element('.embedded-logfile'), 'element for embedded logfile present';
+        wait_for_ajax(msg => 'log contents loaded');
+        like($log->get_text(), qr/Result: setup failure/, 'log contents present');
+    };
 
-        open(my $f, '<', $filename) or die "OPENING $filename: $!\n";
-        my $autoinst_log = do { local ($/); <$f> };
-        close($f);
-
-        like($autoinst_log, qr/\+\+\+\ worker notes \+\+\+/, 'Test 7 correct autoinst worker notes');
-        like((split(/\n/, $autoinst_log))[0], qr/\+\+\+ setup notes \+\+\+/, 'Test 8 correct autoinst setup notes');
-        like(
-            (split(/\n/, $autoinst_log))[-1],
-            qr/uploading autoinst-log.txt/,
-            'Test 8 correct autoinst uploading autoinst'
-        );
-
-        like($autoinst_log, qr/non-existent.qcow2 failed with: 404 - Not Found/,
-            'Test 8 failure message found in log.');
-        like($autoinst_log, qr/result: setup failure/, 'Test 8 state correct: setup failure');
-    }
-
-    kill_worker;
+    $autoinst_log = autoinst_log(8);
+    ok -s $autoinst_log, 'Test 8 autoinst-log.txt file created';
+    $log_content = $autoinst_log->slurp;
+    like $log_content, qr/\+\+\+\ worker notes \+\+\+/, 'Test 8 has worker notes';
+    like((split(/\n/, $log_content))[0],  qr/\+\+\+ setup notes \+\+\+/,   'Test 8 has setup notes');
+    like((split(/\n/, $log_content))[-1], qr/uploading autoinst-log.txt/i, 'Test 8 uploaded autoinst-log (as last)');
+    like $log_content, qr/(Failed to download.*non-existent.qcow2|Download of.*non-existent.qcow2.*failed)/,
+      'Test 8 failure message found in log';
+    like $log_content, qr/Result: setup failure/, 'Test 8 worker result';
+    stop_worker;
 };
 
-
-subtest 'Isotovideo version' => sub {
-    use OpenQA::Worker::Engines::isotovideo;
-    use OpenQA::Worker;
-
-    eval { OpenQA::Worker::Engines::isotovideo::set_engine_exec('/bogus/location'); };
-    is($OpenQA::Worker::Common::isotovideo_interface_version,
-        0, 'providing wrong isotovideo binary causes isotovideo version to remain 0');
-    like($@, qr/Path to isotovideo invalid/, 'isotovideo version path invalid');
-
-    # init does not fail without isotovideo parameter
-    # note that this might set the isotovideo version because the isotovideo path defaults
-    # to /usr/bin/isotovideo
-    OpenQA::Worker::init({}, {apikey => 123, apisecret => 456, instance => 1});
-    $OpenQA::Worker::Common::isotovideo_interface_version = 0;
-
-    OpenQA::Worker::Engines::isotovideo::set_engine_exec('../os-autoinst/isotovideo');
-    ok($OpenQA::Worker::Common::isotovideo_interface_version > 0, 'update isotovideo version via set_engine_exec');
-
-    $OpenQA::Worker::Common::isotovideo_interface_version = 0;
-    OpenQA::Worker::init({},
-        {apikey => 123, apisecret => 456, instance => 1, isotovideo => '../os-autoinst/isotovideo'});
-    ok(
-        $OpenQA::Worker::Common::isotovideo_interface_version > 0,
-        'update isotovideo version indirectly via OpenQA::Worker::init'
-    );
-};
-
-kill_driver;
-turn_down_stack;
 done_testing;
 
-# in case it dies
 END {
     kill_driver;
     turn_down_stack;
     session->clean;
     $? = 0;
+    $tempdir->list_tree->grep(qr/\.txt$/)->each(sub { print "$_:\n" . $_->slurp }) if defined $tempdir;
 }

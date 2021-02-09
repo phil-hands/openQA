@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014 SUSE LLC
 #           (C) 2015 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
@@ -12,12 +12,13 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Controller::API::V1::Table;
 use Mojo::Base 'Mojolicious::Controller';
 
+use Mojo::Util 'trim';
+use OpenQA::Log 'log_debug';
 use Try::Tiny;
 
 =pod
@@ -61,20 +62,20 @@ version, arch and flavor parameters are always required.
 my %tables = (
     Machines => {
         keys     => [['id'], ['name'],],
-        cols     => ['id', 'name', 'backend', 'description'],
+        cols     => ['id',   'name', 'backend', 'description'],
         required => ['name', 'backend'],
         defaults => {description => undef},
     },
     TestSuites => {
         keys     => [['id'], ['name'],],
-        cols     => ['id', 'name', 'description'],
+        cols     => ['id',   'name', 'description'],
         required => ['name'],
         defaults => {description => undef},
     },
     Products => {
-        keys     => [['id'], ['distri', 'version', 'arch', 'flavor'],],
-        cols     => ['id', 'distri', 'version', 'arch', 'flavor', 'description'],
-        required => ['distri', 'version', 'arch', 'flavor'],
+        keys     => [['id'],   ['distri', 'version', 'arch', 'flavor'],],
+        cols     => ['id',     'distri',  'version', 'arch', 'flavor', 'description'],
+        required => ['distri', 'version', 'arch',    'flavor'],
         defaults => {description => "", name => ""},
     },
 );
@@ -156,40 +157,24 @@ OpenQA::WebAPI::Controller::API::V1::Table package documentation.
 =cut
 
 sub create {
-    my ($self)     = @_;
-    my $table      = $self->param("table");
-    my %entry      = %{$tables{$table}->{defaults}};
-    my $validation = $self->validation;
+    my ($self) = @_;
+    my $table  = $self->param("table");
+    my %entry  = %{$tables{$table}->{defaults}};
 
-    for my $par (@{$tables{$table}->{required}}) {
-        $validation->required($par);
-        $entry{$par} = $self->param($par);
-    }
-    $entry{description} = $self->param('description');
-    my $hp = $self->hparams();
-    my @settings;
-    if ($hp->{settings}) {
-        for my $k (keys %{$hp->{settings}}) {
-            push @settings, {key => $k, value => $hp->{settings}->{$k}};
-        }
-    }
-    $entry{settings} = \@settings;
+    my ($error_message, $settings, $keys) = $self->_prepare_settings($table, \%entry);
+    return $self->render(json => {error => $error_message}, status => 400) if defined $error_message;
+
+    $entry{settings} = $settings;
 
     my $error;
     my $id;
-    if ($validation->has_error) {
-        $error = "wrong parameter: ";
-        for my $par (@{$tables{$table}->{required}}) {
-            $error .= " $par" if $validation->has_error($par);
-        }
-    }
-    else {
-        try { $id = $self->schema->resultset($table)->create(\%entry)->id; } catch { $error = shift; };
-    }
+
+    try { $id = $self->schema->resultset($table)->create(\%entry)->id; } catch { $error = shift; };
+
     if ($error) {
         return $self->render(json => {error => $error}, status => 400);
     }
-    $self->emit_event('openqa_table_create', {table => $table, %entry});
+    $self->emit_event('openqa_table_create', {table => $table, id => $id, %entry});
     $self->render(json => {id => $id});
 }
 
@@ -209,61 +194,78 @@ of tables updated by the method on success.
 
 =cut
 
+sub _verify_table_usage {
+    my ($self, $table, $id) = @_;
+
+    my $parameter = {
+        Products   => 'product_id',
+        Machines   => 'machine_id',
+        TestSuites => 'test_suite_id',
+    }->{$table};
+    my $job_templates = $self->schema->resultset('JobTemplates')->search({$parameter => $id});
+    my %groups;
+    while (my $job_template = $job_templates->next) {
+        $groups{$job_template->group->name} = 1 if $job_template->group->template;
+    }
+    return
+      scalar(keys %groups)
+      ? 'Group'
+      . (scalar(keys %groups) > 1 ? 's' : '') . ' '
+      . join(', ', sort keys(%groups))
+      . " must be updated through the YAML template"
+      : undef;
+}
+
 sub update {
     my ($self) = @_;
     my $table = $self->param("table");
-    my %entry;
-    my $validation = $self->validation;
 
-    for my $par (@{$tables{$table}->{required}}) {
-        $validation->required($par);
-        $entry{$par} = $self->param($par);
-    }
-    $entry{description} = $self->param('description');
-    my $hp = $self->hparams();
-    my @settings;
-    my @keys;
-    if ($hp->{settings}) {
-        for my $k (keys %{$hp->{settings}}) {
-            push @settings, {key => $k, value => $hp->{settings}->{$k}};
-            push @keys, $k;
-        }
-    }
+    my $entry = {};
+    my ($error_message, $settings, $keys) = $self->_prepare_settings($table, $entry);
+
+    return $self->render(json => {error => $error_message}, status => 400) if defined $error_message;
 
     my $schema = $self->schema;
 
     my $error;
     my $ret;
-    if ($validation->has_error) {
-        $error = "wrong parameter: ";
-        for my $par (@{$tables{$table}->{required}}) {
-            $error .= " $par" if $validation->has_error($par);
+    my $update = sub {
+        my $rc = $schema->resultset($table)->find({id => $self->param('id')});
+        # Tables used in a group configured in YAML must not be renamed
+        if (
+            (($table eq 'TestSuites' || $table eq 'Machines') && $rc->name ne $self->param('name'))
+            || (
+                $table eq 'Products'
+                && (   $rc->arch ne $self->param('arch')
+                    || $rc->distri ne $self->param('distri')
+                    || $rc->flavor ne $self->param('flavor')
+                    || $rc->version ne $self->param('version'))))
+        {
+            my $error_message = $self->_verify_table_usage($table, $self->param('id'));
+            $ret = 0;
+            die "$error_message\n" if $error_message;
         }
-    }
-    else {
-        my $update = sub {
-            my $rc = $schema->resultset($table)->find({id => $self->param('id')});
-            if ($rc) {
-                $rc->update(\%entry);
-                for my $var (@settings) {
-                    $rc->update_or_create_related('settings', $var);
-                }
-                $rc->delete_related('settings', {key => {'not in' => [@keys]}});
-                $ret = 1;
+        if ($rc) {
+            $rc->update($entry);
+            for my $var (@$settings) {
+                $rc->update_or_create_related('settings', $var);
             }
-            else {
-                $ret = 0;
-            }
-        };
+            $rc->delete_related('settings', {key => {'not in' => [@$keys]}});
+            $ret = 1;
+        }
+        else {
+            $ret = 0;
+        }
+    };
 
-        try {
-            $schema->txn_do($update);
-        }
-        catch {
-            $error = shift;
-            OpenQA::Utils::log_debug("Table update error: $error");
-        };
+    try {
+        $schema->txn_do($update);
     }
+    catch {
+        # The first line of the backtrace gives us the error message we want
+        $error = (split /\n/, $_)[0];
+        log_debug("Table update error: $error");
+    };
 
     if ($ret && $ret == 0) {
         return $self->render(json => {error => 'Not found'}, status => 404);
@@ -271,7 +273,7 @@ sub update {
     if (!$ret) {
         return $self->render(json => {error => $error}, status => 400);
     }
-    $self->emit_event('openqa_table_update', {table => $table, name => $entry{name}, settings => \@settings});
+    $self->emit_event('openqa_table_update', {table => $table, name => $entry->{name}, settings => $settings});
     $self->render(json => {result => int($ret)});
 }
 
@@ -299,6 +301,10 @@ sub destroy {
     my $entry_name;
 
     try {
+        # Tables used in a group configured in YAML must not be deleted
+        my $error_message = $self->_verify_table_usage($table, $self->param('id'));
+        die "$error_message\n" if $error_message;
+
         my $rs = $schema->resultset($table);
         $res = $rs->search({id => $self->param('id')});
         if ($res && $res->single) {
@@ -307,7 +313,8 @@ sub destroy {
         $ret = $res->delete;
     }
     catch {
-        $error = shift;
+        # The first line of the backtrace gives us the error message we want
+        $error = (split /\n/, $_)[0];
     };
 
     if ($ret && $ret == 0) {
@@ -318,6 +325,48 @@ sub destroy {
     }
     $self->emit_event('openqa_table_delete', {table => $table, name => $entry_name});
     $self->render(json => {result => int($ret)});
+}
+
+=over 4
+
+=item _prepare_settings()
+
+Internal method to prepare settings when add or update admin table.
+Use by both B<create()> and B<update()> method.
+
+=back
+
+=cut
+
+sub _prepare_settings {
+    my ($self, $table, $entry) = @_;
+    my $validation = $self->validation;
+
+    for my $par (@{$tables{$table}->{required}}) {
+        $validation->required($par);
+        if (!defined $validation->param($par)) {
+            next;
+        }
+        $entry->{$par} = trim $validation->param($par);
+    }
+
+    if ($validation->has_error) {
+        return "Missing parameter: " . join(', ', @{$validation->failed});
+    }
+
+    $entry->{description} = $self->param('description');
+    my $hp = $self->hparams();
+    my @settings;
+    my @keys;
+    if ($hp->{settings}) {
+        for my $k (keys %{$hp->{settings}}) {
+            $k = trim $k;
+            my $value = trim $hp->{settings}->{$k};
+            push @settings, {key => $k, value => $value};
+            push @keys, $k;
+        }
+    }
+    return (undef, \@settings, \@keys);
 }
 
 1;

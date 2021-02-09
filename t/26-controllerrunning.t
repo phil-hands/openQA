@@ -1,5 +1,5 @@
-#!/usr/bin/env perl -w
-# Copyright (C) 2017-2018 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2017-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,21 +14,20 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
-use strict;
-use warnings;
 use FindBin;
-use lib "$FindBin::Bin/lib";
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use DateTime;
-use Test::More;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '6';
 use OpenQA::WebAPI::Controller::Running;
+use OpenQA::Jobs::Constants;
 use Mojolicious;
 use Mojo::File 'path';
 use Mojo::IOLoop;
+
+my $log_messages = '';
 
 subtest streamtext => sub {
     my $buffer = '';
@@ -38,8 +37,8 @@ subtest streamtext => sub {
             $buffer .= 'accepted';
             $stream->on(
                 read => sub {
-                    my ($stream, $chunk) = @_;
-                    $buffer .= $chunk;
+                    my ($stream, $chunk) = @_;    # uncoverable statement
+                    $buffer .= $chunk;            # uncoverable statement
                 });
         });
     my $port   = Mojo::IOLoop->acceptor($id)->port;
@@ -56,9 +55,12 @@ subtest streamtext => sub {
 
     my $stream = Mojo::IOLoop::Stream->new($handle);
     $id = Mojo::IOLoop->stream($stream);
-    my $contapp    = Mojolicious->new;
+    my $log        = Mojo::Log->new;
+    my $contapp    = Mojolicious->new(log => $log);
     my $controller = OpenQA::WebAPI::Controller::Running->new(app => $contapp);
     my $faketx     = Mojo::Transaction::Fake->new(fakestream => $id);
+    $log->unsubscribe('message');
+    $log->on(message => sub { my ($log, $level, @lines) = @_; $log_messages .= join "\n", @lines, '' });
     $controller->tx($faketx);
     $controller->stash("job", Job->new);
 
@@ -81,7 +83,7 @@ subtest streamtext => sub {
     my $size = -s $t_file;
     ok $size > (10 * 1024), "test file size is greater than 10 * 1024";
     like $controller->tx->res->content->{body_buffer}, qr/data: \["A\\n"\]/, 'body buffer contains "A"';
-};
+} or diag explain $log_messages;
 
 subtest init => sub {
     use Mojo::Util 'monkey_patch';
@@ -94,41 +96,40 @@ subtest init => sub {
     monkey_patch 'OpenQA::WebAPI::Controller::Running', not_found => sub { $not_found = 1 };
     monkey_patch 'OpenQA::WebAPI::Controller::Running',
       render_specific_not_found => sub { $render_specific_not_found = 1 };
-    monkey_patch 'OpenQA::WebAPI::Controller::Running', reply => sub { shift };
-    monkey_patch 'OpenQA::WebAPI::Controller::Running', render => sub { $render = 1 };
+    monkey_patch 'OpenQA::WebAPI::Controller::Running', reply  => sub { shift };
+    monkey_patch 'OpenQA::WebAPI::Controller::Running', render => sub { shift; $render = [@_] };
 
     my $c = OpenQA::WebAPI::Controller::Running->new(app => $app);
-    $c->param('testid', "foobar");
+    $c->param(testid => 'foobar');
 
     # No job could be found
     my $ret = $c->init();
-    is $ret,       0,     "Init returns 0";
-    is $not_found, 1,     "Init returns 0 - no defined job";
-    is $render,    undef, "Init returns - not rendering job state";
+    is $ret,       0,     'Init returns 0';
+    is $not_found, 1,     'Init returns 0 - no defined job';
+    is $render,    undef, 'Init returns - not rendering job state';
 
     # Init should return 1 now
     monkey_patch 'FakeSchema::Find', find => sub { Job->new };
     $ret = $c->init();
-    is $ret, 1, "Init returns 1";
-    my $job = $c->stash("job");
-    isa_ok($job, "Job", "Init correctly stashes the fake Job");
+    is $ret, 1, 'Init returns 1';
+    my $job = $c->stash('job');
+    isa_ok($job, 'Job', 'Init correctly stashes the fake Job');
 
     # Job can be found, but with no worker
     monkey_patch 'Job', worker => sub { undef };
     # status route
-    $render_specific_not_found = 0;
-    $render                    = 0;
+    $render_specific_not_found = $render = 0;
     $ret                       = $c->init('status');
-    is $ret,                       0, "Init returns 0";
-    is $render_specific_not_found, 0, "no 404 despite no worker";
-    is $render,                    1, "no worker but job state still rendered";
+    is $ret,                       0, 'init returns 0';
+    is $render_specific_not_found, 0, 'no 404 despite no worker';
+    is_deeply $render,             [json => {state => RUNNING, result => NONE}], 'job state rendered without worker'
+      or diag explain $render;
     # other routes
-    $render_specific_not_found = 0;
-    $render                    = 0;
+    $render_specific_not_found = $render = 0;
     $ret                       = $c->init();
-    is $ret,                       0, "Init returns 0";
-    is $render_specific_not_found, 1, "specific 404 error rendered";
-    is $render,                    0, "not rendering job state";
+    is $ret,                       0, 'init returns 0';
+    is $render_specific_not_found, 1, 'specific 404 error rendered';
+    is $render,                    0, 'not rendering job state' or diag explain $render;
 };
 
 subtest edit => sub {
@@ -155,7 +156,7 @@ subtest edit => sub {
 
     # Check if we can get the fake results
     my $details_count;
-    monkey_patch 'FakeSchema::Find', find => sub { Job->new };
+    monkey_patch 'FakeSchema::Find',                    find        => sub { Job->new };
     monkey_patch 'OpenQA::WebAPI::Controller::Running', redirect_to => sub { $found = 1; $details_count = $_[5]; };
     $c = OpenQA::WebAPI::Controller::Running->new(app => $app);
     $c->param('testid', "foobar");
@@ -176,9 +177,10 @@ sub new {
 }
 
 sub worker  { shift->{worker} }
-sub state   { 1 }
+sub state   { OpenQA::Jobs::Constants::RUNNING }
+sub result  { OpenQA::Jobs::Constants::NONE }
 sub modules { FakeSchema::Find->new }
-sub details { [qw(foo bar baz)] }
+sub results { {details => [qw(foo bar baz)]} }
 sub name    { "foobar" }
 
 package Worker;
@@ -194,7 +196,7 @@ sub get_property { shift->{WORKER_TMPDIR} }
 
 package Mojo::Transaction::Fake;
 use Mojo::Base 'Mojo::Transaction';
-sub resume { ++$_[0]{writing} and return $_[0]->emit('resume') }
+sub resume     { ++$_[0]{writing} and return $_[0]->emit('resume') }
 sub connection { shift->{fakestream} }
 
 package FakeSchema;
@@ -208,5 +210,5 @@ sub new {
 sub resultset { FakeSchema::Find->new }
 
 package FakeSchema::Find;
-sub new { bless({}, shift) }
+sub new  { bless({}, shift) }
 sub find { undef }

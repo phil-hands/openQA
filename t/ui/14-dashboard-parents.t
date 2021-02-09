@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2016-2018 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2016-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,35 +12,28 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
 use Module::Load::Conditional qw(can_load);
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Date::Format;
-use Test::More;
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '16';
 use OpenQA::Test::Case;
-
-OpenQA::Test::Case->new->init_data;
-
 use OpenQA::SeleniumTest;
 
-my $t = Test::Mojo->new('OpenQA::WebAPI');
+my $test_case     = OpenQA::Test::Case->new;
+my $schema_name   = OpenQA::Test::Database->generate_schema_name;
+my $schema        = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '01-jobs.pl 02-workers.pl');
+my $parent_groups = $schema->resultset('JobGroupParents');
 
-sub schema_hook {
-    my $schema        = OpenQA::Test::Database->new->create;
-    my $parent_groups = $schema->resultset('JobGroupParents');
-    my $job_groups    = $schema->resultset('JobGroups');
-    my $jobs          = $schema->resultset('Jobs');
+sub prepare_database {
+    my $job_groups = $schema->resultset('JobGroups');
+    my $jobs       = $schema->resultset('Jobs');
     # add job groups from fixtures to new parent
     my $parent_group = $parent_groups->create({name => 'Test parent', sort_order => 0});
     while (my $job_group = $job_groups->next) {
@@ -61,7 +53,6 @@ sub schema_hook {
             state      => "cancelled",
             priority   => 35,
             t_finished => undef,
-            backend    => 'qemu',
             # 10 minutes ago
             t_started => time2str('%Y-%m-%d %H:%M:%S', time - 600, 'UTC'),
             # Two hours ago
@@ -82,18 +73,14 @@ sub schema_hook {
             ]});
 }
 
-my $driver = call_driver(\&schema_hook);
-unless ($driver) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
-}
+prepare_database();
+
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
 
 # DO NOT MOVE THIS INTO A 'use' FUNCTION CALL! It will cause the tests
 # to crash if the module is unavailable
-unless (can_load(modules => {'Selenium::Remote::WDKeys' => undef,})) {
-    plan skip_all => 'Install Selenium::Remote::WDKeys to run this test';
-    exit(0);
-}
+plan skip_all => 'Install Selenium::Remote::WDKeys to run this test'
+  unless can_load(modules => {'Selenium::Remote::WDKeys' => undef,});
 
 # don't tests basics here again, this is already done in t/22-dashboard.t and t/ui/14-dashboard.t
 
@@ -101,28 +88,24 @@ $driver->title_is('openQA', 'on main page');
 my $baseurl = $driver->get_current_url();
 
 $driver->get($baseurl . '?limit_builds=20');
-disable_bootstrap_animations();
+wait_for_ajax_and_animations;
 
 # test expanding/collapsing
 is(scalar @{$driver->find_elements('opensuse', 'link_text')}, 0, 'link to child group collapsed (in the first place)');
 $driver->find_element_by_link_text('Build0091')->click();
 my $element = $driver->find_element_by_link_text('opensuse');
 ok($element->is_displayed(), 'link to child group expanded');
-
-# first try of click does not work for unknown reasons
-for (0 .. 10) {
-    $driver->find_element_by_link_text('Build0091')->click();
-    last if $driver->find_element('#group1_build13_1-0091 .h4 a')->is_hidden();
-}
-ok($driver->find_element('#group1_build13_1-0091 .h4 a')->is_hidden(), 'link to child group collapsed');
+$driver->find_element_by_link_text('Build0091')->click();
+# Looking for "is_hidden" does not turn out to be reliable so relying on xpath
+# lookup of collapsed entries instead
+ok($driver->find_element_by_xpath('//div[contains(@class,"children-collapsed")]//a'), 'link to child group collapsed');
 
 # go to parent group overview
 $driver->find_element_by_link_text('Test parent')->click();
-disable_bootstrap_animations();
-
+wait_for_ajax_and_animations;
 ok($driver->find_element('#group1_build13_1-0091 .h4 a')->is_displayed(), 'link to child group displayed');
 my @links = $driver->find_elements('.h4 a', 'css');
-is(scalar @links, 11, 'all links expanded in the first place');
+is(scalar @links, 19, 'all links expanded in the first place');
 $driver->find_element_by_link_text('Build0091')->click();
 ok($driver->find_element('#group1_build13_1-0091 .h4 a')->is_hidden(), 'link to child group collapsed');
 
@@ -131,13 +114,15 @@ isnt(scalar @{$driver->find_elements('opensuse', 'link_text')}, 0, "child group 
 
 # back to home and go to another parent group overview
 $driver->find_element_by_class('navbar-brand')->click();
+wait_for_ajax(msg => 'wait until job group results show up');
 $driver->find_element_by_link_text('Test parent 2')->click();
-disable_bootstrap_animations();
+wait_for_ajax_and_animations;
 isnt(scalar @{$driver->find_elements('opensuse', 'link_text')}, 0, "child group 'opensuse' in 'Test parent 2'");
 
 # test filtering for nested groups
 subtest 'filtering subgroups' => sub {
     $driver->get('/');
+    wait_for_ajax_and_animations;
     my $url = $driver->get_current_url;
     $driver->find_element('#filter-panel .card-header')->click();
     $driver->find_element_by_id('filter-group')->send_keys('Test parent / .* test$');
@@ -148,11 +133,29 @@ subtest 'filtering subgroups' => sub {
     $ele = $driver->find_element_by_id('filter-time-limit-days');
     $ele->click();
     $ele->send_keys(Selenium::Remote::WDKeys->KEYS->{end}, '0');    # appended
-    $driver->find_element('#filter-form button')->click();
-    $url .= '?group=Test+parent+%2F+.*+test%24&default_expanded=1&limit_builds=30&time_limit_days=140#';
-    is($driver->get_current_url, $url, 'URL parameters for filter are correct');
-    is(scalar @{$driver->find_elements('opensuse', 'link_text')}, 0, "child group 'opensuse' filtered out");
+    $driver->find_element('#filter-apply-button')->click();
+    wait_for_ajax();
+    $url .= '?group=Test%20parent%20%2F%20.*%20test%24';
+    $url .= '&default_expanded=1&limit_builds=30&time_limit_days=140&interval=';
+    is($driver->get_current_url,                                  $url, 'URL parameters for filter are correct');
+    is(scalar @{$driver->find_elements('opensuse', 'link_text')}, 0,    "child group 'opensuse' filtered out");
     isnt(scalar @{$driver->find_elements('opensuse test', 'link_text')}, 0, "child group 'opensuse test' present'");
+};
+
+subtest 'View grouped by group' => sub {
+    $driver->get('/parent_group_overview/' . $parent_groups->find({name => 'Test parent'})->id);
+    $driver->find_element_by_id('grouped_by_group_tab')->click();
+    is(
+        $driver->find_element_by_id('grouped_by_group_tab')->get_attribute('class'),
+        'active parent_group_overview_grouping_active',
+        'grouped by group link not active'
+    );
+    isnt(
+        $driver->find_element_by_id('grouped_by_build_tab')->get_attribute('class'),
+        'active parent_group_overview_grouping_active',
+        'grouped by group link remains active'
+    );
+    $driver->find_element_by_id('grouped_by_group')->is_displayed();
 };
 
 kill_driver();

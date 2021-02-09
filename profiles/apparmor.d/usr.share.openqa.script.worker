@@ -3,7 +3,7 @@
 
 # ------------------------------------------------------------------
 #
-#    Copyright (C) 2015 SUSE Linux GmbH
+#    Copyright (C) 2015 SUSE LLC
 #
 #    This program is free software; you can redistribute it and/or
 #    modify it under the terms of version 2 of the GNU General Public
@@ -52,6 +52,7 @@
   /proc/filesystems r,
   /proc/meminfo r,
   /proc/sys/vm/overcommit_memory r,
+  /proc/sys/fs/pipe-max-size r,
   /run/nscd/group r,
   /run/openqa/vde.ctl/* rw,
   /run/udev/queue.bin r,
@@ -75,6 +76,7 @@
   /usr/bin/env rix,
   /usr/bin/find rix,
   /usr/bin/flock rix,
+  /usr/bin/fuser rix,
   /usr/bin/git rix,
   /usr/bin/gzip rix,
   /usr/bin/head rix,
@@ -100,8 +102,9 @@
   /usr/bin/tail rix,
   /usr/bin/tee rix,
   /usr/bin/uname rix,
-  /usr/bin/unxz rix,
   /usr/bin/unixcmd rix,
+  /usr/bin/unxz rix,
+  /usr/bin/unzip-plain rix,
   /usr/bin/x3270 cx,
   /usr/bin/xterm-console rix,
   /usr/bin/xz rix,
@@ -112,12 +115,14 @@
   /usr/lib/git/git rix,
   /usr/lib/git/git-remote-http rix,
   /usr/lib/os-autoinst/videoencoder rix,
+  /usr/bin/ffmpeg rix,
   /usr/lib/utempter/utempter rix,
   /usr/sbin/ipmiconsole rix,
   /usr/share/openqa/lib/** r,
   /usr/share/openqa/lib/DBIx/Class/Timestamps.pm r,
   /usr/share/openqa/lib/OpenQA/** r,
   /usr/share/openqa/script/worker r,
+  /usr/share/git-core/templates/ r,
   /usr/share/git-core/templates/** r,
   /usr/share/qemu/* rk,
   /usr/share/qemu/keymaps/* r,
@@ -125,7 +130,7 @@
   /var/lib/openqa/cache/** rwk,
   /var/lib/openqa/pool/ r,
   /var/lib/openqa/pool/*/ r,
-  /var/lib/openqa/pool/*/** rwk,
+  /var/lib/openqa/pool/*/** rwkl,
   /var/lib/openqa/share/* r,
   /var/lib/openqa/share/factory/hdd/ r,
   /var/lib/openqa/share/factory/hdd/* rk,
@@ -133,6 +138,8 @@
   /var/lib/openqa/share/factory/iso/* rk,
   /var/lib/openqa/share/factory/iso/fixed/* r,
   /var/lib/openqa/share/factory/other/* r,
+  /var/lib/openqa/share/factory/tmp/ rw,
+  /var/lib/openqa/share/factory/tmp/** rw,
   /var/lib/openqa/share/tests/** r,
   owner /sys/**/ rw,
 
@@ -156,6 +163,7 @@
   profile /usr/bin/lscpu {
     #include <abstractions/base>
 
+    /proc/ r,
     /proc/** r,
     /sys/devices/** r,
     /usr/bin/lscpu mr,

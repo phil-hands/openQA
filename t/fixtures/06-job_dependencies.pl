@@ -1,3 +1,6 @@
+use strict;
+use warnings;
+
 [
     # parallel dependency for running test
     JobDependencies => {
@@ -13,4 +16,3 @@
         dependency    => 1
     },
 ]
-# vim: set sw=4 et:

@@ -1,0 +1,55 @@
+% layout 'bootstrap';
+% title 'Test suites';
+
+% content_for 'ready_function' => begin
+    setupAdminTable(<%= is_admin_js %>);
+% end
+
+<div class="row">
+    <div class="col-sm-12">
+        <h2><%= title %></h2>
+
+        %= include 'layouts/info'
+
+        <span class="search-popover">
+            <%= help_popover('Search' => '
+                <p>Allows to filter the testsuites.</p>
+                <p>You can use regular expressions for searching.</p>
+                <p>
+                    <strong>Example</strong><br>
+                    <code>^textmode$</code>
+                </p>
+                ', undef, undef, 'left');
+            %>
+        </span>
+
+        <table class="admintable table table-striped" id='test-suites'>
+            <thead>
+                <tr>
+                    <th class="col_value">Name</th>
+                    <th class="col_settings_list">Settings</th>
+                    <th class="col_description">
+                        Description
+                        <%= help_popover('Help for description' =>
+                            'An optional description can be entered for each
+                            test suite which is displayed as description on
+                            each test row on the test overview page
+                            <i>/tests/overview</i>',
+                            'https://github.com/os-autoinst/openQA/pull/1094' => 'pull request')
+                        %>
+                    </th>
+                    <th class="col_action">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+        % if (is_admin) {
+        <div class="text-center">
+            <input value="New test suite" onclick="addAdminTableRow();" type="button" class="btn btn-default"/>
+        </div>
+        % }
+        <input type="hidden" id="admintable_api_url" value="/api/v1/test_suites"/>
+    </div>
+
+</div>

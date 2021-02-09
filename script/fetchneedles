@@ -1,43 +1,49 @@
-#!/bin/bash
-set -e
-: ${dbuser:="geekotest"}
+#!/bin/sh -e
+[ "$1" = "-h" ] || [ "$1" = "--help" ] && echo "Get openSUSE tests and needles from https://github.com/os-autoinst/os-autoinst-distri-opensuse" && exit
 
-: ${dist:="opensuse"}
-: ${giturl:="git://github.com/os-autoinst/os-autoinst-distri-opensuse.git"}
-: ${branch:="master"}
-: ${email:="openqa@$HOSTNAME"}
-: ${username:="openQA web UI"}
-: ${product:="$dist"}
+: "${dbuser:="geekotest"}"
 
-: ${needles_separate:="1"}
-: ${needles_giturl:="git://github.com/os-autoinst/os-autoinst-needles-opensuse.git"}
-: ${needles_branch:="master"}
+: "${dist:="opensuse"}"
+: "${giturl:="git://github.com/os-autoinst/os-autoinst-distri-opensuse.git"}"
+: "${branch:="master"}"
+: "${email:="openqa@$HOST"}"
+: "${username:="openQA web UI"}"
+: "${product:="$dist"}"
 
-: ${updateall:="0"}
+: "${needles_separate:="1"}"
+: "${needles_giturl:="git://github.com/os-autoinst/os-autoinst-needles-opensuse.git"}"
+: "${needles_branch:="master"}"
+
+: "${updateall:="0"}"
+: "${force:="0"}"
 
 dir="/var/lib/openqa/share/tests"
 if [ -w / ]; then
-	if [ ! -e "$dir/$dist" ]; then
-		mkdir -p "$dir/$dist"
-		chown $dbuser:www "$dir/$dist"
-	fi
-	echo "running as root, re-exec as $dbuser ..."
-	exec sudo -u $dbuser env \
-		dist="$dist" \
-		giturl="$giturl" \
-		branch="$branch" \
-		email="$email" \
-		username="$username" \
-		needles_separate="$needles_separate" \
-		needles_giturl="$needles_giturl" \
-		needles_branch="$needles_branch" \
-		updateall="$updateall" \
-		"$0" "$@"
-	exit 1
+    if [ ! -e "$dir/$dist" ]; then
+        mkdir -p "$dir/$dist"
+        chown $dbuser:www "$dir/$dist"
+    fi
+    echo "running as root, re-exec as $dbuser ..."
+    exec sudo -u $dbuser env \
+        dist="$dist" \
+        giturl="$giturl" \
+        branch="$branch" \
+        email="$email" \
+        username="$username" \
+        needles_separate="$needles_separate" \
+        needles_giturl="$needles_giturl" \
+        needles_branch="$needles_branch" \
+        updateall="$updateall" \
+        "$0" "$@"
+    exit 1
 fi
 
-needlesdir()
-{
+fail() {
+    echo "$*" >&2
+    exit 1
+}
+
+needlesdir() {
     # new layout since
     # https://github.com/os-autoinst/os-autoinst-distri-opensuse/pull/920
     if [ -d "$dir/$dist/products" ]; then
@@ -47,57 +53,69 @@ needlesdir()
     fi
 }
 
-do_fetch()
-{
-	local target=$1
-	echo fetching $target
-	git fetch -q
-	git rebase -q
-	if [ "$needles_separate" = 1 ]; then
-	    if test -d products; then
-		for nd in products/*/needles; do
-		    cd $target/$nd && (
-			git fetch -q
-			git rebase -q
-		    )
-		done
-            else
-		cd $target/needles
-                git fetch -q
-		git rebase -q
-		cd ../..
-            fi
-	fi
+git_update() {
+    branch="${1:-"master"}"
+    git gc --auto --quiet
+    git fetch -q origin
+    # Clear any uncommitted changes that would prevent a rebase
+    [ "$force" = 1 ] && git reset -q --hard HEAD
+    git rebase -q origin/"$branch" || fail 'Use force=1 to discard uncommitted changes before rebasing'
+}
+
+# For needles repos because of needle saving we might end up in conflict, i.e.
+# detached HEAD so we need to repair this
+git_update_needles() {
+    git_update $needles_branch
+    if [ "$(git rev-parse --abbrev-ref --symbolic-full-name HEAD)" = "HEAD" ]; then
+        git branch -D $needles_branch
+        git checkout -b $needles_branch
+        git branch --set-upstream-to=origin/$needles_branch $needles_branch
+        git push origin HEAD:$needles_branch
+    fi
+}
+
+do_fetch() {
+    target=$1
+    git_update "$branch"
+    [ "$needles_separate" = 1 ] || return 0
+    if test -d products; then
+        for nd in products/*/needles; do
+            [ -h "$target/$nd" ] && continue
+            (cd "$target/$nd" && git_update_needles)
+        done
+    else
+        (cd "$target/needles" && git_update_needles)
+    fi
 }
 
 if [ "$updateall" = 1 ]; then
-	cd "$dir"
-	fail=0
-	for repo in *; do
-		target="$dir/$repo"
-		! [ -L "$target" ] || continue
-		[ -d "$target/.git" ] || continue
-		cd "$target"
-		do_fetch "$target" || fail=1
-	done
-	exit "$fail"
+    cd "$dir"
+    fail=0
+    for repo in *; do
+        target="$dir/$repo"
+        [ -h "$target" ] && continue
+        [ -d "$target/.git" ] || continue
+        (cd "$target" && do_fetch "$target") || fail=1
+    done
+    exit "$fail"
 else
-	target="$dir/$dist"
-	mkdir -p "$target"
-	cd "$target"
-	if [ ! -d .git ]; then
-		echo "cloning $giturl shallow. Call 'git fetch --unshallow' for full history"
-		git clone --depth 1 -b "$branch" "$giturl" .
-		git config user.email "$email"
-		git config user.name "$username"
-		if [ "$needles_separate" = 1 ]; then
-		    [ -d $(needlesdir) ] || mkdir $(needlesdir)
-		    cd $(needlesdir)
-		    git clone --depth 1 -b "$needles_branch" "$needles_giturl" .
-		    git config user.email "$email"
-		    git config user.name "$username"
-		fi
-	else
-		do_fetch "$target"
-	fi
+    target="$dir/$dist"
+    mkdir -p "$target"
+    cd "$target"
+    if [ ! -d .git ]; then
+        echo "cloning $giturl shallow. Call 'git fetch --unshallow' for full history"
+        git clone --depth 1 -b "$branch" "$giturl" .
+        git config user.email "$email"
+        git config user.name "$username"
+        if [ "$needles_separate" = 1 ]; then
+            needlesdir=$(needlesdir)
+            [ -d "$needlesdir" ] || mkdir "$needlesdir"
+            cd "$needlesdir"
+            git clone --depth 1 -b "$needles_branch" "$needles_giturl" .
+            git config user.email "$email"
+            git config user.name "$username"
+        fi
+    else
+        do_fetch "$target"
+    fi
 fi

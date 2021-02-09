@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (C) 2015 SUSE Linux Products GmbH
+# Copyright (C) 2015-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -99,12 +99,12 @@ BEGIN {
 }
 
 use FindBin;
-use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::RealBin/../lib";
 use Getopt::Long;
 Getopt::Long::Configure("no_ignore_case");
 
 use OpenQA::Worker;
-use OpenQA::Worker::Common;
+use OpenQA::Log 'log_info';
 
 my %options;
 
@@ -126,14 +126,13 @@ usage(0) if ($options{help});
 # count workers from 1 if not set - if tap devices are used worker would try to use tap -1
 $options{instance} ||= 1;
 
-my ($worker_settings, $host_settings) = OpenQA::Worker::Common::read_worker_config($options{instance}, $options{host});
-$worker_settings->{LOG_LEVEL} = 'debug' if $options{verbose};
-$OpenQA::Worker::Common::worker_settings = $worker_settings;
-# XXX: this should be sent to the scheduler to be included in the worker's table
-$ENV{QEMUPORT} = ($options{instance}) * 10 + 20002;
-$ENV{VNC}      = ($options{instance}) + 90;
+my $worker = OpenQA::Worker->new(\%options);
+$worker->log_setup_info();
 
-OpenQA::Worker::init($host_settings, \%options);
-exit OpenQA::Worker::main($host_settings);
+sub catch_exit { $worker->handle_signal(@_) }    # uncoverable statement
+$SIG{HUP}  = \*catch_exit;
+$SIG{TERM} = \*catch_exit;
+$SIG{INT}  = \*catch_exit;
 
-# vim: set sw=4 sts=4 et:
+exit $worker->exec();
+

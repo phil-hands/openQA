@@ -17,7 +17,7 @@ package OpenQA::WebAPI::Description;
 use strict;
 use warnings;
 
-use OpenQA::Utils 'log_warning';
+use OpenQA::Log 'log_warning';
 use Mojo::File 'path';
 use Pod::POM;
 use Exporter 'import';
@@ -41,7 +41,8 @@ sub get_pod_from_controllers {
     my $tree;
     my %controllers;
     # Path where openQA is installed
-    my $code_base = $ENV{OPENQA_CODEBASE} ? $ENV{OPENQA_CODEBASE} : '/usr/share/openqa';
+    my $app       = shift;
+    my $code_base = $app->home;
     my $ctrlrpath = path($code_base)->child('lib', 'OpenQA', 'WebAPI', 'Controller', 'API', 'V1');
 
     # Review all routes to get controllers, and from there get the .pm filename to parse for POD
@@ -130,4 +131,3 @@ sub _itemize {
 }
 
 1;
-# vim: set sw=4 et:

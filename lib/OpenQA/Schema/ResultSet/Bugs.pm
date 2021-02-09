@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::ResultSet::Bugs;
 
@@ -21,7 +20,9 @@ use warnings;
 
 use base 'DBIx::Class::ResultSet';
 
-# this method returns the bug if it has already been refreshed (and undef otherwise)
+use OpenQA::App;
+
+# inserts the bug if it is new, returns the bug if it has been refreshed, undef otherwise
 sub get_bug {
     my ($self, $bugid, %attrs) = @_;
     return unless $bugid;
@@ -30,7 +31,7 @@ sub get_bug {
 
     if (!$bug->in_storage) {
         $bug->insert;
-        $OpenQA::Utils::app->emit_event(openqa_bug_create => {id => $bug->id, bugid => $bug->bugid, implicit => 1});
+        OpenQA::App->singleton->emit_event(openqa_bug_create => {id => $bug->id, bugid => $bug->bugid, implicit => 1});
     }
     elsif ($bug->refreshed && $bug->existing) {
         return $bug;

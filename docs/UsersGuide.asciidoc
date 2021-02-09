@@ -13,6 +13,234 @@ For administrators it is recommend to have read the
 <<Installing.asciidoc#installing,Installation Guide>> first to understand the structure
 of components as well as the configuration of an installed instance.
 
+
+== Using job templates to automate jobs creation
+[id="job_templates"]
+
+=== The problem
+
+When testing an operating system, especially when doing continuous testing,
+there is always a certain combination of jobs, each one with its own
+settings, that needs to be run for every revision. Those combinations can be
+different for different 'flavors' of the same revision, like running a different
+set of jobs for each architecture or for the Full and the Lite versions. This
+combinational problem can go one step further if openQA is being used for
+different kinds of tests, like running some simple pre-integration tests
+for some snapshots combined with more comprehensive post-integration tests for
+release candidates.
+
+This section describes how an instance of openQA can be configured using the
+options in the admin area to automatically create all the required jobs for each
+revision of your operating system that needs to be tested. If you are starting
+from scratch, you should probably go through the following order:
+
+1. Define machines in 'Machines' menu
+2. Define medium types (products) you have in 'Medium types' menu
+3. Specify various collections of tests you want to run in the 'Test suites' menu
+4. Define job groups in 'Job groups' menu for groups of tests
+5. Select individual 'Job groups' and decide what combinations make sense and
+   need to be tested
+
+Machines, mediums, test suites and job templates  can all set various
+configuration variables. The so called job templates within the job groups
+define how the test suites, mediums and machines should be combined in various
+ways to produce individual 'jobs'. All the variables from the test suite,
+medium, machine and job template are combined and made available to the actual
+test code run by the 'job', along with variables specified as part of the job
+creation request. Certain variables also influence openQA's and/or
+os-autoinst's own behavior in terms of how it configures the environment for
+the job. Variables that influence os-autoinst's behavior are documented in the
+file `doc/backend_vars.asciidoc` in the os-autoinst repository.
+
+In openQA we can parameterize a test to describe for what product it will run
+and for what kind of machines it will be executed. For example, a test suite
+`kde` can be run for any product that has the KDE software stack installed,
+like `openSUSE-DVD-x86_64` and `openSUSE-NET-i586`, and can be tested in
+different x86-64 and i586 machines like `64bit`, `64bit_USBBoot`, `32bit`. In
+this example we could have the following test scenarios considering that the
+"`x86_64`" flavor is not compatible with the `32bit` machine:
+
+* openSUSE-DVD-x86_64-kde-64bit
+* openSUSE-DVD-x86_64-kde-64bit_USBBoot
+* openSUSE-NET-i586-kde-64bit
+* openSUSE-NET-i586-kde-64bit_USBBoot
+* openSUSE-NET-i586-kde-32bit
+
+For every test scenario we need to configure a different instance of the test
+backend, for example `os-autoinst`, with a different set of parameters.
+
+
+=== Machines
+
+You need to have at least one machine set up to be able to run any
+tests. Those machines represent virtual machine types that you want to
+test. To make tests actually happen, you have to have an 'openQA
+worker' connected that can fulfill those specifications.
+
+* *Name.* User defined string - only needed for operator to identify the machine
+configuration.
+
+* *Backend.* What backend should be used for this machine. Recommended value is
+`qemu` as it is the most tested one, but other options (such as `kvm2usb` or `vbox`)
+are also possible.
+
+* *Variables* Most machine variables influence os-autoinst's behavior in terms
+of how the test machine is set up. A few important examples:
+** `QEMUCPU` can be 'qemu32' or 'qemu64' and specifies the architecture of the
+   virtual CPU.
+** `QEMUCPUS` is an integer that specifies the number of cores you wish for.
+** `LAPTOP` if set to 1, QEMU will create a laptop profile.
+** `USBBOOT` when set to 1, the image will be loaded through an
+   emulated USB stick.
+
+
+=== Medium Types (products)
+
+A medium type (product) in openQA is a simple description without any concrete
+meaning. It basically consists of a name and a set of variables that
+define or characterize this product in os-autoinst.
+
+Some example variables used by openSUSE are:
+
+* `ISO_MAXSIZE` contains the maximum size of the product. There is a
+  test that checks that the current size of the product is less or
+  equal than this variable.
+* `DVD` if it is set to 1, this indicates that the medium is a DVD.
+* `LIVECD` if it is set to 1, this indicates that the medium is a live
+  image (can be a CD or USB)
+* `GNOME` this variable, if it is set to 1, indicates that it is a GNOME
+  only distribution.
+* `PROMO` marks the promotional product.
+* `RESCUECD` is set to 1 for rescue CD images.
+
+
+=== Test Suites
+
+A test suite consists of a name and a set of test variables that are used
+inside this particular test together with an optional description. The test
+variables can be used to parameterize the actual test code and influence the
+behaviour according to the settings.
+
+Some sample variables used by openSUSE are:
+
+* `BTRFS` if set, the file system will be BtrFS.
+* `DESKTOP` possible values are 'kde' 'gnome' 'lxde' 'xfce' or
+  'textmode'. Used to indicate the desktop selected by the user during
+  the test.
+* `DOCRUN` used for documentation tests.
+* `DUALBOOT` dual boot testing, needs HDD_1 and HDDVERSION.
+* `ENCRYPT` encrypt the home directory via YaST.
+* `HDDVERSION` used together with HDD_1 to set the operating system
+  previously installed on the hard disk.
+* `INSTALLONLY` only basic installation.
+* `INSTLANG` installation language. Actually used only in documentation
+  tests.
+* `LIVETEST` the test is on a live medium, do not install the distribution.
+* `LVM` select LVM volume manager.
+* `NICEVIDEO` used for rendering a result video for use in show rooms,
+  skipping ugly and boring tests.
+* `NOAUTOLOGIN` unmark autologin in YaST
+* `NUMDISKS` total number of disks in QEMU.
+* `REBOOTAFTERINSTALL` if set to 1, will reboot after the installation.
+* `SCREENSHOTINTERVAL` used with NICEVIDEO to improve the video quality.
+* `SPLITUSR` a YaST configuration option.
+* `TOGGLEHOME` a YaST configuration option.
+* `UPGRADE` upgrade testing, need HDD_1 and HDDVERSION.
+* `VIDEOMODE` if the value is 'text', the installation will be done in
+  text mode.
+
+Some of the variables usually set in test suites that influence openQA
+and/or os-autoinst's own behavior are:
+
+* `HDDMODEL` variable to set the HDD hardware model
+* `HDDSIZEGB` hard disk size in GB. Used together with BtrFS variable
+* `HDD_1` path for the pre-created hard disk
+* `RAIDLEVEL` RAID configuration variable
+* `QEMUVGA` parameter to declare the video hardware configuration in QEMU
+
+
+=== Job Groups
+
+The job groups are the place where the actual test scenarios are defined by
+the selection of the medium type, the test suite and machine together with a
+priority.
+
+The priority is used in the scheduler to choose the next job. If multiple jobs
+are scheduled and their requirements for running them are fulfilled the ones
+with a lower value for the priority are triggered. The id is the second
+sorting key: Of two jobs with equal requirements and same priority the one
+with lower id is triggered first.
+
+Job groups themselves can be created over the web UI as well as the REST API.
+Job groups can optionally be nested into categories. The display order of job
+groups and categories can be configured by drag-and-drop in the web UI.
+
+The scenario definitions within the job groups can be created and configured
+by different means:
+
+* A simple web UI wizard which is automatically shown for job groups when a
+  new medium is added to the job group.
+
+* An intuitive table within the web UI for adding additional test scenarios to
+  existing media including the possibility to configure the priority values.
+
+* The scripts `openqa-load-templates` and `openqa-dump-templates` to quickly
+  dump and load the configuration from custom plain-text dump format files
+  using the REST API.
+
+* Using declarative schedule definitions in the YAML format using REST API
+  routes or an online-editor within the web UI including a syntax checker.
+
+
+=== Variable expansion
+
+Any variable defined in Test Suite, Machine, Product or Job Template table can
+refer to another variable using this syntax: `%NAME%`. When the test job is created,
+the string will be substituted with the value of the specified variable at that time.
+
+For example this variable defined for Test Suite:
+
+[source,sh]
+--------------------------------------------------------------------------------
+PUBLISH_HDD_1 = %DISTRI%-%VERSION%-%ARCH%-%DESKTOP%.qcow2
+--------------------------------------------------------------------------------
+
+may be expanded to this job variable:
+
+[source,sh]
+--------------------------------------------------------------------------------
+PUBLISH_HDD_1 = opensuse-13.1-i586-kde.qcow2
+--------------------------------------------------------------------------------
+
+=== Variable precedence
+
+It's possible to define the same variable in multiple places that would all be
+used for a single job - for instance, you may have a variable defined in both
+a test suite and a product that appear in the same job template. The precedence
+order for variables is as follows (from lowest to highest):
+
+* Product
+* Machine
+* Test suite
+* Job template
+* API POST query parameters
+
+That is, variable values set as part of the API request that triggers the jobs will
+'win' over values set at any of the other locations.
+
+If you need to override this precedence - for example, you want the value set in
+one particular test suite to take precedence over a setting of the same value from
+the API request - you can add a leading + to the variable name. For instance, if
+you set `+VARIABLE = foo` in a test suite, and passed `VARIABLE=bar` in the API
+request, the test suite setting would 'win' and the value would be foo.
+
+If the same variable is set with a + prefix in multiple places, the same precedence
+order described above will apply to those settings.
+
+Note that the `WORKER_CLASS` variable is not overridden in the way described above.
+Instead multiple occurrences are combined.
+
+
 == Use of the web interface
 
 In general the web UI should be intuitive or self-explanatory. Look out for the
@@ -25,6 +253,21 @@ UI elements to control the parameters, for example to look for more older
 builds or only show failed jobs or other settings. Additionally, the query
 parameters can be tweaked by hand if you want to provide a link to specific
 views.
+
+
+=== Description of test suites
+
+Test suites can be described using API commands or the admin table for any operator using the web UI.
+
+[[test_suite_description_edit]]
+.Entering a test suite description in the admin table using the web interface:
+image::images/test_suite_description_edit.png[test suite description edit field]
+
+If a description is defined, the name of the test suite on the tests overview page shows up as a link. Clicking the link will show the description in a popup. The same syntax as for comments can be used, that is Markdown with custom extensions such as shortened links to ticket systems.
+
+[[test_suite_description_shown]]
+.popover in test overview with content as configured in the test suites database:
+image::images/test_suite_description_shown.png[test suite description popup]
 
 
 === /tests/overview - Customizable test overview page
@@ -42,21 +285,6 @@ image::images/tests-overview_multiple_groups.png[test overview page showing mult
 
 Specifying multiple groups with no build will yield the latest build of the
 first group. This can be useful to have a static URL for bookmarking.
-
-
-=== Description of test suites
-
-Test suites can be described using API commands or the admin table for any operator using the web UI.
-
-[[test_suite_description_edit]]
-.Entering a test suite description in the admin table using the web interface:
-image::images/test_suite_description_edit.png[test suite description edit field]
-
-If a description is defined, the name of the test suite on the tests overview page shows up as a link. Clicking the link will show the description in a popup. The same syntax as for comments can be used, that is Markdown with custom extensions such as shortened links to ticket systems.
-
-[[test_suite_description_shown]]
-.popover in test overview with content as configured in the test suites database:
-image::images/test_suite_description_shown.png[test suite description popup]
 
 
 === Review badges ===
@@ -96,13 +324,23 @@ Related issue: https://progress.opensuse.org/issues/10212[#10212]
 'Hint:' You can also write (or copy-paste) full links to bugs and issues. The links are automatically changed to the shortlinks (e.g. `https://progress.opensuse.org/issues/11110` turns into https://progress.opensuse.org/issues/11110[poo#11110]). Related issue: https://progress.opensuse.org/issues/11110[[line-through]*poo#11110*]
 
 Also github pull requests and issues can be linked using the generic format
-+`<marker>[#<project/repo>]#<id>`+, e.g. https://github.com/os-autoinst/openQA/issues/1234[gh#os-autoinst/openQA#1234], see https://github.com/os-autoinst/openQA/pull/973[gh#973]
+``<marker>[#<project/repo>]#<id>``, e.g. https://github.com/os-autoinst/openQA/issues/1234[gh#os-autoinst/openQA#1234], see https://github.com/os-autoinst/openQA/pull/973[gh#973]
 
 All issue references are stored within the internal database of openQA. The status can be updated using the `/bugs` API route for example using external tools.
 
 [[labels_closed_tickets]]
 .Example for visualization of closed issue references. Upside down icons in red visualize closed issues.
 image::images/labels_closed_tickets.png[Example for visualization of closed issue references]
+
+
+=== Distinguish product and test issues bugref https://github.com/os-autoinst/openQA/pull/708[gh#708]
+
+"`progress.opensuse.org`" is used to track test issues, bugzilla for product
+issues, at least for SUSE/openSUSE. openQA bugrefs distinguish this and show
+corresponding icons
+
+image::images/tests-overview-issue_icon.png[Different icons for product and test issues]
+
 
 === Build tagging ===
 
@@ -157,74 +395,479 @@ the same page of the table.
 image::images/highlighting_job_dependencies.png[highlighted child jobs]
 
 
-== Asset cleanup ==
+=== Show previous results in test results page https://github.com/os-autoinst/openQA/pull/538[gh#538]
 
-For more information on assets, see 'Asset handling' below.
+On a tests result page there is a tab for "`Next & previous results`" showing
+the result of test runs in the same scenario. This shows next and previous
+builds as well as test runs in the same build. This way you can easily check
+and compare results from before including any comments, labels, bug references
+(see next section). This helps to answer questions like "`Is this a new
+issue`", "`Is it reproducible`", "`has it been seen in before`", "`how does
+the history look like`".
 
-Assets like ISO files consume a huge amount of disk space. Therefore openQA
-removes assets automatically according to configurable limits.
+Querying the database for former test runs of the same scenario is a
+rather costly operation which we do not want to do for multiple test
+results at once but only for each individual test result (1:1 relation).
+This is why this is done in each individual test result and not for a
+complete build.
 
-This section provides an overall description of the cleanup strategy and
-how to configure the limits. Cleanup-related parameter for the REST API can
-be found in the 'Asset handling' section under 'Use of the REST API'.
+Related issue: https://progress.opensuse.org/issues/10212[#10212]
 
-=== Cleanup strategy ===
+Screenshot of the feature:
 
-openQA frequently checks whether assets need to be removed according to
-the configured limits.
+image::images/test_details-next_and_previous.png[Next and previous job results]
 
-To find out whether an asset should be removed, openQA determines by which
-job groups the asset is used. If at least one job within a certain job group
-is using an asset, the asset is considered to be used by that group.
 
-So an asset can be accounted to multiple groups. The assets table which is
-accessible via the admin menu shows these groups for each asset and also
-the latest job.
+=== Link to latest in scenario name https://github.com/os-autoinst/openQA/pull/836[gh#836]
 
-If the size limit for assets by a certain group is exceeded, openQA will
-remove assets accounted to that group:
+Find the always latest job in a scenario with the link after the
+scenario name in the tab "`Next & previous results`" Screenshot:
+image::images/test_details-link_to_latest.png[Link to latest in scenario]
 
-* Assets belonging to old jobs are preferred.
-* Assets belonging to jobs which are still scheduled or running are not
-  considered.
-* Assets which are also accounted to another group that has still space
-  left are not considered.
 
-Assets which do _not_ belong to any group are removed after a configurable
-duration. Keep in mind that this behavior is also enabled on local instances
-and affects all cloned jobs (unless cloned into a job group).
+=== Add `latest' query route https://github.com/os-autoinst/openQA/pull/815[gh#815]
 
-'Fixed' assets - those placed in the +fixed+ subdirectory of the relevant
-asset directory - are counted against the group size limit, but are never
-cleaned up. This is intended for things like base disk images which must
-always be available for a test to work.
+Should always refer to most recent job for the specified scenario.
 
-=== Configure limit for assets within groups ===
+* have the same link for test development, i.e. if one retriggers tests,
+the person has to always update the URL. If there would be a static URL
+even the browser can be instructed to reload the page automatically
+* for linking to the always current execution of the last job within one
+scenario, e.g. to respond faster to the standard question in bug reports
+"`does this bug still happen?`"
 
-To configure the maximum size for the assets of a group, open 'Job groups'
-in the operators menu and select a group. The size limit for assets can be
-configured under 'Edit job group properties'. It also shows the size of
-assets which belong to that group and not to any other group.
+Examples:
 
-Job groups inherit the size limit from their parent group unless the limit
-is set explicitely. The default size limit for groups can be adjusted in
-the +default_group_limits+ section of the openQA config file.
+* `tests/latest?distri=opensuse&version=13.1&flavor=DVD&arch=x86_64&test=kde&machine=64bit`
+* `tests/latest?flavor=DVD&arch=x86_64&test=kde`
+* `tests/latest?test=foobar` - this searches for the most recent job
+using test_suite `foobar' covering all distri, version, flavor, arch,
+machines. To be more specific, add the other query entries.
 
-=== Configure limit for groupless assets ===
 
-Assets not belonging to jobs within a group are deleted automatically
-after a certain number of days. That duration can be adjusted by setting
-+untracked_assets_storage_duration+ in the +misc_limits+ section of the
-openQA config to the desired number of days.
+=== Allow group overview query by result https://github.com/os-autoinst/openQA/pull/531[gh#531]
 
+This allows e.g. to show only failed builds. Could be included like in
+http://lists.opensuse.org/opensuse-factory/2016-02/msg00018.html for
+"`known defects`".
+
+Example: Add query parameters like `…&result=failed&arch=x86_64` to show
+only failed for the single architecture selected.
+
+
+=== Add web UI controls to select more builds in group_overview https://github.com/os-autoinst/openQA/pull/804[gh#804]
+
+The query parameter `limit_builds' allows to show more than the default
+10 builds on demand. Just like we have for configuring previous results,
+the current commit adds web UI selections to reload the same page with
+higher number of builds on demand. For this, the limit of days is
+increased to show more builds but still limited by the selected number.
+
+Example screenshot:
+
+image::images/job_group-limit_builds.png[Select different limit for number of displayed builds]
+
+
+=== More query parameters for configuring last builds https://github.com/os-autoinst/openQA/pull/575[gh#575]
+
+By using advanced query parameters in the URLs you can configure the
+search for builds. Higher numbers would yield more complex database
+queries but can be selected for special investigation use cases with the
+advanced query parameters, e.g. if one wants to get an overview of a
+longer history. This applies to both the index dashboard and group
+overview page.
+
+Example to show up to three week old builds instead of the default two
+weeks with up to 20 builds instead of up to 10 being the default for the
+group overview page:
+
+....
+http://openqa/group_overview/1?time_limit_days=21&limit_builds=20
+....
+
+
+=== Web UI controls to filter only tagged or all builds https://github.com/os-autoinst/openQA/pull/807[gh#807]
+
+Using a new query parameter `only_tagged=[0|1]' the list can be
+filtered, e.g. show only tagged (important) builds.
+
+Example screenshot:
+
+image::images/job_group-limit_builds_tagged.png[Show only tagged or all builds]
+
+Related issue: https://progress.opensuse.org/issues/11052[#11052]
+
+
+=== Carry over bugrefs from previous jobs in same scenario if still failing https://github.com/os-autoinst/openQA/pull/564[gh#564]
+
+It is possible to label all failing tests but tedious to do by a human
+user as many failures are just having the same issue until it gets
+fixed. It helps if a label is preserved for a build that is still
+failing. This idea is inspired by
+https://wiki.jenkins-ci.org/display/JENKINS/Claim+plugin and has been
+activated for bugrefs.
+
+Does not carry over bugrefs over passes: After a job passed a new issue
+in a subsequent fail is assumed to be failed for a different reason.
+
+Related issue: https://progress.opensuse.org/issues/10212[#10212]
+
+Note that the carry-over feature works based on test module level. Only if the
+same module as in a predecessor job fails the latest label is carried over.
+
+For an approach to label jobs based on a search expression found in the job
+reason for incomplete jobs or job logs consider to
+<<Installing.asciidoc#_enable_custom_hook_scripts_on_job_done_based_on_result,Enable custom hook scripts on "job done" based on result>>.
+
+
+=== Pinning comments as group description
+
+This is possible by adding the keyword `pinned-description` anywhere in
+a comment on the group overview page. Then the comment will be shown at
+the top of the group overview page. However, it only works as operator
+or admin.
+
+
+=== Developer mode ===
+
+The developer mode allows to:
+
+* Create or update needles from `assert_screen` mismatches ("re-needling")
+* Pause the test execution (at a certain module) for manual investigation of the SUT
+
+It can be accessed via the "Live View" tab of a running test. Only registered
+users can take control over a tests. Basic instructions and buttons providing further
+information about the different options are already contained on the web page itself.
+So I am not repeating that information here and rather explain the overall workflow.
+
+In case the developer mode in not working on your instance, try to follow the
+<<Pitfalls.asciidoc#debugdevelmode,steps for debugging the developer mode under 'Pitfalls'>>.
+
+==== Workflow for creating or updating needles ====
+
+1. In case a new needles should be created, add the corresponding `assert_screen` calls
+   to your test.
+2. Start the test with the `assert_screen` calls which are supposed to fail.
+3. Select "`assert_screen` timeout" under "Pause on screen mismatch" and confirm.
+4. Wait until the test has paused. There is a button to skip the current timeout to speed
+   this up.
+5. A button for accessing the needle editor should occur. It may take a few seconds till
+   it occurs because the screenshots created so far need to be uploaded from the worker to
+   the web UI. Of course it is also possible to go back to the "Details" tab to create a new
+   needle from any previous screenshot/match available.
+6. After creating the new needle, click the resume button to test whether it worked.
+
+Steps 4. to 6. can be repeated for further needles without restarting the test.
+
+
+=== Job group editor https://github.com/os-autoinst/openQA/pull/2111[gh#2111] ===
+
+Scenarios are defined as part of a job group. The `Edit job group` button exposes the editor.
+
+
+==== YAML job templates editor
+
+Settings can be specified as a key/value pair for each scenario. There is no
+equivalent in the table view so you need to migrate groups to use this feature.
+
+Any settings specified on test suites, machines or products are also used and
+can still be modified independently. However, the YAML document should be
+updated before renaming or deleting test suites, products or machines used by
+it, otherwise that would create an inconsistent state.
+
+Job groups can be updated through the YAML editor or the YAML-related
+REST API routes.
+
+
+==== Deprecated: Table-based (pre-migration)
+
+In old versions openQA had a table-based UI for defining job templates, listed
+in a table per medium. Machines can be added by selecting the architecture
+column and picking a machine from the list. Remove scenarios by removing all
+of their machines. Add new scenarios via the blue Plus icon at the top of the
+table. Changes to the priority are applied immediately.
+
+If job groups still exist showing the old mode, the `Edit YAML` button can be
+used to reveal the YAML editor and migrate a group. After saving for the first
+time, the group can only be configured in YAML. The table view will not be
+shown anymore.
+
+Note that making a backup before migrating groups may be a good idea, for example using
+`openqa-dump-templates`.
+
+To migrate an old job group using the API the current schedule can be
+retrieved in YAML format and sent back to save as a complete YAML document.
+For example for all job groups in the old format:
+
+[source,sh]
+----
+for i in $(ssh openqa.example.com "sudo -u geekotest psql --no-align --tuples-only --command=\"select id from job_groups where template is null order by id;\" openqa") ; do
+    curl -s http://openqa.example.com/api/v1/job_templates_scheduling/$i | openqa-cli api --host http://openqa.example.com -X POST job_templates_scheduling/$i schema=JobTemplates-01.yaml template="$(cat -)"
+done
+----
+
+Note that in some cases you might run into errors where old test suites or
+products have invalid names which the old editor did not enforce:
+
+*Product names* may not contain `:` or `@` characters. Something like
+`Server-DVD-Staging:A` would require replacing the `:` with eg. a `-`.
+
+*Test suites* may not contain `:` or `@` characters. A test suite such as
+`ext4_uefi@staging` would have been allowed previously. The use of the `@`
+as a suffix could be replaced with a `-` or if it is used for variants of
+the same test suite with different settings, settings can be specified in
+YAML directly.
+
+More generally the regular expression `[A-Za-z0-9._*-]+` could be used to
+check if a name is allowed for a product or test suite.
+
+== Configuring job groups via YAML documents
+
+A new job group starts out empty, which in YAML means that the two mandatory
+sections are present but contain nothing. This is what can be seen when
+editing a completely group, and what is also the state to revert to before
+deleting a job group that is no longer useful:
+
+```yaml
+products: {}
+scenarios: {}
+```
+
+A job group is comprised of up to three main sections. `products` defines
+one or more mediums to run the scenarios in the group. At least one needs to
+be specified to be able to run tests. Going by an example of openSUSE 15.1
+the name, distri, flavor and version could be written like so. Note that the
+version is a string in single quotes.
+
+```yaml
+products:
+  opensuse-15.1-DVD-Updates-x86_64:
+    distri: opensuse
+    flavor: DVD-Updates
+    version: '15.1'
+```
+
+To complete the job group at least one scenario has to be added. A scenario is
+a combination of a test suite, a machine and an architecture. Scenarios must
+also be unique across job groups - trying to add it to multiple job groups is
+an error. Case in point, `textmode` and `gnome` could be defined like so:
+
+```yaml
+scenarios:
+  x86_64:
+    opensuse-15.1-DVD-Updates-x86_64:
+    - textmode
+    - gnome:
+      machine: uefi
+      priority: 70
+      settings:
+        QEMUVGA: cirrus
+```
+
+=== Defaults
+
+Now there are two scenarios for `x86_64`, one by giving just the name of the
+test suite and another which has a machine, priority and settings. Both are
+allowed. However since at least one scenario relies on defaults those need to
+be specified once in their own section:
+
+```yaml
+defaults:
+  x86_64:
+    machine: 64bit
+    priority: 50
+```
+
+The defaults section is only required whenever a scenario is not completely
+defined in-place. When it is used, the available parameters are identical to
+those for a single scenario. For instance the example could be amended to use
+settings and run every test suite for that architecture on several machines by
+default.
+
+```yaml
+defaults:
+  x86_64:
+    machine: [64bit, 32bit]
+    priority: 50
+    settings:
+      FOO: '1'
+```
+
+Defaults are always overwritten by explicit parameters on scenarios. Further
+more, all settings can be specified in YAML. Using this together with custom
+job template names, variants of a scenario can even be specified when they
+would normally be considered duplicated:
+
+```yaml
+scenarios:
+  x86_64:
+    opensuse-15.1-DVD-Updates-x86_64:
+    - textmode
+    - gnome:
+      machine: uefi
+      priority: 70
+      settings:
+        QEMUVGA: cirrus
+    - gnome_staging:
+      testsuite: gnome
+      machine: [32bit, 64bit-staging]
+      settings:
+        FOO: '2'
+```
+
+=== YAML Aliases
+
+Even more flexibility can be achieved by using aliases in YAML, or in other
+words re-using a scenario by reference, such as to run the same scenarios in
+two different mediums. `&` is used to define an anchor, while `*` is the alias
+referencing the anchor:
+
+```yaml
+products:
+  opensuse-15.1-DVD-Updates-x86_64:
+    distri: opensuse
+    flavor: DVD-Updates
+    version: '15.1'
+  opensuse-15.2-GNOME-Live-x86_64:
+    distri: opensuse
+    flavor: GNOME-Live
+    version: '15.2'
+scenarios:
+  x86_64:
+    opensuse-15.1-DVD-Updates-x86_64:
+    - textmode
+    - gnome: &gnome
+      machine: uefi
+      priority: 70
+      settings:
+        QEMUVGA: cirrus
+    - gnome_staging: &gnome_staging
+      testsuite: gnome
+      machine: [32bit, 64bit-staging]
+      settings:
+        FOO: '2'
+    opensuse-15.2-GNOME-Live-x86_64:
+    - textmode
+    - gnome: *gnome
+    - gnome_staging: *gnome_staging
+```
+
+=== YAML Merge Keys
+
+Also link:https://yaml.org/type/merge.html[YAML Merge Keys] are supported.
+This way you can reuse previously defined anchors and add other values to it.
+Values in the merged alias will be overriden.
+
+You can even merge more than one alias.
+
+
+```yaml
+products:
+  opensuse-15.1-DVD-Updates-x86_64:
+    distri: opensuse
+    flavor: DVD-Updates
+    version: '15.1'
+  opensuse-15.2-GNOME-Live-x86_64:
+    distri: opensuse
+    flavor: GNOME-Live
+    version: '15.2'
+scenarios:
+  x86_64:
+    opensuse-15.1-DVD-Updates-x86_64:
+    - textmode
+    - gnome:
+      machine: uefi
+      priority: 70
+      settings: &common1
+        QEMUVGA: cirrus
+        FOO: default foo
+    - gnome:
+      machine: [32bit, 64bit-staging]
+      priority: 70
+      settings: &common2
+        QEMUVGA: cirrus
+        FOO: default foo
+        BAR: default bar
+    - gnome_staging:
+      testsuite: gnome
+      machine: [32bit, 64bit-staging]
+      settings:
+        # Merge
+        <<: *common1
+        FOO: foo # overrides the value from the merge keys
+    - gnome_staging:
+      testsuite: gnome
+      machine: [32bit, 64bit-staging]
+      settings:
+        # Merge
+        <<: [*common1, *common2] # *common1 overrides *common2
+        FOO: foo # overrides the value from the merge keys
+```
+
+
+=== General YAML documentation
+
+The job templates are written in link:https://yaml.org/spec/1.2/spec.html[YAML
+1.2]. In YAML, strings usually do not have to be quoted, except if it is a
+special value that would be loaded as a Boolean, NULL or Number. The following
+table shows all special values (See the documentation for the default link:https://yaml.org/spec/1.2/spec.html#id2804923[YAML 1.2 Core Schema] for more information).
+
+[%header,cols="20%,80%"]
+|=======
+| Type
+| Special Values
+
+| `bool`
+| `true \| True \| TRUE \| false \| False \| FALSE`
+
+| `int (Base 8)`
+| `0o7`, `0o10`, `0o755`
+
+Regular Expression: `0o [0-7]+`
+
+| `int (Base 10)`
+| `23`, `+42`, `0123`, `-314`
+
+Regular Expression: `[-\+]? [0-9]+`
+
+| `int (Base 16)`
+| `0xFF`, `0xa`, `0xc0ffee`
+
+Regular Expression: `0x [0-9a-fA-F]+`
+
+| `float (Number)`
+| `3.14`, `+3.14`, `-3.14`, `3.3e+3`, `3.3e3`, `.14`, `001.23`, `.3E-1`, `3e3`
+
+Regular Expression: `[-\+]? ( \. [0-9]+ \| [0-9]+ ( \. [0-9]* )? ) ( [eE] [-\+]? [0-9]+ )?`
+
+| `float (Infinity)`
+| `.inf`, `+.inf`, `-.inf`, `.Inf` etc.
+
+Regular Expression: `[-+]? \. ( inf \| Inf \| INF )`
+
+| `float (Not a number)`
+| `.nan`, `.NaN`, `.NAN`
+
+Regular Expression: `\. ( nan \| NaN \|NAN )`
+
+| `null`
+| `null \| Null \| NULL \| ~ \| # empty`
+
+| `str`
+| everything else
+|=======
+
+Because we are using the Merge Keys feature, also the unquoted string `<<` is
+special.
+If you need the literal string `<<` (for example as a value in the job
+settings), you have to quote it.
 
 == Use of the REST API
 
 openQA includes a _client_ script which - depending on the distribution - is
 packaged independantly if you just want to interface with an existing openQA
-instance without needing to install the full package. Call
-`<openqa-folder>/script/client --help` for help (openSUSE: `openqa-client
---help`).
+instance without needing to install the full package. Call `openqa-cli --help`
+for help.
 
 Basics are described in the
 <<GettingStarted.asciidoc#gettingstarted,Getting Started>> guide.
@@ -232,19 +875,20 @@ Basics are described in the
 
 === Triggering tests
 
-Tests can be triggered over multiple ways, using `clone_job.pl`, `jobs post`,
-`isos post` as well as retriggering existing jobs or whole media over the web
-UI.
+Tests can be triggered over multiple ways, using `openqa-clone-job`,
+`jobs post`, `isos post` as well as retriggering existing jobs or whole media
+over the web UI.
 
 
-==== Cloning existing jobs - clone_job.pl ====
+==== Cloning existing jobs - openqa-clone-job ====
 
 If one wants to recreate an existing job from any publically available openQA
-instance the script `clone_job.pl` can be used to copy the necessary settings
-and assets to another instance and schedule the test. For the test to be
-executed it has to be ensured that matching ressources can be found, for
+instance the script `openqa-clone-job` can be used to copy the necessary
+settings and assets to another instance and schedule the test. For the test to
+be executed it has to be ensured that matching ressources can be found, for
 example a worker with matching `WORKER_CLASS` must be registered. More details
-on `clone_job.pl` can be found in <<WritingTests.asciidoc#writingtests,Writing Tests>>.
+on `openqa-clone-job` can be found in
+<<WritingTests.asciidoc#writingtests,Writing Tests>>.
 
 
 ==== Spawning single new jobs - jobs post ====
@@ -270,12 +914,12 @@ parameters.
 [horizontal]
 .The following scheduling parameters exist
 
-_NO_OBSOLETE:: Do not obsolete jobs in older builds with same DISTRI and VERSION
-(as is the default behavior). With this option jobs which are currently pending,
-for example scheduled or running, are not cancelled when a new medium is triggered.
+_OBSOLETE:: Obsolete jobs in older builds with same DISTRI and VERSION
+(The default behavior is not obsoleting). With this option jobs which are currently pending,
+for example scheduled or running, are cancelled when a new medium is triggered.
 
-_DEPRIORITIZEBUILD:: Setting this switch '1' will not immediately obsolete jobs of old
-builds but rather deprioritize them up to a configurable limit of priority.
+_DEPRIORITIZEBUILD:: Setting this switch to '1' will deprioritize the unfinished jobs of old
+builds, and it will obsolete the jobs once the configurable limit of priority is reached.
 
 _DEPRIORITIZE_LIMIT:: The configurable limit of priority up to which jobs
 should be deprioritized. Needs `_DEPRIORITIZEBUILD`. Default 100.
@@ -284,10 +928,13 @@ _ONLY_OBSOLETE_SAME_BUILD:: Only obsolete (or deprioritize) jobs for the same BU
 This is useful for cases where a new build appearing does not necessarily
 mean existing jobs for earlier builds with the same DISTRI and VERSION are
 no longer interesting, but you still want to be able to re-submit jobs for a
-build and have existing jobs for the exact same build obsoleted.
+build and have existing jobs for the exact same build obsoleted. Needs `_OBSOLETE`.
+
+_SKIP_CHAINED_DEPS:: Do not schedule parent test suites which are specified in `START_AFTER_TEST`
+                     or `START_DIRECTLY_AFTER_TEST`.
 
 _GROUP:: Job templates *not* matching the given group name are ignored. Does *not*
-         affect obsoletion behavior, so you might want to combine with `_NO_OBSOLETE`.
+         affect obsoletion behavior.
 
 _GROUP_ID:: Same as `_GROUP` but allows to specify the group directly by ID.
 _PRIORITY:: Sets the priority for the new jobs (which otherwise defaults to the priority
@@ -297,13 +944,35 @@ Example for `_DEPRIORITIZEBUILD` and `_DEPRIORITIZE_LIMIT`.
 
 [source,sh]
 --------------------------------------------------------------------------------
-openqa-client isos post ISO=my_iso.iso DISTRI=my_distri FLAVOR=sweet \
+openqa-cli api -X POST isos ISO=my_iso.iso DISTRI=my_distri FLAVOR=sweet \
          ARCH=my_arch VERSION=42 BUILD=1234 \
          _DEPRIORITIZEBUILD=1 _DEPRIORITIZE_LIMIT=120 \
 --------------------------------------------------------------------------------
 
 
-==== Asset handling ====
+=== Job template YAML ===
+
+Job groups can be queried via the experimental REST API:
+
+    api/v1/experimental/job_templates_scheduling
+
+The GET request will get the YAML for one or multiple groups while a POST request
+conversely updates the YAML for a particular group.
+
+
+Two scripts using these routes can be used to import and export YAML templates:
+
+[source,sh]
+--------------------------------------------------------------------------------
+openqa-dump-templates --json --group test > test.json
+--------------------------------------------------------------------------------
+
+[source,sh]
+--------------------------------------------------------------------------------
+openqa-load-templates test.json
+--------------------------------------------------------------------------------
+
+== Asset handling ==
 
 Multiple parameters exist to reference "assets" to be used by tests. "Assets" are essentially
 content that is stored by the openQA web-UI and provided to the workers; when sending jobs to
@@ -329,11 +998,11 @@ The parameters treated as assets are as follows. Where you see e.g. `ISO_n`, tha
 * `INITRD` (type `other`)
 
 The values of the above parameters are expected to be the name of a file - or, in the case of
-`REPO_n`, a directory - that exists under the path +/var/lib/openqa/share/factory+ on the openQA
+`REPO_n`, a directory - that exists under the path `/var/lib/openqa/share/factory` on the openQA
 web-UI. That path has subdirectories for each of the asset types, and the file or directory must
 be in the correct subdirectory, so e.g. the file for an asset `HDD_1` must be under
-+/var/lib/openqa/share/factory/hdd+. You may create a subdirectory called +fixed+ for any asset
-type and place assets there (e.g. in +/var/lib/openqa/share/factory/hdd/fixed+ for `hdd`-type
+`/var/lib/openqa/share/factory/hdd`. You may create a subdirectory called `fixed` for any asset
+type and place assets there (e.g. in `/var/lib/openqa/share/factory/hdd/fixed` for `hdd`-type
 assets): this exempts them from the automatic cleanup described under 'Asset cleanup' above.
 Non-fixed assets are always subject to the cleanup.
 
@@ -352,15 +1021,15 @@ assets.
 .The following suffixes exist:
 
 _URL:: Before starting these jobs, try to download these assets into the relevant asset directory
-of the openQA web-UI from trusted domains specified in +/etc/openqa/openqa.ini+. For e.g.,
+of the openQA web-UI from trusted domains specified in `/etc/openqa/openqa.ini`. For e.g.,
 `ISO_1_URL=http://trusted.com/foo.iso` would, if `trusted.com` is set as a trusted domain, cause
-openQA to download the file `foo.iso` to +/var/lib/openqa/share/factory/iso+ and set
+openQA to download the file `foo.iso` to `/var/lib/openqa/share/factory/iso` and set
 `ISO_1=foo.iso`. If you set both `ISO_1` and `ISO_1_URL`, the file pointed to by `ISO_1_URL` will
 be downloaded and renamed to the name set as `ISO_1`.
 
 _DECOMPRESS_URL:: Specify a compressed asset to be downloaded that will be uncompressed by openQA.
 For e.g. `ISO_1_DECOMPRESS_URL=http://host/foo2.iso.xz` will download the file `foo2.iso.xz`,
-uncompress it to `foo2.iso`, store it in +/var/lib/openqa/share/factory/iso+ and set
+uncompress it to `foo2.iso`, store it in `/var/lib/openqa/share/factory/iso` and set
 `ISO_1=foo2.iso`. Again, you can also set `ISO_1` to change the name the file will be downloaded
 and uncompressed as.
 
@@ -376,7 +1045,8 @@ an asset, you can specify e.g. `STORE_HDD_1`. To 'publish' it, you can specify e
 `PUBLISH_HDD_1` or `PUBLISH_PFLASH_VARS`. If you specify `PUBLISH_HDD_1=updated.qcow2`, the
 `HDD_1` disk image as it exists at the end of the test will be uploaded back to the web-UI and
 stored under the name `updated.qcow2`; any other job can then specify `HDD_1=updated.qcow2` to use
-this published image as its `HDD_1`.
+this published image as its `HDD_1`. To force publishing assets even in case
+of a failed job one can try the `FORCE_PUBLISH_HDD_` variable.
 
 The difference between 'storing' and 'publishing' is that when 'storing' an asset, it will be
 altered in some way (currently, by prepending the job ID to the filename) to associate it with
@@ -391,37 +1061,100 @@ in the <<WritingTests.asciidoc,Writing Tests>> guide.
 When using this mechanism you will often also want to use the 'Variable expansion' mechanism
 described in the <<GettingStarted.asciidoc,Getting Started>> guide.
 
-== Developer mode ==
+=== Asset cleanup ===
 
-The developer mode allows to:
+For more information on assets, see 'Asset handling' below.
 
-* Create or update needles from +assert_screen+ mismatches ("re-needling")
-* Pause the test execution (at a certain module) for manual investigation of the SUT
+Assets like ISO files consume a huge amount of disk space. Therefore openQA
+removes assets automatically according to configurable limits.
 
-It can be accessed via the "Live View" tab of a running test. Only registered
-users can take control over a tests. Basic instructions and buttons providing further
-information about the different options are already contained on the web page itself.
-So I am not repeating that information here and rather explain the overall workflow.
+This section provides an overall description of the cleanup strategy and
+how to configure the limits. Cleanup-related parameter for the REST API can
+be found in the 'Asset handling' section under 'Use of the REST API'.
 
-In case the developer mode in not working on your instance, try to follow the
-<<Pitfalls.asciidoc#debugdevelmode,steps for debugging the developer mode under 'Pitfalls'>>.
+==== Cleanup strategy ====
 
-=== Workflow for creating or updating needles ===
+openQA frequently checks whether assets need to be removed according to
+the configured limits.
 
-1. In case a new needles should be created, add the corresponding +assert_screen+s to
-   your test.
-2. Start the test with the +assert_screen+s which are supposed to fail.
-3. Select "Pause on +assert_screen+ failure and confirm.
-4. Wait until the test has paused. There is a button to skip the current timeout to speed
-   this up.
-5. A button for acessing the needle editor should occour. It may take a few seconds till
-   it occurs because the screenshots created so far need to be uploaded from the worker to
-   the web UI. Of course it is also possible to go back to the "Details" tab to create a new
-   needle from any previous screenshot/match available.
-6. After creating the new needle, click the resume button to test whether it worked.
+To find out whether an asset should be removed, openQA determines by which
+groups the asset is used. If at least one job within a certain job group is
+using an asset, the asset is considered to be used by that job group. If
+that job group is within a parent job group, the asset is considered part
+of that parent job group.
 
-Steps 4. to 6. can be repeated for further +assert_screen+s/needles without restarting the
-test.
+So an asset can belong to multiple job groups or parent job groups. The
+assets table which is accessible via the admin menu shows these groups for
+each asset and also the latest job.
+
+While an asset might belong to multiple groups it is only *accounted*
+to the group with the highest asset limit which has still enough room to
+hold that asset. That basically mean that an asset is never counted twice.
+
+If the size limit for assets of a group is exceeded, openQA will remove
+assets which belong to that group:
+
+* Assets belonging to old jobs are preferred.
+* Assets belonging to jobs which are still scheduled or running are not
+  considered.
+* Assets which have been accounted to another group that has still space
+  left are not considered.
+
+Assets which do _not_ belong to any group are removed after a configurable
+duration unless the files are still being updated. Keep in mind that this
+behavior is also enabled on local instances and affects all cloned jobs
+(unless cloned into a job group).
+
+'Fixed' assets - those placed in the `fixed` subdirectory of the relevant
+asset directory - are counted against the group size limit, but are never
+cleaned up. This is intended for things like base disk images which must
+always be available for a test to work.
+
+=== Configure limit for assets within job groups ===
+
+To configure the maximum size for the assets of a group, open 'Job groups'
+in the operators menu and select a group. The size limit for assets can be
+configured under 'Edit job group properties'. It also shows the size of
+assets which belong to that group and not to any other group.
+
+The default size limit for job groups can be adjusted in the
+`default_group_limits` section of the openQA config file.
+
+=== Configure limit for groupless assets ===
+
+Assets not belonging to jobs within a group are deleted automatically
+after a certain number of days. That duration can be adjusted by setting
+`untracked_assets_storage_duration` in the `misc_limits` section of the
+openQA config to the desired number of days.
+
+In less trivial cases where a common limit is not enough or certain assets
+need more fine-grained control, patterns based on the filename can be used.
+The patterns are interpreted as Perl regular expressions and if a pattern
+matches the basename of an asset the specified duration in days will be used.
+In simple cases the pattern is just a match on a word.
+
+Consider the following examples to specify custom limits that would match
+assets with the names `testrepo-latest` and `openSUSE-12.3-x86_64.iso`.
+[source,ini]
+--------------------------------------------------------------------------------
+[assets/storage_duration]
+latest = 30
+openSUSE.+x86_64 = 10
+--------------------------------------------------------------------------------
+
+Note that modifications to the file will count against the limit, so if an
+asset was updated within the timespan it will not be removed.
+
+== CLI interface
+Beside the `daemon` argument to run the actual web service the openQA
+startup script `/usr/share/openqa/script/openqa` supports further arguments.
+
+For a full list of those commands, just invoke `/usr/share/openqa/script/openqa -h`.
+This also works for sub-commands(e.g. `/usr/share/openqa/script/openqa minion -h`,
+`/usr/share/openqa/script/openqa minion job -h`).
+
+Note that `prefork` is only supported for the main web service but not for
+other services like the live view handler.
 
 == Where to now?
 

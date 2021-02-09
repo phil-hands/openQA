@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2018 SUSE LLC
+# Copyright (C) 2015-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,22 +11,31 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Controller::Admin::Workers;
 use Mojo::Base 'Mojolicious::Controller';
 
 use OpenQA::Utils;
-use OpenQA::ServerSideDataTable;
+use OpenQA::WebAPI::ServerSideDataTable;
 use Scalar::Util 'looks_like_number';
 
 sub _extend_info {
     my ($w, $live) = @_;
     $live //= 0;
     my $info = $w->info($live);
-    $info->{name}      = $w->name;
-    $info->{t_updated} = $w->t_updated;
+    $info->{name} = $w->name;
+    my $error = $info->{error};
+    if ($live && $error && ($error =~ qr/(graceful disconnect) at (.*)/)) {
+        $info->{offline_note} = $1;
+        $info->{t_seen}       = $2 . 'Z';
+    }
+    elsif (my $last_seen = $w->t_seen) {
+        $info->{t_seen} = $last_seen->datetime . 'Z';
+    }
+    else {
+        $info->{t_seen} = 'never';
+    }
     return $info;
 }
 
@@ -79,7 +88,7 @@ sub show {
 sub previous_jobs_ajax {
     my ($self) = @_;
 
-    OpenQA::ServerSideDataTable::render_response(
+    OpenQA::WebAPI::ServerSideDataTable::render_response(
         controller => $self,
         resultset  => 'Jobs',
         columns    => [
@@ -115,4 +124,3 @@ sub previous_jobs_ajax {
 }
 
 1;
-# vim: set sw=4 et:

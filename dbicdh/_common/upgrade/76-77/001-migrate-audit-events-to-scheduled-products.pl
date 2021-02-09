@@ -13,13 +13,13 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 use strict;
 use DBIx::Class::DeploymentHandler;
 use OpenQA::Schema;
 use OpenQA::Schema::Result::ScheduledProducts;
+use OpenQA::Log qw(log_info log_warning);
 use OpenQA::Utils;
 use Mojo::JSON qw(decode_json encode_json);
 use Try::Tiny;
@@ -31,8 +31,7 @@ sub {
     my $audit_events
       = $schema->resultset('AuditEvents')->search({event => 'iso_create'}, {order_by => {-asc => 'me.id'}},);
 
-    OpenQA::Utils::log_info(
-        'Migration of "iso_create" audit events to scheduled products is ongoing. This might take a while.');
+    log_info('Migration of "iso_create" audit events to scheduled products is ongoing. This might take a while.');
 
     while (my $event = $audit_events->next) {
         my $event_id = $event->id;
@@ -41,20 +40,20 @@ sub {
             $settings = decode_json($event->event_data);
         };
         if (!$settings) {
-            OpenQA::Utils::log_warning(
+            log_warning(
                 "Unable to read settings from 'iso_create' audit event with ID $event_id. Skipping its migration.");
             next;
         }
 
         my $scheduled_product = $scheduled_products->create(
             {
-                distri  => $settings->{DISTRI}  // '',
-                version => $settings->{VERSION} // '',
-                flavor  => $settings->{FLAVOR}  // '',
-                arch    => $settings->{ARCH}    // '',
-                build   => $settings->{BUILD}   // '',
-                iso     => $settings->{ISO}     // '',
-                status  => OpenQA::Schema::Result::ScheduledProducts::SCHEDULED,
+                distri    => $settings->{DISTRI}  // '',
+                version   => $settings->{VERSION} // '',
+                flavor    => $settings->{FLAVOR}  // '',
+                arch      => $settings->{ARCH}    // '',
+                build     => $settings->{BUILD}   // '',
+                iso       => $settings->{ISO}     // '',
+                status    => OpenQA::Schema::Result::ScheduledProducts::SCHEDULED,
                 settings  => $settings,
                 user_id   => $event->user_id,
                 t_created => $event->t_created,

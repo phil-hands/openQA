@@ -1,6 +1,7 @@
 #!/usr/bin/env perl
 
 # Copyright (C) 2015 Red Hat
+# Copyright (C) 2015-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,15 +16,15 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    use FindBin qw($Bin);
-    use lib "$Bin/../lib";
-}
-
 use strict;
 use warnings;
+
+use FindBin qw($RealBin);
+use lib "$RealBin/../lib";
+
 use OpenQA::Schema::Result::ApiKeys;
 use OpenQA::Schema;
+use OpenQA::Utils 'random_hex';
 use Getopt::Long;
 
 my $email    = 'admin@example.com';
@@ -31,7 +32,23 @@ my $nickname = 'admin';
 my $fullname = 'Administrator';
 my $key      = "";
 my $secret   = "";
-my $help     = 0;
+my $user     = $ARGV[0];
+my $help;
+
+sub usage {
+    print "Usage: $0 [options] user \n\n";
+    print "  --email     : Email address.\n";
+    print "  --nickname  : Nickname.\n";
+    print "  --fullname  : Full name.\n";
+    print "  --key       : API key (will be randomly generated if not set).\n";
+    print "  --secret    : API secret (will be randomly generated if not set).\n";
+    print "  user        : User ID (e.g. OpenID URL).\n";
+    print "usage: $_[0]\n";
+    exit $_[0];
+}
+
+# need to count this *before* calling GetOptions
+my $numargs = scalar @ARGV;
 
 my $result = GetOptions(
     "email=s"    => \$email,
@@ -42,33 +59,18 @@ my $result = GetOptions(
     "help"       => \$help,
 );
 
-my $user = $ARGV[0];
-
-if (!$user || (scalar @ARGV > 1)) {
-    $help = 1;
-}
-
-if ($help) {
-    print "Usage: $0 [options] user \n\n";
-    print "  --email     : Email address.\n";
-    print "  --nickname  : Nickname.\n";
-    print "  --fullname  : Full name.\n";
-    print "  --key       : API key (will be randomly generated if not set).\n";
-    print "  --secret    : API secret (will be randomly generated if not set).\n";
-    print "  user        : User ID (e.g. OpenID URL).\n";
-    exit;
-}
+usage 0 if $help;
+usage 1 unless $result && $user && $numargs > 1;
 
 if (($key || $secret)
     && !($key =~ /^[[:xdigit:]]{16}$/ && $secret =~ /^[[:xdigit:]]{16}$/))
 {
-    warn "--key and --secret must both be 16 digit hexadecimals.\n";
-    exit 1;
+    die "--key and --secret must both be 16 digit hexadecimals.\n";
 }
 
 unless ($key) {
-    $key    = db_helpers::rndhexU;
-    $secret = db_helpers::rndhexU;
+    $key    = random_hex();
+    $secret = random_hex();
     print "Key: $key\n";
     print "Secret: $secret\n";
 }
@@ -89,4 +91,3 @@ my $account = $schema->resultset('Users')->create_user(
 
 $schema->resultset("ApiKeys")->create({user_id => $account->id, key => $key, secret => $secret});
 
-# vim: set sw=4 sts=4 et:

@@ -1,4 +1,4 @@
-# Copyright (C) 2016 SUSE LLC
+# Copyright (C) 2016-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,43 +11,34 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-use strict;
-use warnings;
-
-BEGIN { unshift @INC, 'lib'; }
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Test::Database;
-use Test::More;
+use OpenQA::Test::TimeLimit '10';
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 
 my $args;
-
-my $schema = OpenQA::Test::Database->new->create();
-
-my $t = Test::Mojo->new('OpenQA::WebAPI');
+my $schema = OpenQA::Test::Database->new->create(fixtures_glob => '01-jobs.pl');
+my $t      = Test::Mojo->new('OpenQA::WebAPI');
 
 # export all jobs
-my $r = $t->get_ok("/tests/export")->status_is(200);
-$t->content_type_is('text/plain');
-$t->content_like(qr/Job 99937: opensuse-13.1-DVD-i586-Build0091-kde\@32bit is passed/);
-$t->content_like(qr/Job 99981: opensuse-13.1-GNOME-Live-i686-Build0091-RAID0\@32bit is skipped/);
+$t->get_ok("/tests/export")->status_is(200)->content_type_is('text/plain')
+  ->content_like(qr/Job 99937: opensuse-13.1-DVD-i586-Build0091-kde\@32bit is passed/)
+  ->content_like(qr/Job 99981: opensuse-13.1-GNOME-Live-i686-Build0091-RAID0\@32bit is skipped/);
 
 # filter
-$r = $t->get_ok("/tests/export?from=99981")->status_is(200);
-$t->content_type_is('text/plain');
-$t->content_unlike(qr/Job 99937: opensuse-13.1-DVD-i586-Build0091-kde\@32bit is passed/);
-$t->content_like(qr/Job 99981: opensuse-13.1-GNOME-Live-i686-Build0091-RAID0\@32bit is skipped/);
+$t->get_ok("/tests/export?from=99981")->status_is(200)->content_type_is('text/plain')
+  ->content_unlike(qr/Job 99937: opensuse-13.1-DVD-i586-Build0091-kde\@32bit is passed/)
+  ->content_like(qr/Job 99981: opensuse-13.1-GNOME-Live-i686-Build0091-RAID0\@32bit is skipped/);
 
-$r = $t->get_ok("/tests/export?to=99981")->status_is(200);
-$t->content_type_is('text/plain');
-$t->content_like(qr/Job 99937: opensuse-13.1-DVD-i586-Build0091-kde\@32bit is passed/);
 # to is exclusiv
-$t->content_unlike(qr/Job 99981: opensuse-13.1-GNOME-Live-i686-Build0091-RAID0\@32bit is skipped/);
+$t->get_ok("/tests/export?to=99981")->status_is(200)->content_type_is('text/plain')
+  ->content_like(qr/Job 99937: opensuse-13.1-DVD-i586-Build0091-kde\@32bit is passed/)
+  ->content_unlike(qr/Job 99981: opensuse-13.1-GNOME-Live-i686-Build0091-RAID0\@32bit is skipped/);
 
 done_testing();

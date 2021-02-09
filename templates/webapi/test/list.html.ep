@@ -1,0 +1,80 @@
+% layout 'bootstrap';
+% title 'Test results';
+
+% content_for 'ready_function' => begin
+  is_operator = <%= (is_operator) ? 'true' : 'false' %>;
+  restart_url = "<%= url_for("apiv1_restart", jobid => 'REPLACEIT') %>";
+  cancel_url = "<%= url_for("apiv1_cancel", jobid => 'REPLACEIT') %>";
+  renderTestLists();
+% end
+
+<div>
+    <h2 id="running_jobs_heading">Running jobs</h2>
+    <table id="running" class="display table table-striped" style="width: 100%">
+        <thead>
+            <tr>
+                <th class="name">Medium</th>
+                <th class="test">Test</th>
+                <th>Progress</th>
+                <th class="time">Started</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+</div>
+
+<div>
+    <h2 id="scheduled_jobs_heading">Scheduled jobs</h2>
+    <table id="scheduled" class="display table table-striped" style="width: 100%">
+        <thead>
+            <tr>
+            <th class="name">Medium</th>
+            <th class="name">Test</th>
+            <th>Priority</th>
+            <th class="time">Created</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+</div>
+
+<div>
+  <h2 id="finished_jobs_heading">Finished jobs</h2>
+  <div id="flash-messages-finished-jobs"></div>
+    <div class="row" style="margin-bottom: 10px;">
+            <div class="col-sm-12 col-md-6">
+                %= check_box relevant => '1', 'checked' => 'checked' => (id => 'relevantfilter')
+                %= label_for 'relevantfilter' => 'Show only relevant jobs'
+            </div>
+            <div class="col-sm-12 col-md-6" style="text-align: right;">
+                Result:
+                <select style="min-width: 250px;" id="finished-jobs-result-filter" data-placeholder="Filter by result" class="chosen-select" multiple>
+                    <option>Passed</option>
+                    <option>Softfailed</option>
+                    <option>Failed</option>
+                    <option>Incomplete</option>
+                    <option>Skipped</option>
+                    <option>Obsoleted</option>
+                    <option value="parallel_failed">Parallel failed</option>
+                    <option value="parallel_restarted">Parallel restarted</option>
+                    <option value="user_cancelled">User cancelled</option>
+                    <option value="user_restarted">User restarted</option>
+                    <option value="timeout_exceeded">Timeout exceeded</option>
+                </select>
+            </div>
+    </div>
+    <table id="results" class="display table table-striped no-wrap" style="width: 100%">
+        <thead>
+            <tr>
+                <th class="name">Medium</th>
+                <th>Test</th>
+                <th>Result</th>
+                <th>Finished</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+</div>

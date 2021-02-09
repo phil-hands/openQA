@@ -1,0 +1,89 @@
+% layout 'bootstrap';
+% title 'Workers';
+
+% content_for 'ready_function' => begin
+    loadWorkerTable();
+% end
+
+%# FIXME: move this from view to controller
+% my $percent_online         = $total ? int(($workers_online*100)/$total) : 0;
+% my $percent_busy           = $total ? int(($workers_busy*100)/$total) : 0;
+% my $percent_active_free    = $total ? int(($workers_active_free*100)/$total) : 0;
+% my $percent_busy_online    = $workers_online? int(($workers_active_free*100)/$workers_online) : 0;
+
+<h2><%= title %></h2>
+<div id="summary" class="card">
+    <div class="card-header">Statistics</div>
+    <div class="card-body row">
+        <div class="col-sm-3">
+            Online: <span class="badge badge-success"><%= $workers_online ? $workers_online : 0 %></span>
+        </div>
+        <div class="col-sm-3">
+            Busy: <span class="badge badge-primary"><%= $workers_busy ? $workers_busy : 0 %></span>
+        </div>
+        <div class="col-sm-3">
+            Idle: <span class="badge badge-secondary"><%= $workers_active_free ? $workers_active_free : 0 %></span>
+        </div>
+        <div class="col-sm-3">
+            Total: <span class="badge badge-dark"><%= $total ? $total : 0 %></span>
+        </div>
+    </div>
+</div>
+
+<div class="row"><hr></div>
+
+<div class="row">
+    <div class="col-sm-12">
+
+        %= include 'layouts/info'
+
+        <table id="workers" class="table table-striped">
+            <thead>
+                <tr>
+                    <th>Worker</th>
+                    <th>Host</th>
+                    <th>Class</th>
+                    <th>Arch</th>
+                    <th>Status</th>
+                    <th>Websocket Api version</th>
+                    <th>os-autoinst version</th>
+                    <th>Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+                % for my $workername (sort keys %$workers) {
+                    % my $worker = $workers->{$workername};
+                    <tr id="worker_<%= $worker->{id} %>" >
+                        <td class="worker">
+                            %= link_to( $workername => url_for('admin_worker_show', worker_id => $worker->{id}) )
+                        </td>
+                        <td class="host">
+                            <%= exists $worker->{host} ? $worker->{host} : 'unknown' %>
+                        </td>
+                        <td class="class">
+                            <%= exists $worker->{properties} && $worker->{properties}->{WORKER_CLASS} ? $worker->{properties}->{WORKER_CLASS} : 'unknown' %>
+                        </td>
+                        <td class="arch">
+                            <%= exists $worker->{properties} && $worker->{properties}->{CPU_ARCH} ? $worker->{properties}->{CPU_ARCH} : 'unknown' %>
+                        </td>
+                        <td class="status">
+                            % stash(workername => $workername, worker => $worker);
+                            %= include 'admin/workers/worker_status'
+                        </td>
+                        <td class="version">
+                            <%= exists $worker->{properties} && $worker->{properties}->{WEBSOCKET_API_VERSION} ? $worker->{properties}->{WEBSOCKET_API_VERSION} : 'unknown' %>
+                        </td>
+                        <td class="version">
+                            <%= exists $worker->{properties} && $worker->{properties}->{ISOTOVIDEO_INTERFACE_VERSION} ? $worker->{properties}->{ISOTOVIDEO_INTERFACE_VERSION} : 'unknown' %>
+                        </td>
+                        <td class='action'>
+                            % if($is_admin == 1 && ($worker->{status} eq 'dead' && !$worker->{job})) {
+                                <button class='btn' type='submit' alt='Delete' title='Delete' post_delete_url="<%= url_for('apiv1_worker_delete', worker_id => $worker->{id}) %>" onclick='deleteWorker(this)'><i class="fa fa-trash-alt"></i></button>
+                            % }
+                        </td>
+                    </tr>
+                % }
+            </tbody>
+        </table>
+    </div>
+</div>

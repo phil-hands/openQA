@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2014-2018 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,41 +12,52 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
-
-use Mojo::Base -strict;
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Date::Format 'time2str';
-use Test::More;
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '20';
 use OpenQA::Test::Case;
 use OpenQA::Test::Database;
-use OpenQA::Scheduler;
 
-# create Test DBus bus and service for fake WebSockets and Scheduler call
-my $sh = OpenQA::Scheduler->new;
-
-OpenQA::Test::Case->new->init_data;
+my $test_case   = OpenQA::Test::Case->new;
+my $schema_name = OpenQA::Test::Database->generate_schema_name;
+my $schema      = $test_case->init_data(schema_name => $schema_name);
 
 use OpenQA::SeleniumTest;
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
-# By defining a custom hook we can customize the database based on fixtures.
+my %job_param = (
+    group_id   => 1002,
+    priority   => 35,
+    result     => OpenQA::Jobs::Constants::NONE,
+    state      => OpenQA::Jobs::Constants::RUNNING,
+    t_finished => undef,
+    # 5 minutes ago
+    t_started => time2str('%Y-%m-%d %H:%M:%S', time - 300, 'UTC'),
+    # 1 hour ago
+    t_created => time2str('%Y-%m-%d %H:%M:%S', time - 3600, 'UTC'),
+    TEST      => 'kde',
+    ARCH      => 'x86_64',
+    BUILD     => '0092',
+    DISTRI    => 'opensuse',
+    FLAVOR    => 'NET',
+    MACHINE   => '64bit',
+    VERSION   => '13.1'
+
+);
+
+# Customize the database based on fixtures.
 # We do not need job 99981 right now so delete it here just to have a helpful
 # example for customizing the test database
-sub schema_hook {
-    my $schema = OpenQA::Test::Database->new->create;
-    my $jobs   = $schema->resultset('Jobs');
+sub prepare_database {
+    my $jobs = $schema->resultset('Jobs');
     $jobs->find(99981)->delete;
 
     # add a few comments
@@ -63,24 +73,10 @@ sub schema_hook {
     # add another running job which is half done
     my $running_job = $jobs->create(
         {
-            id         => 99970,
-            group_id   => 1002,
-            priority   => 35,
-            result     => OpenQA::Jobs::Constants::NONE,
-            state      => OpenQA::Jobs::Constants::RUNNING,
-            t_finished => undef,
-            backend    => 'qemu',
-            # 5 minutes ago
-            t_started => time2str('%Y-%m-%d %H:%M:%S', time - 300, 'UTC'),
-            # 1 hour ago
-            t_created => time2str('%Y-%m-%d %H:%M:%S', time - 3600, 'UTC'),
-            TEST      => 'kde',
-            ARCH      => 'x86_64',
-            BUILD     => '0092',
-            DISTRI    => 'opensuse',
-            FLAVOR    => 'NET',
-            MACHINE   => '64bit',
-            VERSION   => '13.1'
+            %job_param,
+            id    => 99970,
+            state => OpenQA::Jobs::Constants::RUNNING,
+            TEST  => 'kde'
         });
     my $running_job_modules = $running_job->modules;
     $running_job_modules->create(
@@ -114,23 +110,30 @@ sub schema_hook {
 
     my $job99940 = $jobs->find(99940);
     my %modules  = (a => 'skip', b => 'ok', c => 'none', d => 'softfail', e => 'fail');
-    while (my ($k, $v) = each %modules) {
-        $job99940->insert_module({name => $k, category => $k, script => $k});
-        $job99940->update_module($k, {result => $v, details => []});
+    foreach my $key (sort keys %modules) {
+        $job99940->insert_module({name => $key, category => $key, script => $key});
+        $job99940->update_module($key, {result => $modules{$key}, details => []});
     }
+
+    my $schedule_job = $jobs->create(
+        {
+            %job_param,
+            id       => 99991,
+            state    => OpenQA::Jobs::Constants::SCHEDULED,
+            TEST     => 'kde_variant',
+            settings =>
+              [{key => 'JOB_TEMPLATE_NAME', value => 'kde_variant'}, {key => 'TEST_SUITE_NAME', value => 'kde'}]});
 }
 
-my $driver = call_driver(\&schema_hook);
-unless ($driver) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
-}
+prepare_database();
+
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
 
 $driver->title_is("openQA", "on main page");
 is($driver->get("/results"), 1, "/results gets");
 like($driver->get_current_url(), qr{.*/tests}, 'legacy redirection from /results to /tests');
 
-wait_for_ajax();
+wait_for_ajax(msg => 'DataTables on "All tests" page');
 
 # Test 99946 is successful (29/0/1)
 my $job99946 = $driver->find_element('#results #job_99946');
@@ -159,26 +162,24 @@ subtest 'running jobs, progress bars' => sub {
     $time->text_like(qr/1[01] minutes ago/, 'right time for running');
 };
 
-$driver->get('/tests');
-wait_for_ajax;
 my @header       = $driver->find_elements('h2');
 my @header_texts = map { OpenQA::Test::Case::trim_whitespace($_->get_text()) } @header;
-my @expected     = ('3 jobs are running', '2 scheduled jobs', 'Last 11 finished jobs');
+my @expected     = ('3 jobs are running', '3 scheduled jobs', 'Last 11 finished jobs');
 is_deeply(\@header_texts, \@expected, 'all headings correctly displayed');
 
 $driver->get('/tests?limit=1');
-wait_for_ajax;
+wait_for_ajax(msg => 'DataTables on "All tests" page with limit');
 @header       = $driver->find_elements('h2');
 @header_texts = map { OpenQA::Test::Case::trim_whitespace($_->get_text()) } @header;
-@expected     = ('3 jobs are running', '2 scheduled jobs', 'Last 1 finished jobs');
+@expected     = ('3 jobs are running', '3 scheduled jobs', 'Last 1 finished jobs');
 is_deeply(\@header_texts, \@expected, 'limit for finished tests can be adjusted with query parameter');
 
-my $get = $t->get_ok('/tests/99963')->status_is(200);
+$t->get_ok('/tests/99963')->status_is(200);
 $t->content_like(qr/State.*running/, "Running jobs are marked");
 
 subtest 'available comments shown' => sub {
     $driver->get('/tests');
-    wait_for_ajax;
+    wait_for_ajax(msg => 'DataTables on "All tests" page for comments');
 
     is(
         $driver->find_element('#job_99946 .fa-comment')->get_attribute('title'),
@@ -212,6 +213,7 @@ like(
 
 # return
 is($driver->get("/tests"), 1, "/tests gets");
+wait_for_ajax(msg => 'wait for all tests displayed before looking for 99928');
 
 # Test 99928 is scheduled
 isnt($driver->find_element('#scheduled #job_99928'), undef, '99928 scheduled');
@@ -271,9 +273,9 @@ subtest 'priority of scheduled jobs' => sub {
     is($driver->find_element('#job_99927 .prio-value')->get_text(), '45', 'priority of other job not affected');
 };
 
-$driver->get('/logout');
-$driver->get('/tests');
-
+ok $driver->get('/logout'), 'logout';
+ok $driver->get('/tests'),  'get tests';
+wait_for_ajax(msg => 'wait for all tests displayed before looking for 99938');
 # parent-child
 my $child_e = $driver->find_element('#results #job_99938 .parent_child');
 is($child_e->get_attribute('title'),         "1 chained parent", "dep info");
@@ -332,7 +334,7 @@ $driver->find_element('#finished_jobs_result_filter_chosen .search-choice-close'
 # enable filter via query parameter, this time disable relevantfilter
 $driver->get('/tests?resultfilter=Failed&foo=bar&resultfilter=Softfailed');
 $driver->find_element_by_id('relevantfilter')->click();
-wait_for_ajax();
+wait_for_ajax_and_animations();
 @jobs = map { $_->get_attribute('id') } @{$driver->find_elements('#results tbody tr', 'css')};
 is_deeply(
     \@jobs,
@@ -397,6 +399,20 @@ subtest 'check test results of job99940' => sub {
     }
 };
 
+subtest 'test name and description still show up correctly using JOB_TEMPLATE_NAME' => sub {
+    $driver->get('/tests');
+    wait_for_ajax(msg => 'wait for all tests displayed before looking for 99991');
+    is($driver->find_element('#job_99991 td.test')->get_text(),
+        'kde_variant@64bit', 'job 99991 displays TEST correctly');
+
+    $driver->get('/tests/99991#settings');
+    wait_for_ajax;
+    is(
+        $driver->find_element('#scenario-description')->get_text(),
+        'Simple kde test, before advanced_kde',
+        'job 99991 description displays correctly'
+    );
+};
 
 kill_driver();
 done_testing();

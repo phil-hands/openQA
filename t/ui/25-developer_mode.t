@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2018 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2018-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,51 +12,43 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 # note: Tests the only the UI-layer of the developer mode. So no
 #       web socket connection to the live view handler is established here.
 #       Instead, the state is injected via JavaScript commands.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
 use Module::Load::Conditional qw(can_load);
-use Mojo::Base -strict;
 use Mojo::File qw(path tempdir);
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 use Test::MockModule;
+use OpenQA::Test::TimeLimit '10';
 use OpenQA::WebSockets::Client;
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 
-OpenQA::Test::Case->new->init_data;
-my $tempdir = tempdir;
-
-sub schema_hook {
-    my $schema             = OpenQA::Test::Database->new->create;
-    my $workers            = $schema->resultset('Workers');
-    my $jobs               = $schema->resultset('Jobs');
+sub prepare_database {
+    my $schema  = OpenQA::Test::Database->new->create(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
+    my $workers = $schema->resultset('Workers');
+    my $jobs    = $schema->resultset('Jobs');
     my $developer_sessions = $schema->resultset('DeveloperSessions');
 
     # make OpenQA::WebSockets::Client::send_msg() a noop (tested in ../34-developer_mode-unit.t anyways)
     my $ipc_mock_module = Test::MockModule->new('OpenQA::WebSockets::Client');
-    $ipc_mock_module->mock(send_msg => sub { });
+    $ipc_mock_module->redefine(send_msg => sub { });
 
     # assign a worker to job 99961
     my $job_id = 99961;
-    my $worker = $workers->find({job_id => $job_id});
+    my $worker = $workers->find({job_id => $job_id}) or die "worker for job '$job_id' not found";
     $jobs->find($job_id)->update({assigned_worker_id => $worker->id});
 
     # set required worker properties
-    $worker->set_property(WORKER_TMPDIR => $tempdir->child('t', 'devel-mode-ui.d'));
+    $worker->set_property(WORKER_TMPDIR => tempdir->child('t', 'devel-mode-ui.d'));
     $worker->set_property(CMD_SRV_URL   => 'http://remotehost:20013/token99964');
 
     # add developer session for a finished job
@@ -71,12 +62,10 @@ sub schema_hook {
       or note 'unable to register developer session for finished job';
 }
 
-my $t      = Test::Mojo->new('OpenQA::WebAPI');
-my $driver = call_driver(\&schema_hook);
-unless ($driver) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
-}
+prepare_database;
+
+my $t = Test::Mojo->new('OpenQA::WebAPI');
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
 
 # executes JavaScript code taking a note
 sub inject_java_script {
@@ -154,12 +143,13 @@ like(
 
 # navigate to live view of running test
 $driver->get('/tests/99961#live');
+wait_for_ajax(msg => 'live tab of job 99961 loaded');
 
 # mock some JavaScript functions
 mock_js_functions(
     updateStatus             => '',
     setupWebsocketConnection => '',
-    startDeveloperSession =>
+    startDeveloperSession    =>
 'developerMode.ownSession = true; developerMode.useDeveloperWsRoute = true; handleWebsocketConnectionOpened(developerMode.wsConnection);',
     sendWsCommand => 'if (!window.sentCmds) { window.sentCmds = [] } window.sentCmds.push(arg1);',
 );
@@ -172,7 +162,7 @@ $driver->execute_script(
 subtest 'devel UI hidden when running, but modules not initialized' => sub {
     my $info_panel = $driver->find_element('#info_box .card-body');
     my $info_text  = $info_panel->get_text();
-    like($info_text, qr/State\: running.*\nAssigned worker\: remotehost\:1/, 'job is running');
+    like($info_text, qr/State\: running.*Assigned worker\: remotehost\:1/s, 'job is running');
     element_hidden('#developer-global-session-info');
     element_hidden('#developer-vnc-notice');
     element_hidden('#developer-panel');
@@ -232,7 +222,7 @@ subtest 'state shown when connected' => sub {
     fake_state(developerMode => {moduleToPauseAt => '"installation-foo"'});
     element_hidden('#developer-vnc-notice');
     element_visible('#developer-panel .card-header', qr/will pause at module: installation-foo/, qr/paused/,);
-    is(scalar @options, 5, '5 options in module to pause at selection present');
+    is(scalar @options,   5,                                '5 options in module to pause at selection present');
     is($_->is_selected(), $_->get_value() eq 'foo' ? 1 : 0, 'only foo selected') for (@options);
 
     # has already completed the module to pause at
@@ -245,7 +235,7 @@ subtest 'state shown when connected' => sub {
     fake_state(developerMode => {isPaused => '"some reason"'});
     element_visible(
         '#developer-vnc-notice',
-qr/You might be able to connect to the SUT at remotehost:91 via VNC with shared mode enabled \(eg\. vncviewer remotehost:91 -Shared for TigerVNC\)\./,
+qr/You might be able to connect to the SUT at remotehost:5991 via VNC with shared mode enabled \(eg\. vncviewer remotehost:5991 -Shared for TigerVNC\)\./,
     );
     element_visible(
         '#developer-panel .card-header',
@@ -322,7 +312,8 @@ subtest 'expand developer panel' => sub {
     subtest 'behavior when changes have not been confirmed' => sub {
         my @options = $driver->find_elements('#developer-pause-at-module option');
 
-        $options[4]->set_selected();
+        ok $options[4], 'option #5 present' or return undef;
+        $options[4]->click();
         assert_sent_commands(undef, 'changes not instantly submitted');
 
         subtest 'module to pause at not updated' => sub {
@@ -369,7 +360,8 @@ subtest 'start developer session' => sub {
 
     # select to pause at 'installation-bar'
     my @options = $driver->find_elements('#developer-pause-at-module option');
-    $options[4]->set_selected();
+    ok $options[4], 'option #5 present' or return undef;
+    $options[4]->click();
 
     # start developer session by submitting the changes
     $driver->find_element('Confirm to control this test', 'link_text')->click();
@@ -445,14 +437,16 @@ subtest 'start developer session' => sub {
     };
 
     subtest 'select module to pause at' => sub {
-        my @options = $driver->find_elements('#developer-pause-at-module option');
         fake_state(developerMode => {moduleToPauseAt => '"installation-foo"'});
-        is($_->is_selected(), $_->get_value() eq 'foo' ? 1 : 0, 'foo selected') for (@options);
+        my @options = $driver->find_elements('#developer-pause-at-module option');
+        is $_->is_selected, $_->get_value eq 'foo' ? 1 : 0, 'foo selected (' . $_->get_value . ')' for @options;
 
-        $options[3]->set_selected();    # select installation-foo
+        ok $options[3], 'option #4 present' or return undef;
+        $options[3]->click();    # select installation-foo
         assert_sent_commands(undef, 'no command sent if nothing changes');
 
-        $options[4]->set_selected();    # select installation-bar
+        ok $options[4], 'option #5 present' or return undef;
+        $options[4]->click();    # select installation-bar
         assert_sent_commands(
             [
                 {
@@ -463,7 +457,7 @@ subtest 'start developer session' => sub {
             'command to set module to pause at sent'
         );
 
-        $options[0]->set_selected();    # select <don't pause>
+        $options[0]->click();    # select <don't pause>
         assert_sent_commands(
             [
                 {
@@ -481,7 +475,7 @@ subtest 'start developer session' => sub {
         is($options[0]->is_selected(), 1, 'pausing on screen mismatch disabled by default');
 
         # attempt to turn pausing on assert_screen on when current state unknown
-        $options[1]->set_selected();
+        $options[1]->click();
         assert_sent_commands(undef, 'prevent overriding pause on mismatch with form defaults if unknown');
 
         # assume we know the pausing on screen match is disabled
@@ -489,7 +483,7 @@ subtest 'start developer session' => sub {
         is($options[0]->is_selected(), 1, 'pausing on screen mismatch still disabled');
 
         # turn pausing on assert_screen on
-        $options[1]->set_selected();
+        $options[1]->click();
         assert_sent_commands(
             [
                 {
@@ -505,7 +499,7 @@ subtest 'start developer session' => sub {
         is($options[1]->is_selected(), 1, 'still right option selected');
 
         # turn pausing on check_screen on
-        $options[2]->set_selected();
+        $options[2]->click();
         assert_sent_commands(
             [
                 {
@@ -521,7 +515,7 @@ subtest 'start developer session' => sub {
         is($options[2]->is_selected(), 1, 'still right option selected');
 
         # turn pausing on screen mismatch off
-        $options[0]->set_selected();
+        $options[0]->click();
         assert_sent_commands(
             [
                 {
@@ -657,7 +651,26 @@ subtest 'process state changes from os-autoinst/worker' => sub {
         $driver->execute_script(
 'handleMessageFromWebsocketConnection(developerMode.wsConnection, { data: "{\"type\":\"info\",\"what\":\"cmdsrvmsg\",\"data\":{\"current_api_function\":\"assert_screen\"}}" });'
         );
+        is(js_variable('developerMode.currentApiFunction'),     'assert_screen', 'current API function set');
+        is(js_variable('developerMode.currentApiFunctionArgs'), '',              'current API function set');
+
+        $driver->execute_script(
+'handleMessageFromWebsocketConnection(developerMode.wsConnection, { data: "{\"type\":\"info\",\"what\":\"cmdsrvmsg\",\"data\":{\"current_api_function\":\"assert_screen\",\"check_screen\":{\"check\":0,\"mustmatch\":\"generic-desktop\",\"timeout\":30}}}" });'
+        );
+        is(js_variable('developerMode.currentApiFunction'),     'assert_screen',   'current API function set');
+        is(js_variable('developerMode.currentApiFunctionArgs'), 'generic-desktop', 'current API function set');
+
+        $driver->execute_script(
+'handleMessageFromWebsocketConnection(developerMode.wsConnection, { data: "{\"type\":\"info\",\"what\":\"cmdsrvmsg\",\"data\":{\"current_api_function\":\"wait_serial\"}}" });'
+        );
+        is(js_variable('developerMode.currentApiFunction'),     'wait_serial', 'current API function set');
+        is(js_variable('developerMode.currentApiFunctionArgs'), '',            'current API function set');
+
+        $driver->execute_script(
+'handleMessageFromWebsocketConnection(developerMode.wsConnection, { data: "{\"type\":\"info\",\"what\":\"cmdsrvmsg\",\"data\":{\"current_api_function\":\"assert_screen\",\"check_screen\":{\"check\":0,\"mustmatch\":[\"foo\",\"bar\"],\"timeout\":30}}}" });'
+        );
         is(js_variable('developerMode.currentApiFunction'), 'assert_screen', 'current API function set');
+        is_deeply(js_variable('developerMode.currentApiFunctionArgs'), ['foo', 'bar'], 'current API function set');
     };
 
     subtest 'error handling, flash messages' => sub {
@@ -699,7 +712,7 @@ subtest 'process state changes from os-autoinst/worker' => sub {
         subtest 'dismissed message appears again' => sub {
             # click "X" button of 2nd flash message
             $driver->execute_script('$(".alert-danger").removeClass("fade")');    # prevent delay due to animation
-            $driver->execute_script('return $($(".alert-danger")[1]).find("button").click();');
+            $driver->execute_script('$($(".alert-danger")[1]).find("button").click();');
 
             assert_flash_messages(
                 danger => [qr/Unable to parse/, qr/another error/, qr/not ignored error/],

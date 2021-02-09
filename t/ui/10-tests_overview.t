@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2016 SUSE LLC
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,27 +13,27 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Date::Format 'time2str';
-use Test::More;
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '20';
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 use OpenQA::Jobs::Constants;
 
-my $test_case = OpenQA::Test::Case->new;
-$test_case->init_data;
+my $test_case   = OpenQA::Test::Case->new;
+my $schema_name = OpenQA::Test::Database->generate_schema_name;
+my $schema      = $test_case->init_data(
+    schema_name   => $schema_name,
+    fixtures_glob => '01-jobs.pl 02-workers.pl 04-products.pl 05-job_modules.pl 06-job_dependencies.pl'
+);
+my $jobs = $schema->resultset('Jobs');
 
-sub schema_hook {
-    my $schema   = OpenQA::Test::Database->new->create;
+sub prepare_database {
     my $comments = $schema->resultset('Comments');
     my $bugs     = $schema->resultset('Bugs');
 
@@ -66,8 +66,7 @@ sub schema_hook {
         });
 
     # add a job result on another machine type to test rendering
-    my $jobs = $schema->resultset('Jobs');
-    my $new  = $jobs->find(99963)->to_hash->{settings};
+    my $new = $jobs->find(99963)->to_hash->{settings};
     $new->{MACHINE} = 'uefi';
     $new->{_GROUP}  = 'opensuse';
     $jobs->create_from_settings($new);
@@ -106,14 +105,33 @@ sub schema_hook {
             ],
         });
     $jobs->find(99946)->update({result => OpenQA::Jobs::Constants::FAILED});
+
+    # add job for testing job template name
+    my $job_hash = {
+        id         => 99990,
+        group_id   => 1002,
+        priority   => 30,
+        result     => OpenQA::Jobs::Constants::FAILED,
+        state      => OpenQA::Jobs::Constants::DONE,
+        TEST       => 'kde_variant',
+        VERSION    => '13.1',
+        BUILD      => '0091',
+        ARCH       => 'x86_64',
+        MACHINE    => '64bit',
+        DISTRI     => 'opensuse',
+        FLAVOR     => 'DVD',
+        t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 36000, 'UTC'),
+        t_started  => time2str('%Y-%m-%d %H:%M:%S', time - 72000, 'UTC'),
+        t_created  => time2str('%Y-%m-%d %H:%M:%S', time - 72000, 'UTC'),
+        settings => [{key => 'JOB_TEMPLATE_NAME', value => 'kde_variant'}, {key => 'TEST_SUITE_NAME', value => 'kde'}],
+    };
+    $jobs->create($job_hash);
 }
 
-my $driver = call_driver(\&schema_hook);
+prepare_database;
 
-unless ($driver) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
-}
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
+disable_timeout;
 
 $driver->title_is("openQA", "on main page");
 my $baseurl = $driver->get_current_url();
@@ -131,7 +149,7 @@ is(scalar @filtered_out, 0, 'result filter correctly applied');
 
 # Test whether all URL parameter are passed correctly
 my $url_with_escaped_parameters
-  = $baseurl . 'tests/overview?arch=&modules=&distri=opensuse&build=0091&version=Staging%3AI&groupid=1001';
+  = $baseurl . 'tests/overview?arch=&machine=&modules=&distri=opensuse&build=0091&version=Staging%3AI&groupid=1001';
 $driver->get($url_with_escaped_parameters);
 $driver->find_element('#filter-panel .card-header')->click();
 $driver->find_element('#filter-form button')->click();
@@ -147,6 +165,7 @@ like($driver->find_elements('.failedmodule', 'css')->[1]->get_attribute('href'),
 
 my @descriptions = $driver->find_elements('td.name a', 'css');
 is(scalar @descriptions, 2, 'only test suites with description content are shown as links');
+disable_bootstrap_animations;
 $descriptions[0]->click();
 is($driver->find_element('.popover-header')->get_text, 'kde', 'description popover shows content');
 
@@ -191,9 +210,9 @@ subtest 'filtering by test' => sub {
     my @rows = $driver->find_elements('#content tbody tr');
     is(scalar @rows, 1, 'exactly one row present');
     like($rows[0]->get_text(), qr/textmode/, 'test is textmode');
-    is(
+    like(
         OpenQA::Test::Case::trim_whitespace($driver->find_element('#summary .card-header')->get_text()),
-        'Overall Summary of opensuse 13.1 build 0092',
+        qr/Overall Summary of opensuse 13\.1 build 0092/,
         'summary states "opensuse 13.1" although no explicit search params',
     );
 };
@@ -208,7 +227,7 @@ subtest 'filtering by distri' => sub {
         $driver->get('/tests/overview?distri=foo&distri=opensuse&distri=bar&version=13.1&build=0091');
         check_build_0091_defaults;
         is(
-            OpenQA::Test::Case::trim_whitespace($driver->find_element('#summary .card-header b')->get_text()),
+            OpenQA::Test::Case::trim_whitespace($driver->find_element('#summary .card-header strong')->get_text()),
             'foo/opensuse/bar 13.1',
             'filter also visible in summary'
         );
@@ -285,6 +304,82 @@ subtest 'filtering by module' => sub {
         element_visible('#res_DVD_i586_kde');
         element_visible('#res_DVD_i586_textmode');
     };
+};
+
+subtest "filtering by machine" => sub {
+    $driver->get('/tests/overview?distri=opensuse&version=13.1&build=0091');
+
+    subtest 'by default, all machines for all flavors present' => sub {
+        check_build_0091_defaults;
+    };
+
+    subtest 'filter for specific machine' => sub {
+        $driver->find_element('#filter-panel .card-header')->click();
+        $driver->find_element('#filter-machine')->send_keys('uefi');
+        $driver->find_element('#filter-panel .btn-default')->click();
+
+        element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
+        element_not_present('#flavor_DVD_arch_i586');
+        element_not_present('#flavor_GNOME-Live_arch_i686');
+        element_not_present('#flavor_NET_arch_x86_64');
+
+        my @row = $driver->find_element('#content tbody tr');
+        is(scalar @row, 1, 'The job its machine is uefi is shown');
+
+        is($driver->find_element('#content tbody .name span')->get_text(), 'kde@uefi', 'Test suite name is shown');
+        $driver->find_element('#filter-panel .card-header')->click();
+        is($driver->find_element('#filter-machine')->get_value(), 'uefi', 'machine text is correct.');
+
+        $driver->find_element('#filter-machine')->clear();
+        $driver->find_element('#filter-machine')->send_keys('64bit,uefi');
+        $driver->find_element('#filter-panel .btn-default')->click();
+
+        element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
+        element_visible('#flavor_NET_arch_x86_64', qr/x86_64/);
+        element_not_present('#flavor_GONME-Live_arch_i686');
+        element_not_present('#flavor_DVD_arch_i586');
+
+    };
+};
+
+subtest "job template names displayed on 'Test result overview' page" => sub {
+    $driver->get('/group_overview/1002');
+    is($driver->find_element('.progress-bar-failed')->get_text(), '1 failed', 'The number of failed jobs is right');
+    is($driver->find_element('.progress-bar-unfinished')->get_text(),
+        '1 unfinished', 'The number of unfinished jobs is right');
+
+    $driver->get('/tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1002');
+    my @tds = $driver->find_elements('#results_DVD tbody tr .name');
+    is($tds[0]->get_text(), 'kde_variant', 'job template name kde_variant displayed correctly');
+
+    my @descriptions = $driver->find_elements('td.name a', 'css');
+    is(scalar @descriptions, 2, 'only test suites with description content are shown as links');
+    disable_bootstrap_animations;
+    $descriptions[0]->click();
+    is(wait_for_element(selector => '.popover-header')->get_text, 'kde_variant', 'description popover shows content');
+};
+
+subtest "job dependencies displayed on 'Test result overview' page" => sub {
+    $jobs->find(99938)->update({VERSION => '13.1', BUILD => '0091'});
+    $driver->get($baseurl . 'tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1001');
+    my $deps           = $driver->find_element('td#res_DVD_x86_64_kde .dependency');
+    my @child_elements = $driver->find_child_elements($deps, 'a');
+    my $details        = $child_elements[0];
+    like $details->get_attribute('href'), qr{tests/99963\#dependencies},          'job href is shown correctly';
+    is $details->get_attribute('title'),  "1 parallel parent\ndependency passed", 'dependency is shown correctly';
+
+    my $parent_ele = $driver->find_element('td#res_DVD_i586_kde .parents_children');
+    $driver->move_to(element => $parent_ele);
+    my @child_deps = $driver->find_elements('tr.highlight_child');
+    is scalar @child_deps, 1, 'child job was highlighted';
+    is $driver->find_child_element($child_deps[0], '#res_DVD_x86_64_doc')->get_attribute('name'), 'jobid_td_99938',
+      'child job was highlighted correctly';
+    my $child_ele = $driver->find_element('td#res_DVD_x86_64_doc .parents_children');
+    $driver->move_to(element => $child_ele);
+    my @parent_deps = $driver->find_elements('tr.highlight_parent');
+    is scalar @parent_deps, 1, 'parent job was highlighted';
+    is $driver->find_child_element($parent_deps[0], '#res_DVD_i586_kde')->get_attribute('name'), 'jobid_td_99937',
+      'parent job was highlighted correctly';
 };
 
 kill_driver();

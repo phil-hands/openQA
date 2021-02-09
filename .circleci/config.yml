@@ -1,0 +1,356 @@
+version: 2
+
+aliases:
+  - &restore_cache
+    keys:
+      - v1-{{ checksum ".circleci/ci-packages.txt" }}-{{ checksum ".circleci/build_cache.sh" }}
+
+  - &save_cache
+    key: v1-{{ checksum ".circleci/ci-packages.txt" }}-{{ checksum ".circleci/build_cache.sh" }}
+    paths:
+      - "/var/cache/zypp/packages"
+      - "~/project/assets/cache"
+
+  - &restore_fullstack_cache
+    keys:
+      - v1-{{ checksum ".circleci/autoinst.sha" }}-{{ checksum ".circleci/build_autoinst.sh" }}
+
+  - &save_fullstack_cache
+    key: v1-{{ checksum ".circleci/autoinst.sha" }}-{{ checksum ".circleci/build_autoinst.sh" }}
+    paths:
+      - "/var/cache/autoinst"
+
+  - &chown_hack_for_cache
+    name: Chown package cache to user
+    command: |
+      [ -z "$CIRCLE_WORKFLOW_ID" ] || sudo chown -R squamata /var/cache/zypp/packages
+
+  - &chown_hack_for_cache_fullstack
+    name: Chown autoinst cache to user
+    command: |
+      # hack as we don't want run container as root
+      [ -z "$CIRCLE_WORKFLOW_ID" ] || {
+        sudo mkdir -p /var/cache/autoinst
+        sudo chown -R squamata /var/cache/autoinst
+      }
+
+  - &check_cache
+    name: Log cached packages
+    command: |
+      mkdir -p logs
+      find /var/cache/zypp/packages/ -iname *.rpm > ./logs/packages.txt
+
+  - &store_logs
+    path: logs
+    destination: artifacts
+
+  - &install_cached_packages
+    name: Install cached packages
+    command: |
+        set -x
+        if [ -z "$CIRCLE_WORKFLOW_ID" ]; then
+          bash .circleci/build_cache.sh
+        else
+          sudo rpm -i -f $(find /var/cache/zypp/packages/ | grep '.rpm$')
+        fi
+
+  - &test_junit
+    name: "Enabling JUnit output for Perl tests"
+    command: |
+      mkdir -p test-results/junit
+      echo 'export JUNIT_OUTPUT_FILE=test-results/junit/${CIRCLE_JOB}.xml' >> $BASH_ENV
+
+  - &store_test_results
+    path: test-results/junit
+
+  - &store_artifacts
+    path: test-results/t
+    destination: artifacts
+
+  - &store_cover_db
+    path: cover_db
+    destination: cover_db
+
+  - &build_autoinst
+    name: "Link or build os-autoinst"
+    command: |
+      if [ ! -z "$CIRCLE_WORKFLOW_ID" ]; then # only in workflow
+        rm -rf ../os-autoinst
+        sudo cp -r /var/cache/autoinst ../os-autoinst
+        sudo chown -R 1000 ../os-autoinst/t/data
+      else # only in local run
+         [ -d ../os-autoinst ] || { sudo mkdir ../os-autoinst && sudo chown -R 1000 ../os-autoinst; }
+         bash .circleci/build_autoinst.sh ../os-autoinst $(cat .circleci/autoinst.sha)
+       fi
+
+  - &make_test
+    name: "Running unit tests"
+    command: |
+      export PERL5OPT="$COVEROPT,-db,cover_db_${CIRCLE_JOB}"
+      echo PERL5OPT="$PERL5OPT"
+      make test-$CIRCLE_JOB
+    no_output_timeout: 50m
+
+  - &git_token_authentication
+    name: "Prepare auth token"
+    command: |
+      echo 'echo $GITHUB_TOKEN' > $(pwd)/.git-askpass
+      echo "export GIT_ASKPASS=$(pwd)/.git-askpass" >> $BASH_ENV
+      chmod +x $(pwd)/.git-askpass
+
+images:
+  - &docker_config
+    user: squamata
+    environment:
+      JUNIT_PACKAGE: openQA
+      JUNIT_NAME_MANGLE: perl
+      # Be aware that this option saves all verbose output caught by "prove"
+      # into test artifact files whereas the error output is still shows up
+      # where prove is executed to show initial context in case of failed
+      # tests or other problems. The "--merge" option of prove would loose
+      # that context in the prove calling context.
+      PERL_TEST_HARNESS_DUMP_TAP: test-results
+      HARNESS: --harness TAP::Harness::JUnit --timer
+      COVEROPT: -MDevel::Cover=-select_re,'^/lib',+ignore_re,lib/perlcritic/Perl/Critic/Policy,-coverage,statement
+      COMMIT_AUTHOR_EMAIL: skynet@open.qa
+
+  - &base
+    image: registry.opensuse.org/devel/openqa/ci/containers/base:latest
+    <<: *docker_config
+
+  - &dependency_bot
+    image: registry.opensuse.org/devel/openqa/ci/containers/base:latest
+    environment:
+      COMMIT_AUTHOR_EMAIL: skynet@open.qa
+
+jobs:
+  dependencies-pr:
+    docker:
+      - <<: *dependency_bot
+    steps:
+      - checkout
+      - run:
+          name: "Setup git"
+          command: |
+            git config user.email "${COMMIT_AUTHOR_EMAIL}"
+            git config user.name "Dependency bot circleci"
+            git config core.autocrlf true
+      - run: *git_token_authentication
+      - run:
+          name: "Prepare dependency PR"
+          command: |
+            depid=$(date -I)
+            # more specific branch name if the same exists
+            ! git ls-remote --exit-code -- origin "dependency_$depid" || depid=$(date +%Y-%m-%dT%H%M%S)
+            git checkout -b dependency_$depid
+            bash .circleci/build_dependencies.sh
+
+            git status
+            git --no-pager diff .circleci/ci-packages.txt
+            git diff --quiet .circleci/ci-packages.txt || (
+                set +o pipefail
+                sudo zypper -n install git hub curl
+                hub --version
+                curl -s https://api.github.com/repos/os-autoinst/os-autoinst/commits | grep sha | head -n 1 | grep -o -E '[0-9a-f]{40}' > .circleci/autoinst.sha
+                git add .circleci/ci-packages.txt .circleci/autoinst.sha
+                # these might have changed by tidy in .circleci/build_dependencies.sh
+                git add cpanfile dbicdh dependencies.yaml tools/* script/* lib/* t/*
+                git commit -m "Dependency cron $depid"
+                git push -q -f https://token@github.com/openqabot/openQA.git dependency_$depid
+                hub pull-request -m "Dependency cron $depid" --base "$CIRCLE_PROJECT_USERNAME":"$CIRCLE_BRANCH" --head "openqabot:dependency_$depid"
+            )
+
+  cache:
+    docker:
+      - <<: *base
+    steps:
+      - checkout
+      - run: ls -la && pwd
+      - run: cat .circleci/ci-packages.txt
+      - run: *chown_hack_for_cache
+      - restore_cache: *restore_cache
+      - run: *check_cache
+      - store_artifacts: *store_logs
+      - run:
+          name: "Generate packaged assets"
+          command: |
+            if [ ! -d /var/cache/zypp/packages/openQA ]; then
+              bash -x .circleci/build_cache.sh
+              tools/generate-packed-assets
+            fi
+      - save_cache: *save_cache
+
+  cache.fullstack:
+    docker:
+      - <<: *base
+    steps:
+      - checkout
+      - run: *chown_hack_for_cache
+      - run: *chown_hack_for_cache_fullstack
+      - restore_cache: *restore_cache
+      - restore_cache: *restore_fullstack_cache
+      - run: *check_cache
+      - store_artifacts: *store_logs
+      - run:
+          name: "Build os-autoinst if not cached"
+          command: |
+            if [ ! -d /var/cache/autoinst/t ]; then
+              bash -x .circleci/build_autoinst.sh "/var/cache/autoinst" $(cat .circleci/autoinst.sha)
+            fi
+      - save_cache: *save_fullstack_cache
+
+  checkstyle: &test-template
+    docker:
+      - <<: *base
+    steps:
+      - checkout
+      - run: *chown_hack_for_cache
+      - restore_cache: *restore_cache
+      - run: *check_cache
+      - store_artifacts: *store_logs
+      - run: *install_cached_packages
+      - run: *test_junit
+      - run: *make_test
+      - persist_to_workspace:
+          root: .
+          paths:
+            - cover_db_*
+      - store_test_results: *store_test_results
+      - store_artifacts: *store_artifacts
+
+  fullstack: &test-fullstack-template
+    docker:
+      - <<: *base
+    steps:
+      - checkout
+      - run: *chown_hack_for_cache
+      - run: *chown_hack_for_cache_fullstack
+      - restore_cache: *restore_cache
+      - restore_cache: *restore_fullstack_cache
+      - run: *check_cache
+      - store_artifacts: *store_logs
+      - run: *install_cached_packages
+      - run: *build_autoinst
+      - run: *test_junit
+      - run: *make_test
+      - persist_to_workspace:
+          root: .
+          paths:
+            - cover_db_*
+      - store_test_results: *store_test_results
+      - store_artifacts: *store_artifacts
+  t:
+    <<: *test-template
+
+  ui:
+    <<: *test-template
+
+  api:
+    <<: *test-template
+
+  unstable:
+    <<: *test-template
+
+  developer:
+    <<: *test-fullstack-template
+
+  scheduler:
+    <<: *test-fullstack-template
+
+  codecov:
+    docker:
+      - <<: *base
+    steps:
+      - checkout
+      - run: *chown_hack_for_cache
+      - restore_cache: *restore_cache
+      - run: *check_cache
+      - store_artifacts: *store_logs
+      - run: *install_cached_packages
+      - attach_workspace:
+          at: .
+      - run: cover -write cover_db cover_db*
+      - run: cover -select_re '^(lib|script|t)/' -report html_minimal
+      - store_artifacts: *store_cover_db
+      - run: cover -select_re '^(lib|script|t)/' -report codecov
+
+  build-docs: &docs-template
+    name: "Generating docs"
+    docker:
+      - <<: *base
+    steps:
+      - checkout
+      - run: *chown_hack_for_cache
+      - restore_cache: *restore_cache
+      - run: *check_cache
+      - run: *install_cached_packages
+      - run: *git_token_authentication
+      - run:
+          command: |
+            # pygments requires python2
+            sudo zypper -n install python-base
+      - run:
+          command: |
+            export GEM_HOME=$(pwd)/.gem
+            if [[ "${CIRCLE_JOB}" != *nightly ]]; then
+                bash -xe tools/generate-documentation
+            else
+                sudo zypper -n install hub
+                export PULL_REQUEST_USER=${CIRCLE_PROJECT_USERNAME:-os-autoinst}
+                export PUBLISH=1
+                bash -xe tools/generate-documentation https://token@github.com/openqabot/openQA.git gh-pages-$(date +%y%m%d%H%M%S)
+            fi
+
+  build-docs-nightly:
+    <<: *docs-template
+
+workflows:
+  version: 2
+  test:
+    jobs:
+      - cache
+      - checkstyle: &requires
+          requires:
+            - cache
+      - t:
+          <<: *requires
+      - api:
+          <<: *requires
+      - ui:
+          <<: *requires
+      # put unstable tests in unstable_tests.txt and uncomment to handle with retries
+      - unstable:
+          requires:
+            - cache
+      - cache.fullstack:
+          <<: *requires
+      - fullstack: &requires_fullstack
+          requires:
+            - cache.fullstack
+      - developer:
+          <<: *requires_fullstack
+      - scheduler:
+          <<: *requires_fullstack
+      - codecov:
+          requires:
+            - t
+            - api
+            - ui
+            - unstable
+            - fullstack
+            - developer
+            - scheduler
+      - build-docs:
+          <<: *requires
+
+  nightly:
+    triggers:
+      - schedule:
+          cron: "20 2 * * *"
+          filters:
+            branches:
+              only:
+                - master
+    jobs:
+      - dependencies-pr
+      - build-docs-nightly

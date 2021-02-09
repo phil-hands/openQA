@@ -103,7 +103,7 @@ sub create {
             my $error = "Error: missing parameters:";
             for my $k (@mandatory_parameter) {
                 $log->debug(@{$validation->error($k)}) if $validation->has_error($k);
-                $error .= ' ' . $k if $validation->has_error($k);
+                $error .= ' ' . $k                     if $validation->has_error($k);
             }
             return $self->render(text => $error, status => 400);
         }
@@ -134,30 +134,30 @@ sub create {
         %params = map { $_ => $up_params{$_} =~ s@%2F@/@gr } keys %up_params;
     }
 
-    my @check = check_download_whitelist(\%params, $self->app->config->{global}->{download_domains});
+    my @check = check_download_passlist(\%params, $self->app->config->{global}->{download_domains});
     if (@check) {
         my ($status, $param, $url, $host) = @check;
         $log->debug("$param - $url");
         if ($status == 2) {
             return $self->render(
-                text   => "Asset download requested but no domains whitelisted! Set download_domains.",
+                text   => "Asset download requested but no domains passlisted! Set download_domains.",
                 status => 403
             );
         }
         else {
-            return $self->render(text => "Asset download requested from non-whitelisted host $host.", status => 403);
+            return $self->render(text => "Asset download requested from non-passlisted host $host.", status => 403);
         }
     }
 
     # add entry to ScheduledProducts table and log event
     my $scheduled_product = $scheduled_products->create(
         {
-            distri  => $params{DISTRI}  // '',
-            version => $params{VERSION} // '',
-            flavor  => $params{FLAVOR}  // '',
-            arch    => $params{ARCH}    // '',
-            build   => $params{BUILD}   // '',
-            iso     => $params{ISO}     // '',
+            distri   => $params{DISTRI}  // '',
+            version  => $params{VERSION} // '',
+            flavor   => $params{FLAVOR}  // '',
+            arch     => $params{ARCH}    // '',
+            build    => $params{BUILD}   // '',
+            iso      => $params{ISO}     // '',
             settings => \%params,
             user_id  => $self->current_user->id,
         });
@@ -202,7 +202,7 @@ sub create {
             ids                  => [],
             failed               => {},
         },
-        status => 400,
+        status => $scheduled_jobs->{error_code},
     ) if $error;
 
     my $successful_job_ids = $scheduled_jobs->{successful_job_ids};
@@ -273,4 +273,3 @@ sub cancel {
 }
 
 1;
-# vim: set sw=4 et:

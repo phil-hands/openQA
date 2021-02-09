@@ -1,0 +1,46 @@
+% layout 'bootstrap';
+% title 'Machines';
+
+% content_for 'ready_function' => begin
+    setupAdminTable(<%= is_admin_js %>);
+% end
+
+<div class="row">
+    <div class="col-sm-12">
+        <h2><%= title %></h2>
+
+        %= include 'layouts/info'
+
+        <span class="search-popover">
+            <%= help_popover('Search' => '
+                <p>Allows to filter the machines.</p>
+                <p>You can use regular expressions for searching.</p>
+                <p>
+                    <strong>Example</strong><br>
+                    <code>^64bit$</code>
+                </p>
+                ', undef, undef, 'left');
+            %>
+        </span>
+
+        <table class="admintable table table-striped" id='machines'>
+            <thead>
+                <tr>
+                    <th class="col_value">Name</th>
+                    <th class="col_value">Backend</th>
+                    <th class="col_settings_list">Settings</th>
+                    <th class="col_action">Actions</th>
+                </tr>
+            </thead>
+            <tbody>
+            </tbody>
+        </table>
+        % if (is_admin) {
+        <div class="text-center">
+            <input value="New machine" onclick="addAdminTableRow();" type="button" class="btn btn-default"/>
+        </div>
+        % }
+        <input type="hidden" id="admintable_api_url" value="/api/v1/machines"/>
+    </div>
+
+</div>

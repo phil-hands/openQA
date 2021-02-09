@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2014-2018 SUSE LLC
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -25,11 +25,11 @@ client [OPTIONS] PATH
 
 =item B<--host> HOST
 
-connect to specified host, defaults to localhost
+Connect to specified host, defaults to localhost
 
 =item B<--params> FILE
 
-load get/post parameters from a json file. For example
+Load get/post parameters from a json file. For example
 
 {
    "FLAVOR" : "DVD",
@@ -45,7 +45,20 @@ Set API base URL component, default: '/api/v1'
 
 =item B<--json-output>
 
-Output JSON instead of perl structures.
+Output JSON instead of Perl structures.
+
+=item B<--yaml-output>
+
+Output YAML instead of Perl structures.
+
+=item B<accept> (json|yaml)
+
+Send Accept header to explicitly tell the API what format is accepted
+
+Note that currently only one endpoint (job_templates_scheduling) is able
+to return YAML, and it's deprecated.
+
+By default, C<Accept: */*> is sent.
 
 =item B<--verbose, -v>
 
@@ -57,10 +70,23 @@ Specify api key and secret to use, overrides use of config file ~/.config/openqa
 
 =item B<--json-data>
 
-Send JSON data (which is expected by some routes)
+Send JSON data; expected by certain routes
 
 For example:
 jobs/639172 put --json-data '{"group_id": 1}'
+
+=item B<--form>
+
+Send form data (application/x-www-form-urlencoded) instead of appending supplied parameters
+as URL query; expected by certain routes
+
+This is for instance used to post job templates, e.g.:
+
+job_templates_scheduling/1 post --form schema=JobTemplates-01.yaml preview=0 template="$(cat foo.yaml)"
+
+To create nested forms use dotted syntax, e.g.:
+
+jobs/1/artefact post --form file.file=bar file.filename=bar.log
 
 =item B<--help, -h>
 
@@ -123,83 +149,31 @@ Download all assets and test logs and images from job B<42> with asset limit of 
 
 =cut
 
-# Intentionally commented out - so far useful only for openQA debugging
-# =item B<--form>
-#
-# Use HTTP forms instead of appending supplied parameters as URL query
-#
-# To create nested forms use dotted syntax. For example:
-#
-# client jobs/1/artefact post file.file=bar file.filename=bar.log
-
 use strict;
 use warnings;
 use FindBin;
 BEGIN { unshift @INC, "$FindBin::RealBin/../lib" }
 
-use Mojo::JSON;    # booleans
-use Cpanel::JSON::XS ();
-use Data::Dump 'dd';
-use Mojo::URL;
-use OpenQA::Client;
+use OpenQA::Script::Client;
 use Getopt::Long;
-use OpenQA::Client::Archive;
-
 Getopt::Long::Configure("no_ignore_case");
 
 my %options;
 
 sub usage($) {
     my $r = shift;
-    eval { use Pod::Usage; pod2usage(1); };
-    if ($@) {
-        die "cannot display help, install perl(Pod::Usage)\n";
-    }
-}
-
-sub handle_result {
-    my $res = shift;
-
-    if ($res->code == 200) {
-        my $json = $res->json;
-        if ($options{'json-output'}) {
-            print Cpanel::JSON::XS->new->pretty->encode($json);
-        }
-        else {
-            dd($json || $res->body);
-        }
-        return $json;
-    }
-
-    printf(STDERR "ERROR: %s - %s\n", $res->code, $res->{error}->{message});
-    if ($res->body) {
-        if ($options{json}) {
-            print Cpanel::JSON::XS->new->pretty->encode($res->json);
-        }
-        else {
-            dd($res->json || $res->body);
-        }
-    }
-    exit(1);
-}
-
-# prepend the API-base if the specified path is relative
-sub prepend_api_base {
-    my $path = shift;
-
-    if ($path !~ m/^\//) {
-        $path = join('/', $options{apibase}, $path);
-    }
-    return $path;
+    eval { require Pod::Usage; Pod::Usage::pod2usage($r); };
+    die "cannot display help, install perl(Pod::Usage)\n" if $@;
 }
 
 GetOptions(
-    \%options,            'host=s',      'apibase=s',   'json-output',
-    'verbose|v',          'apikey:s',    'apisecret:s', 'params=s',
-    'form',               'json-data:s', 'help|h|?',    'archive|a:s',
-    'asset-size-limit:i', 'with-thumbnails'
+    \%options,            'host=s',          'apibase=s',   'json-output',
+    'verbose|v',          'apikey:s',        'apisecret:s', 'params=s',
+    'form',               'json-data:s',     'help|h|?',    'archive|a:s',
+    'asset-size-limit:i', 'with-thumbnails', 'accept=s',    'yaml-output',
 ) or usage(1);
 
+usage(0) if $options{help};
 usage(1) unless @ARGV;
 
 if ($options{form} && $options{'json-data'}) {
@@ -207,97 +181,7 @@ if ($options{form} && $options{'json-data'}) {
     exit(2);
 }
 
-$options{host}    ||= 'localhost';
-$options{apibase} ||= '/api/v1';
-
-# determine operation and path
-my $operation = shift @ARGV;
-my $path      = prepend_api_base($operation);
-
-my $method = 'get';
-my %params;
-
-if ($options{params}) {
-    local $/;
-    open(my $fh, '<', $options{params});
-    my $info = Cpanel::JSON::XS->new->relaxed->decode(<$fh>);
-    close $fh;
-    %params = %{$info};
-}
-
-for my $arg (@ARGV) {
-    if ($arg =~ /^(?:get|post|delete|put)$/i) {
-        $method = lc $arg;
-    }
-    elsif ($arg =~ /^([[:alnum:]_\[\]\.]+)=(.+)/) {
-        $params{$1} = $2;
-    }
-}
-
-my $url;
-
-if ($options{host} !~ '/') {
-    $url = Mojo::URL->new();
-    $url->host($options{host});
-    $url->scheme('http');
-}
-else {
-    $url = Mojo::URL->new($options{host});
-}
-
-$url->path($path);
-
-if (!$options{form}) {
-    $url->query([%params]) if %params;
-}
-else {
-    my %form;
-    for (keys %params) {
-        if (/(\S+)\.(\S+)/) {
-            $form{$1}{$2} = $params{$_};
-        }
-        else {
-            $form{$_} = $params{$_};
-        }
-    }
-    %params = %form;
-}
-
-my $client = OpenQA::Client->new(apikey => $options{apikey}, apisecret => $options{apisecret}, api => $url->host);
-
-if ($options{form}) {
-    handle_result($client->$method($url, form => \%params)->res);
-}
-elsif ($options{'json-data'}) {
-    handle_result($client->$method($url, {'Content-Type' => 'application/json'} => $options{'json-data'})->res);
-}
-else {
-    # Either the user wants to call a command or wants to interact with
-    # the rest api directly.
-    if ($options{archive}) {
-        my $res;
-        $options{path}    = $path;
-        $options{url}     = $url;
-        $options{params}  = \%params;
-        $options{params2} = @ARGV;
-        eval { $res = $client->archive->run(\%options) };
-        die "ERROR: $@ \n", $@ if $@;
-        exit(0);
-    }
-    elsif ($operation eq 'jobs/overview/restart') {
-        $url->path(prepend_api_base('jobs/overview'));
-        my $relevant_jobs = handle_result($client->get($url)->res);
-        my @job_ids       = map { $_->{id} } @$relevant_jobs;
-        $url->path(prepend_api_base('jobs/restart'));
-        $url->query(Mojo::Parameters->new);
-        $url->query(jobs => \@job_ids);
-        print("$url\n");
-        handle_result($client->post($url)->res);
-    }
-    else {
-        handle_result($client->$method($url)->res);
-    }
-}
+my $ret = run(\%options, @ARGV);
+exit(defined $ret ? 0 : 1);
 
 1;
-# vim: set sw=4 sts=4 et:

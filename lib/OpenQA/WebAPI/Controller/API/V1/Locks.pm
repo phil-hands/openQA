@@ -1,4 +1,4 @@
-# Copyright (c) 2015-2019 SUSE LINUX GmbH, Nuernberg, Germany.
+# Copyright (c) 2015-2019 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -90,7 +90,7 @@ sub mutex_create {
     my $name = $validation->param('name');
 
     my $res = OpenQA::Resource::Locks::create($name, $jobid);
-    return $self->render(text => 'ack', status => 200) if $res;
+    return $self->render(text => 'ack',  status => 200) if $res;
     return $self->render(text => 'nack', status => 409);
 }
 
@@ -152,7 +152,7 @@ sub barrier_create {
     my $name  = $validation->param('name');
 
     my $res = OpenQA::Resource::Locks::barrier_create($name, $jobid, $tasks);
-    return $self->render(text => 'ack', status => 200) if $res;
+    return $self->render(text => 'ack',  status => 200) if $res;
     return $self->render(text => 'nack', status => 409);
 }
 
@@ -183,4 +183,3 @@ sub barrier_destroy {
 }
 
 1;
-# vim: set sw=4 et:

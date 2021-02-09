@@ -1,0 +1,37 @@
+% layout 'bootstrap';
+% title 'Medium types';
+
+% content_for 'ready_function' => begin
+   setupAdminTable(<%= is_admin_js %>);
+% end
+
+<div class="row">
+    <div class="col-sm-12">
+
+    <h2><%= title %></h2>
+
+    %= include 'layouts/info'
+
+    <table class="admintable table table-striped" id='products'>
+        <thead>
+            <tr>
+                <th class="col_value">Distri</th>
+                <th class="col_value">Version</th>
+                <th class="col_value">Flavor</th>
+                <th class="col_value">Arch</th>
+                <th class="col_settings_list">Settings</th>
+                <th class="col_action">Actions</th>
+            </tr>
+        </thead>
+        <tbody>
+        </tbody>
+    </table>
+    % if (is_admin) {
+    <div class="text-center">
+        <input value="New medium" onclick="addAdminTableRow();" type="button" class="btn btn-default"/>
+    </div>
+    % }
+    <input type="hidden" id="admintable_api_url" value="/api/v1/products"/>
+</div>
+
+</div>

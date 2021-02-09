@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::JobSettings;
 
@@ -20,8 +19,6 @@ use strict;
 use warnings;
 
 use base 'DBIx::Class::Core';
-
-use db_helpers;
 
 __PACKAGE__->table('job_settings');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime Timestamps));
@@ -59,9 +56,8 @@ __PACKAGE__->has_many(
 
 sub sqlt_deploy_hook {
     my ($self, $sqlt_table) = @_;
-    $sqlt_table->add_index(name => 'idx_value_settings',        fields => ['key',    'value']);
+    $sqlt_table->add_index(name => 'idx_value_settings', fields => ['key', 'value']);
     $sqlt_table->add_index(name => 'idx_job_id_value_settings', fields => ['job_id', 'key', 'value']);
 }
 
 1;
-# vim: set sw=4 et:

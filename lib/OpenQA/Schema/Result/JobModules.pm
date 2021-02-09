@@ -1,4 +1,4 @@
-# Copyright (C) 2015-2016 SUSE LLC
+# Copyright (C) 2015-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::JobModules;
 
@@ -22,11 +21,11 @@ use warnings;
 use 5.012;    # so readdir assigns to $_ in a lone while test
 use base 'DBIx::Class::Core';
 
-use db_helpers;
-use OpenQA::Scheduler::Scheduler;
+use OpenQA::Log qw(log_debug);
 use OpenQA::Jobs::Constants;
-use OpenQA::Schema::Result::Jobs;
 use Mojo::JSON qw(decode_json encode_json);
+use Mojo::File qw(path tempfile);
+use Mojo::Util 'decode';
 use File::Basename qw(dirname basename);
 use File::Path 'remove_tree';
 use Cwd 'abs_path';
@@ -92,6 +91,7 @@ __PACKAGE__->belongs_to(
         on_update     => "CASCADE",
     },
 );
+__PACKAGE__->add_unique_constraint([qw(job_id name category script)]);
 
 sub sqlt_deploy_hook {
     my ($self, $sqlt_table) = @_;
@@ -99,158 +99,75 @@ sub sqlt_deploy_hook {
     $sqlt_table->add_index(name => 'idx_job_modules_result', fields => ['result']);
 }
 
-my %columns_by_result = (
-    OpenQA::Jobs::Constants::PASSED     => 'passed_module_count',
-    OpenQA::Jobs::Constants::SOFTFAILED => 'softfailed_module_count',
-    OpenQA::Jobs::Constants::FAILED     => 'failed_module_count',
-    OpenQA::Jobs::Constants::NONE       => 'skipped_module_count',
-    OpenQA::Jobs::Constants::SKIPPED    => 'externally_skipped_module_count',
-);
+sub results {
+    my ($self, %options) = @_;
+    my $skip_text_data = $options{skip_text_data};
 
-# override to update job module stats in jobs table
-sub store_column {
-    my ($self, $name, $value) = @_;
+    my $dir = $self->job->result_dir;
+    return undef unless $dir;
+    my $name              = $self->name;
+    my $file_name         = "$dir/details-$name.json";
+    my $initial_file_size = -s $file_name;
+    my $json_data         = eval { path($file_name)->slurp };
+    if (my $error = $@) {
+        log_debug("Unable to read $name: $error");
+        return {};
+    }
+    my $json = eval { decode_json($json_data) } // {};
+    log_debug("Malformed JSON file $file_name") if $@;
 
-    # only updates of result relevant here
-    if (!($name eq 'result' || $name eq 'job_id')) {
-        return $self->next::method($name, $value);
+    # load detail file which restores all results provided by os-autoinst (with hash-root)
+    # support also old format which only restores details information (with array-root)
+    my $results = ref($json) eq 'HASH' ? $json : {details => $json};
+    my $details = $results->{details};
+
+    # when the job module is running, the content of the details file is {"result" => "running"}
+    # so set details to []
+    if (ref $details ne 'ARRAY') {
+        $results->{details} = [];
+        return $results;
     }
 
-    # set default result to 'none'
-    $value //= OpenQA::Jobs::Constants::NONE if ($name eq 'result');
-
-    # remember previous value before updating
-    my $previous_value = $self->get_column($name);
-    my $res            = $self->next::method($name, $value);
-
-    # skip this when the value does not change
-    if ($value && $previous_value && $value eq $previous_value) {
-        return $res;
-    }
-
-    # update statistics in relevant job(s)
-    if ($name eq 'result') {
-        # update assigned job on result change
-        my $job = $self->job or return $res;
-        my %job_update;
-        if (my $value_column = $columns_by_result{$value}) {
-            $job_update{$value_column} = $job->get_column($value_column) + 1;
-        }
-        if ($previous_value) {
-            if (my $previous_value_column = $columns_by_result{$previous_value}) {
-                $job_update{$previous_value_column} = $job->get_column($previous_value_column) - 1;
+    for my $step (@$details) {
+        my $text_file_name = $step->{text};
+        if (!$skip_text_data && $text_file_name && !defined $step->{text_data}) {
+            eval { $step->{text_data} = decode('UTF-8', path($dir, $text_file_name)->slurp); };
+            if (my $error = $@) {
+                # try reading the results one more time if the JSON file's size has increased; otherwise render an error
+                # note: Likely a concurrent finalize_job_results Minion job has finished so the separate text file has
+                #       just been incorporated within the JSON file.
+                return $self->results(%options) if (-s $file_name // -1) > ($initial_file_size // -1);
+                $step->{text_data} = "Unable to read $text_file_name.";
             }
         }
-        $job->update(\%job_update);
 
-    }
-    elsif ($name eq 'job_id') {
-        # update previous job and new job on job assignment
-        # handling previous job might not be neccassary because once a job is assigned, it shouldn't
-        # change anymore, right?
-        my $result = $self->result or return $res;
-        my $result_column = $columns_by_result{$result} or return $res;
-        if ($previous_value) {
-            if (my $previous_job = $self->result_source->schema->resultset('Jobs')->find($previous_value)) {
-                $previous_job->update({$result_column => $previous_job->get_column($result_column) - 1});
-            }
-        }
-        if ($value) {
-            if (my $job = $self->result_source->schema->resultset('Jobs')->find($value)) {
-                $job->update({$result_column => $job->get_column($result_column) + 1});
-            }
-        }
-    }
-
-    return $res;
-}
-
-# override to update job module stats in jobs table
-sub insert {
-    my ($self, @args) = @_;
-    $self->next::method(@args);
-
-    # count modules which are initially skipped (default value for the result) in statistics of associated job
-    # doing this explicitely is required because in this case store_column does not seem to be called
-    my $job    = $self->job;
-    my $result = $self->result;
-    if ($job && (!$result || $result eq OpenQA::Jobs::Constants::NONE)) {
-        $job->update({skipped_module_count => $job->skipped_module_count + 1});
-    }
-
-    return $self;
-}
-
-sub details {
-    my ($self) = @_;
-
-    my $dir = $self->job->result_dir();
-    return unless $dir;
-    my $fn = "$dir/details-" . $self->name . ".json";
-    OpenQA::Utils::log_debug "reading $fn";
-    open(my $fh, "<", $fn) || return [];
-    local $/;
-    my $ret;
-    # decode_json dies if JSON is malformed, so handle that
-    try {
-        $ret = decode_json(<$fh>);
-    }
-    catch {
-        OpenQA::Utils::log_debug "malformed JSON file $fn";
-        $ret = [];
-    }
-    finally {
-        close($fh);
-    };
-    for my $img (@$ret) {
-        next unless $img->{screenshot};
-        my $link = abs_path($dir . "/" . $img->{screenshot});
+        next unless $step->{screenshot};
+        my $link = abs_path("$dir/$step->{screenshot}");
         next unless $link;
         my $base = basename($link);
         my $dir  = dirname($link);
         # if linking into images, translate it into md5 lookup
         if ($dir =~ m,/images/,) {
             $dir =~ s,^.*/images/,,;
-            $img->{md5_dirname}  = $dir;
-            $img->{md5_basename} = $base;
+            $step->{md5_dirname}  = $dir;
+            $step->{md5_basename} = $base;
         }
     }
 
-    return $ret;
-}
-
-sub job_module {
-    my ($job, $name) = @_;
-
-    my $schema = OpenQA::Scheduler::Scheduler::schema();
-    return $schema->resultset("JobModules")->search({job_id => $job->id, name => $name})->first;
-}
-
-sub job_modules {
-    my ($job) = @_;
-
-    my $schema = OpenQA::Scheduler::Scheduler::schema();
-    return $schema->resultset("JobModules")->search({job_id => $job->id}, {order_by => 'id'})->all;
+    return $results;
 }
 
 sub update_result {
     my ($self, $r) = @_;
-
-    my $result = $r->{result};
-
-    $result ||= 'none';
+    my $result = $r->{result} || 'none';
     $result =~ s,fail,failed,;
     $result =~ s,^na,none,;
     $result =~ s,^ok,passed,;
     $result =~ s,^unk,none,;
     $result =~ s,^skip,skipped,;
-    if ($r->{dents} && $result eq 'passed') {
-        $result = 'softfailed';
-    }
-    $self->update(
-        {
-            result => $result,
-        });
+    $result = 'softfailed' if ($r->{dents} && $result eq 'passed');
+    $self->update({result => $result});
+    return $result;
 }
 
 # if you give a needle_cache, make sure to call
@@ -258,27 +175,15 @@ sub update_result {
 sub store_needle_infos {
     my ($self, $details, $needle_cache) = @_;
 
-    my $schema = $self->result_source->schema;
-
     # we often see the same needles in the same test, so avoid duplicated work
     my %hash;
-    if (!$needle_cache) {
-        $needle_cache = \%hash;
-    }
-
-    my %needles;
-
-    for my $detail (@{$details}) {
+    $needle_cache = \%hash unless $needle_cache;
+    for my $detail (@$details) {
         if ($detail->{needle}) {
-            my $nfn    = $detail->{json};
-            my $needle = OpenQA::Schema::Result::Needles::update_needle($nfn, $self, 1, $needle_cache);
-            $needles{$needle->id} ||= 1;
+            OpenQA::Schema::Result::Needles::update_needle($detail->{json}, $self, 1, $needle_cache);
         }
         for my $needle (@{$detail->{needles} || []}) {
-            my $nfn    = $needle->{json};
-            my $needle = OpenQA::Schema::Result::Needles::update_needle($nfn, $self, 0, $needle_cache);
-            # failing needles are more interesting than succeeding, so ignore previous values
-            $needles{$needle->id} = -1;
+            OpenQA::Schema::Result::Needles::update_needle($needle->{json}, $self, 0, $needle_cache);
         }
     }
 
@@ -287,52 +192,79 @@ sub store_needle_infos {
 }
 
 sub _save_details_screenshot {
-    my ($self, $screenshot, $existent_md5, $cleanup) = @_;
+    my ($self, $screenshot, $known_md5_sums) = @_;
 
     my ($full, $thumb) = OpenQA::Utils::image_md5_filename($screenshot->{md5});
-    if (-e $full) {    # mark existent
-        push(@$existent_md5, $screenshot->{md5});
-    }
-    if ($cleanup) {
-        # interactive mode, recreate the symbolic link of screenshot if it was changed
-        my $full_link  = readlink($self->job->result_dir . "/" . $screenshot->{name})         || '';
-        my $thumb_link = readlink($self->job->result_dir . "/.thumbs/" . $screenshot->{name}) || '';
-        if ($full ne $full_link) {
-            OpenQA::Utils::log_debug "cleaning up " . $self->job->result_dir . "/" . $screenshot->{name};
-            unlink($self->job->result_dir . "/" . $screenshot->{name});
-        }
-        if ($thumb ne $thumb_link) {
-            OpenQA::Utils::log_debug "cleaning up " . $self->job->result_dir . "/.thumbs/" . $screenshot->{name};
-            unlink($self->job->result_dir . "/.thumbs/" . $screenshot->{name});
-        }
-    }
-    symlink($full,  $self->job->result_dir . "/" . $screenshot->{name});
-    symlink($thumb, $self->job->result_dir . "/.thumbs/" . $screenshot->{name});
-    return $screenshot->{name};
+    my $result_dir      = $self->job->result_dir;
+    my $screenshot_name = $screenshot->{name};
+    $known_md5_sums->{$screenshot->{md5}} = 1 if defined $known_md5_sums && -e $full;
+    symlink($full,  "$result_dir/$screenshot_name");
+    symlink($thumb, "$result_dir/.thumbs/$screenshot_name");
+    return $screenshot_name;
 }
 
-sub save_details {
-    my ($self, $details, $cleanup) = @_;
-    my $existent_md5 = [];
+sub save_results {
+    my ($self, $results, $known_md5_sums, $known_file_names) = @_;
     my @dbpaths;
-    my $schema = $self->result_source->schema;
+    my $details    = $results->{details};
+    my $result_dir = $self->job->result_dir;
     for my $d (@$details) {
-        # avoid creating symlinks for text results
-        if ($d->{screenshot}) {
+        # create symlinks for screenshots
+        if (my $screenshot = $d->{screenshot}) {
             # save the database entry for the screenshot first
-            push(@dbpaths, OpenQA::Utils::image_md5_filename($d->{screenshot}->{md5}, 1));
+            push(@dbpaths, OpenQA::Utils::image_md5_filename($screenshot->{md5}, 1));
             # create possibly stale symlinks
-            $d->{screenshot} = $self->_save_details_screenshot($d->{screenshot}, $existent_md5, $cleanup);
+            $d->{screenshot} = $self->_save_details_screenshot($screenshot, $known_md5_sums);
+            next;
+        }
+        # report other files as known if already present
+        next unless defined $known_file_names;
+        if (my $other_file = $d->{text} || $d->{audio}) {
+            $known_file_names->{$other_file} = 1 if -e "$result_dir/$other_file";
         }
     }
-    OpenQA::Schema::Result::ScreenshotLinks::populate_images_to_job($schema, \@dbpaths, $self->job_id);
-
+    $self->result_source->schema->resultset('Screenshots')->populate_images_to_job(\@dbpaths, $self->job_id);
     $self->store_needle_infos($details);
-    open(my $fh, ">", $self->job->result_dir . "/details-" . $self->name . ".json");
-    $fh->print(encode_json($details));
-    close($fh);
-    return $existent_md5;
+    path($self->job->result_dir, 'details-' . $self->name . '.json')->spurt(encode_json($results));
+}
+
+# incorporate textual step data into details JSON
+# note: Can not be called from save_results() because the upload must have already been concluded.
+sub finalize_results {
+    my ($self) = @_;
+
+    # locate details JSON; skip if not present or empty
+    my $dir = $self->job->result_dir;
+    return undef unless $dir;
+    my $name = $self->name;
+    my $file = path($dir, "details-$name.json");
+    return undef unless -s $file;
+
+    # read details; skip if none present
+    my $results = decode_json($file->slurp);
+    my $details = ref $results eq 'HASH' ? $results->{details} : $results;
+    return undef unless ref $details eq 'ARRAY' && @$details;
+
+    # incorporate textual step data into details
+    for my $step (@$details) {
+        next unless my $text = $step->{text};
+        my $txtfile = path($dir, $text);
+        next unless -e $txtfile;
+        $step->{text_data} = decode('UTF-8', $txtfile->slurp);
+    }
+
+    # replace file contents on disk using a temp file to preserve old file if something goes wrong
+    my $new_file_contents = encode_json($results);
+    my $tmpfile           = tempfile(DIR => $file->dirname);
+    $tmpfile->spurt($new_file_contents);
+    $tmpfile->chmod(0644)->move_to($file);
+
+    # cleanup incorporated files
+    for my $step (@$details) {
+        next unless $step->{text} && defined $step->{text_data};
+        my $textfile = path($dir, $step->{text});
+        $textfile->remove if -e $textfile;
+    }
 }
 
 1;
-# vim: set sw=4 et:

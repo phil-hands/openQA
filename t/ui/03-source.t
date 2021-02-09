@@ -1,4 +1,5 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+#!/usr/bin/env perl
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,33 +12,52 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '8';
 use OpenQA::Test::Case;
+use Mojo::File 'path';
 
-SKIP: {
-    skip "breaks package build", 4;
+my $schema  = OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl 05-job_modules.pl');
+my $t       = Test::Mojo->new('OpenQA::WebAPI');
+my $name    = 'installer_timezone';
+my $id      = 99938;
+my $src_url = "/tests/$id/modules/$name/steps/1/src";
+$t->get_ok($src_url)->status_is(200)->content_like(qr|installation/.*$name.pm|i, "$name test source found")
+  ->content_like(qr/assert_screen.*timezone/i, "$name test source shown");
 
-    OpenQA::Test::Case->new->init_data;
+subtest 'source view for jobs using VCS based tests' => sub {
+    # simulate the job had been triggered with a VCS checkout setting
+    my $job       = $schema->resultset('Jobs')->find($id);
+    my $vars_file = path($job->result_dir(), 'vars.json');
+    $vars_file->remove;
+    my $settings_rs = $job->settings_rs;
+    my $casedir     = 'https://github.com/me/repo#my/branch';
+    $settings_rs->update_or_create({job_id => $id, key => 'CASEDIR', value => $casedir});
+    my $expected = qr@github.com/me/repo/blob/my/branch/tests.*/installer_timezone@;
+    $t->get_ok($src_url)->status_is(302)->header_like('Location' => $expected);
 
-    my $t = Test::Mojo->new('OpenQA::WebAPI');
+    subtest 'github treats ".git" as optional extension which needs to be stripped' => sub {
+        $casedir = 'https://github.com/me/repo.git#my/branch';
+        $settings_rs->find({key => 'CASEDIR'})->update({value => $casedir});
+        $t->get_ok($src_url)->status_is(302)->header_like('Location' => $expected);
+    };
 
-    my $test_name = 'isosize';
-
-    my $get = $t->get_ok("/tests/99938/modules/$test_name/steps/1/src")->status_is(200);
-    $get->content_like(qr|inst\.d/.*$test_name.pm|i, "$test_name test source found");
-    $get->content_like(qr/ISO_MAXSIZE/i,             "$test_name test source shown");
+    subtest 'unique git hash is read from vars.json if existant' => sub {
+        $vars_file->spurt('
+{
+   "TEST_GIT_HASH" : "77b4c9e4bf649d6e489da710b9f08d8008e28af3"
 }
+');
+        $expected = qr@github.com/me/repo/blob/77b4c9e4bf649d6e489da710b9f08d8008e28af3/tests.*/installer_timezone@;
+        $t->get_ok($src_url)->status_is(302)->header_like('Location' => $expected);
+    };
+};
 
-done_testing();
+done_testing;

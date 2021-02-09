@@ -1,6 +1,5 @@
-#!/usr/bin/env perl -w
-
-# Copyright (c) 2015 SUSE LINUX GmbH, Nuernberg, Germany.
+#!/usr/bin/env perl
+# Copyright (c) 2015-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,26 +14,20 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
-use strict;
-use warnings;
-
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Utils;
 use OpenQA::Test::Database;
+use OpenQA::Test::TimeLimit '20';
 use OpenQA::Constants 'WEBSOCKET_API_VERSION';
 use OpenQA::Jobs::Constants;
-use Test::More;
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 
 
-my $schema = OpenQA::Test::Database->new->create();
+my $schema = OpenQA::Test::Database->new->create(fixtures_glob => '01-jobs.pl 02-workers.pl 06-job_dependencies.pl');
 my $t      = Test::Mojo->new('OpenQA::WebAPI');
 
 # from fixtures
@@ -56,7 +49,7 @@ $t->ua->on(
 # try locking before mutex is created
 $t->post_ok('/api/v1/mutex/test_lock', form => {action => 'lock'})->status_is(409);
 
-$t->post_ok('/api/v1/mutex')->status_is(400);    # missing name
+$t->post_ok('/api/v1/mutex')->status_is(400);                             # missing name
 $t->post_ok('/api/v1/mutex', form => {name => 'a/b'})->status_is(400);    # invalid name
 
 # create test mutex
@@ -67,7 +60,7 @@ ok($res, 'mutex is in database');
 ## mutex is not locked
 ok(!$res->locked_by, 'mutex is not locked');
 
-$t->post_ok('/api/v1/mutex/test_lock')->status_is(400);                   # missing action
+$t->post_ok('/api/v1/mutex/test_lock')->status_is(400);                                   # missing action
 $t->post_ok('/api/v1/mutex/test_lock', form => {action => 'invalid'})->status_is(400);    # invalid action
 
 # lock mutex
@@ -362,13 +355,13 @@ set_token_header($t->ua, 'token' . $jC);
 $t->post_ok($b_prefix . '/barrier2', form => {action => 'wait', check_dead_job => 1})->status_is(200);
 
 # input validation
-$t->post_ok($m_prefix)->status_is(400)->content_is('Invalid request parameters (name)');
-$t->post_ok("$m_prefix/foo")->status_is(400)->content_is('Invalid request parameters (action)');
+$t->post_ok($m_prefix)->status_is(400)->content_is('Erroneous parameters (name missing)');
+$t->post_ok("$m_prefix/foo")->status_is(400)->content_is('Erroneous parameters (action missing)');
 $t->post_ok($b_prefix => form => {tasks => 'abc'})->status_is(400)
-  ->content_is('Invalid request parameters (name, tasks)');
+  ->content_is('Erroneous parameters (name missing, tasks invalid)');
 $t->post_ok("$b_prefix/foo" => form => {where => 'abc'})->status_is(400)
-  ->content_is('Invalid request parameters (where)');
+  ->content_is('Erroneous parameters (where invalid)');
 $t->delete_ok("$b_prefix/foo" => form => {where => 'abc'})->status_is(400)
-  ->content_is('Invalid request parameters (where)');
+  ->content_is('Erroneous parameters (where invalid)');
 
 done_testing();

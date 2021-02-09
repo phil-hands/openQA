@@ -1,4 +1,4 @@
-# Copyright (C) 2017 SUSE LLC
+# Copyright (C) 2017-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,20 +11,15 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
+# no OpenQA::Test::TimeLimit for this trivial test
 
-use Mojo::Base -strict;
-use Test::More;
-use Test::Mojo;
-use Test::Warnings;
+use Mojo::Base 'Mojolicious', -signatures;
 
 use_ok('OpenQA::WebAPI::Description', qw(get_pod_from_controllers set_api_desc));
-$ENV{OPENQA_CODEBASE} = ".";
-get_pod_from_controllers();
+my $app = Mojolicious->new;
+get_pod_from_controllers($app);
 
 done_testing;

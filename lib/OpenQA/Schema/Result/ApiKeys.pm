@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Schema::Result::ApiKeys;
 
@@ -21,7 +20,7 @@ use warnings;
 
 use base 'DBIx::Class::Core';
 
-use db_helpers;
+use OpenQA::Utils 'random_hex';
 
 __PACKAGE__->table('api_keys');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime Timestamps));
@@ -53,12 +52,11 @@ __PACKAGE__->belongs_to(user => 'OpenQA::Schema::Result::Users', 'user_id');
 sub new {
     my ($class, $attrs) = @_;
 
-    $attrs->{key}    = db_helpers::rndhexU unless $attrs->{key};
-    $attrs->{secret} = db_helpers::rndhexU unless $attrs->{secret};
+    $attrs->{key}    = random_hex() unless $attrs->{key};
+    $attrs->{secret} = random_hex() unless $attrs->{secret};
 
     my $new = $class->next::method($attrs);
     return $new;
 }
 
 1;
-# vim: set sw=4 et:

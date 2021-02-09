@@ -1,6 +1,6 @@
-#! /usr/bin/perl
+#!/usr/bin/env perl
 
-# Copyright (C) 2019 SUSE LLC
+# Copyright (C) 2019-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,30 +13,54 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
 use FindBin;
-use lib "$FindBin::Bin/lib";
-use Mojo::Base -strict;
-use Test::More;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
 use OpenQA::Test::Case;
+use OpenQA::Jobs::Constants;
+use OpenQA::Test::TimeLimit '6';
 
 # init test case
 my $test_case = OpenQA::Test::Case->new;
-$test_case->init_data;
+$test_case->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl');
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
 # get resultsets
 my $db      = $t->app->schema;
 my $workers = $db->resultset('Workers');
 my $jobs    = $db->resultset('Jobs');
+
+$db->txn_begin;
+
+subtest 'reschedule assigned jobs' => sub {
+    my $worker_1 = $workers->find({host => 'localhost', instance => 1});
+
+    # assume the jobs 99961, 99963 and 99937 are assigned to the worker and 99961 is the current job
+    $workers->search({})->update({job_id => undef});
+    $worker_1->update({job_id => 99961});
+    $jobs->find($_)->update({state => ASSIGNED, assigned_worker_id => $worker_1->id}) for (99961, 99963);
+    $jobs->find(99937)->update({state => PASSED, assigned_worker_id => $worker_1->id});
+
+    $worker_1->reschedule_assigned_jobs;
+    $worker_1->discard_changes;
+
+    is($worker_1->job_id, undef, 'current job has been un-assigned');
+    for my $job_id ((99961, 99963)) {
+        my $job = $jobs->find($job_id);
+        is($job->state,              SCHEDULED, "job $job_id is scheduled again");
+        is($job->assigned_worker_id, undef,     "job $job_id has no worker assigned anymore");
+    }
+    my $passed_job = $jobs->find(99937);
+    is($passed_job->state,              PASSED,        'passed job not affected');
+    is($passed_job->assigned_worker_id, $worker_1->id, 'passed job still associated with worker');
+};
+
+$db->txn_rollback;
 
 subtest 'delete job which is currently assigned to worker' => sub {
     my $worker_1        = $workers->find({host => 'localhost', instance => 1});

@@ -1,4 +1,4 @@
-# Copyright (C) 2018 SUSE LLC
+# Copyright (C) 2018-2019 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -16,7 +16,8 @@
 package OpenQA::Test::FakeWebSocketTransaction;
 use Mojo::Base 'Mojo::EventEmitter';
 
-use Test::More;
+use Mojo::IOLoop;
+use Mojo::Message::Response;
 
 has finish_called => 0;
 has sent_messages => sub { return []; };
@@ -24,6 +25,11 @@ has sent_messages => sub { return []; };
 sub clear_messages {
     my ($self) = @_;
     $self->sent_messages([]);
+}
+
+sub is_finished {
+    my ($self) = @_;
+    return $self->finish_called;
 }
 
 sub is_websocket {
@@ -36,12 +42,15 @@ sub send {
 
     if ($self->finish_called) {
         fail('attempt to send message via finished connection');
-        return;
+        return undef;
     }
 
-    push(@{$self->sent_messages}, $message);
-    $callback->() if ($callback);
-    return 1;
+    push @{$self->sent_messages}, $message;
+    Mojo::IOLoop->next_tick($callback) if $callback;
+
+    my $res = Mojo::Message::Response->new;
+    $res->code(200);
+    return $res;
 }
 
 sub finish {

@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+      <!-- Meta, title, CSS, favicons, etc. -->
+      <meta charset="utf-8">
+      <meta http-equiv="X-UA-Compatible" content="IE=edge">
+      <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+      <meta name="description" content="openQA is a testing framework mainly for distributions">
+      <meta name="keywords" content="Testing, Linux, Qemu">
+      <meta name="author" content="openQA contributors">
+
+      <meta name="csrf-token" content="<%= csrf_token %>" />
+      <meta name="csrf-param" content="csrf_token" />
+
+      % if ($title) {
+      <title><%= $appname . ": " . title %></title>
+      % } else
+      % {
+      <title><%= $appname %></title>
+      % }
+
+      <!-- Bootstrap core CSS -->
+      %= asset 'bootstrap.css'
+      %= asset 'bootstrap.js'
+
+      %= content_for 'head'
+
+      %= javascript begin
+          %= content_for 'head_javascript'
+          $(function() {
+            setupForAll();
+            %= content_for 'ready_function'
+            % if (current_user) {
+              newFeature(<%= current_user->feature_version %>);
+            % }
+          } );
+      % end
+
+      <link id="favicon-16" rel="icon" href="<%= favicon_url '-16.png' %>" sizes="16x16" type="image/png">
+      <link id="favicon-svg" rel="icon" href="<%= favicon_url '.svg' %>" sizes="any" type="image/svg+xml">
+
+  </head>
+  <body>
+      %= include 'layouts/navbar'
+      <div class="container-fluid" id="content">
+          %= content
+      </div>
+
+      <footer class='footer'>
+          <div class='container-fluid'>
+              <div id="footer-links">
+                  <span class="left">
+                      %= include_branding 'links_footer_left'
+                  </span>
+                  <span class="right">
+                      %= include_branding 'links_footer_right'
+                  </span>
+              </div>
+              <div id='footer-legal' class="text-center">
+                  openQA is licensed
+                  %= link_to 'GPL-2.0' => 'https://github.com/os-autoinst/openQA'
+                  % if ($current_version) {
+                      - Version
+                      %= link_to $current_version => url_for('changelog')
+                  % }
+              </div>
+            </div>
+      </footer>
+  </body>
+</html>

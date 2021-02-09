@@ -18,12 +18,12 @@ use Mojo::Base 'Mojolicious::Controller';
 
 BEGIN { $ENV{MAGICK_THREAD_LIMIT} = 1; }
 
-use OpenQA::Utils;
+use OpenQA::Utils qw(:DEFAULT prjdir assetdir imagesdir);
 use File::Basename;
 use File::Spec;
 use File::Spec::Functions 'catfile';
 use Data::Dump 'pp';
-use Mojolicious::Static;
+use Mojo::File 'path';
 
 sub needle {
     my $self = shift;
@@ -32,21 +32,43 @@ sub needle {
     # 13.1.png would be format 1.png otherwise
     my ($name, $dummy, $format) = fileparse($self->param('name'), qw(.png .txt));
     my $distri   = $self->param('distri');
-    my $version  = $self->param('version') || '';
+    my $version  = $self->param('version')  || '';
     my $jsonfile = $self->param('jsonfile') || '';
-    # make sure the directory of the file parameter is a real subdir of
-    # testcasedir before applying it as needledir to prevent access
-    # outside of the zoo
+
+    # locate the needle in the needle directory for the given distri and version
+    my $needledir = needledir($distri, $version);
+
+    # make sure the directory of the file parameter is a real subdir of testcasedir before
+    # using it to find needle subdirectory, to prevent access outside of the zoo
     if ($jsonfile && !is_in_tests($jsonfile)) {
+        my $prjdir = prjdir();
         warn "$jsonfile is not in a subdir of $prjdir/share/tests or $prjdir/tests";
         return $self->render(text => 'Forbidden', status => 403);
     }
-    my $needle = needle_info($name, $distri, $version, $jsonfile);
-    return $self->reply->not_found unless $needle;
-
-    $self->{static} = Mojolicious::Static->new;
-    # needledir is an absolute path from the needle database
-    push @{$self->{static}->paths}, $needle->{needledir};
+    # Reject directory traversal breakouts here...
+    if (index($jsonfile, '..') != -1) {
+        warn "jsonfile value $jsonfile is invalid, cannot contain ..";
+        return $self->render(text => 'Forbidden', status => 403);
+    }
+    # we need to handle the needle being in a subdirectory - we cannot assume it is always just
+    # '$needledir/$name.$format'. figure out subdirectory elements from the JSON file path
+    # Note this means you cannot just browse to /needles/distri/subdir/needle.png;
+    # you can only find needles in subdirectories by passing the jsonfile parameter
+    my ($dummy1, $path, $dummy2) = fileparse($jsonfile);
+    # drop the trailing / from $path
+    $path = substr($path, 0, -1);
+    if (index($path, '/needles') != -1) {
+        # we got something like /var/lib/openqa/share/tests/distri/needles/(subdir)/needle.json
+        my @elems = split('/needles', $path, 2);
+        if (defined $elems[1]) {
+            $needledir .= $elems[1];
+        }
+    }
+    elsif ($path ne '.') {
+        # we got something like subdir/needle.json, $path will be "subdir"
+        $needledir .= "/$path";
+    }
+    push(@{($self->{static} = Mojolicious::Static->new)->paths}, $needledir);
 
     # name is an URL parameter and can't contain slashes, so it should be safe
     return $self->serve_static_($name . $format);
@@ -55,8 +77,8 @@ sub needle {
 sub _needle_by_id_and_extension {
     my ($self, $extension) = @_;
 
-    my $needle_id = $self->param('needle_id') or return $self->reply->not_found;
-    my $needle = $self->schema->resultset('Needles')->find($needle_id) or return $self->reply->not_found;
+    my $needle_id       = $self->param('needle_id')                             or return $self->reply->not_found;
+    my $needle          = $self->schema->resultset('Needles')->find($needle_id) or return $self->reply->not_found;
     my $needle_dir      = $needle->directory->path;
     my $needle_filename = $needle->name . $extension;
 
@@ -105,9 +127,9 @@ sub download_asset {
     my $path = $self->param('assetpath');
     return $self->reply->not_found if $path =~ qr/\.\./;
 
-    my $static = Mojolicious::Static->new;
-    $static->paths([$OpenQA::Utils::assetdir]);
-    return $self->rendered if $static->serve($self, $path);
+    my $file = path(assetdir(), $path)->to_string;
+    return $self->reply->not_found unless -f $file && -r _;
+    $self->reply->file($file);
 }
 
 sub test_asset {
@@ -115,7 +137,7 @@ sub test_asset {
 
     my $jobid = $self->param('testid');
     my %cond  = ('me.id' => $jobid);
-    if ($self->param('assetid')) { $cond{'asset.id'} = $self->param('assetid') }
+    if    ($self->param('assetid')) { $cond{'asset.id'} = $self->param('assetid') }
     elsif ($self->param('assettype') and $self->param('assetname')) {
         $cond{name} = $self->param('assetname');
         $cond{type} = $self->param('assettype');
@@ -146,14 +168,9 @@ sub serve_static_ {
     my ($self, $asset) = @_;
 
     $self->app->log->debug("looking for " . pp($asset) . " in " . pp($self->{static}->paths));
-    if ($asset && !ref($asset)) {
-        # TODO: check for plain file name
-        $asset = $self->{static}->file($asset);
-    }
-
-    $self->app->log->debug("found " . pp($asset));
-
+    $asset = $self->{static}->file($asset) if $asset && !ref($asset);
     return $self->reply->not_found unless $asset;
+    $self->app->log->debug("found " . pp($asset));
 
     if (ref($asset) eq "Mojo::Asset::File") {
         my $filename = basename($asset->path);
@@ -193,7 +210,7 @@ sub thumb_image {
     my ($self) = @_;
 
     $self->{static} = Mojolicious::Static->new;
-    push @{$self->{static}->paths}, $OpenQA::Utils::imagesdir;
+    push @{$self->{static}->paths}, imagesdir();
 
     # name is an URL parameter and can't contain slashes, so it should be safe
     my $dir = $self->param('md5_dirname') || ($self->param('md5_1') . '/' . $self->param('md5_2'));
@@ -201,4 +218,3 @@ sub thumb_image {
 }
 
 1;
-# vim: set sw=4 et:

@@ -1,4 +1,4 @@
-# Copyright (C) 2017 SUSE LLC
+# Copyright (C) 2017-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,129 +14,50 @@
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Setup;
-use Mojo::Base -base;
+use Mojo::Base -strict;
 
-use Mojo::Home;
-use Mojo::Log;
-use Sys::Hostname;
-use File::Spec::Functions 'catfile';
 use Mojo::File 'path';
+use Mojo::Util 'trim';
+use Mojo::Loader 'load_class';
 use Config::IniFiles;
-use db_profiler;
-use db_helpers;
-use OpenQA::Utils;
+use OpenQA::App;
+use OpenQA::Log 'log_format_callback';
+use OpenQA::Utils qw(:DEFAULT assetdir random_string);
 use File::Path 'make_path';
 use POSIX 'strftime';
 use Time::HiRes 'gettimeofday';
-use OpenQA::Schema::JobGroupDefaults;
-
-has config => sub { {} };
-
-has log => sub { Mojo::Log->new(handle => \*STDOUT, level => "info"); };
-
-has home => sub { Mojo::Home->new($ENV{MOJO_HOME} || '/') };
-
-has mode => 'production';
-
-has 'log_name';
-
-has 'level';
-
-has 'instance';
-
-has 'log_dir';
-
-sub setup_log {
-    my ($self) = @_;
-    my ($logfile, $logdir, $level, $log);
-
-    if ($self->isa('OpenQA::Setup')) {
-        $logdir = $self->log_dir;
-        $level  = $self->level;
-        if ($logdir && !-e $logdir) {
-            make_path($logdir);
-        }
-        elsif ($logdir && !-d $logdir) {
-            die "Please point the logs to a valid folder!";
-        }
-    }
-    else {
-        $log = $self->log;
-    }
-    $level //= $self->config->{logging}->{level} // 'info';
-    $logfile = $ENV{OPENQA_LOGFILE} || $self->config->{logging}->{file};
-
-    if ($logfile && $logdir) {
-        $logfile = catfile($logdir, $logfile);
-        $log     = Mojo::Log->new(
-            handle => path($logfile)->open('>>'),
-            level  => $self->level,
-            format => \&log_format_callback
-        );
-    }
-    elsif ($logfile) {
-        $log = Mojo::Log->new(
-            handle => path($logfile)->open('>>'),
-            level  => $level,
-            format => \&log_format_callback
-        );
-    }
-    elsif ($logdir) {
-        # So each worker from each host get it's own log (as the folder can be shared). Hopefully the machine hostname
-        # is already sanitized. Otherwise we need to check
-        $logfile
-          = catfile($logdir, hostname() . (defined $self->instance ? "-${\$self->instance}" : '') . ".log");
-        $log = Mojo::Log->new(
-            handle => path($logfile)->open('>>'),
-            level  => $self->level,
-            format => \&log_format_callback
-        );
-    }
-    else {
-        $log = Mojo::Log->new(
-            handle => \*STDOUT,
-            level  => $level,
-            format => sub {
-                my ($time, $level, @lines) = @_;
-                return "[$level] " . join "\n", @lines, '';
-            });
-    }
-
-    $self->log($log);
-    if ($ENV{OPENQA_SQL_DEBUG} // $self->config->{logging}->{sql_debug} // 'false' eq 'true') {
-        # avoid enabling the SQL debug unless we really want to see it
-        # it's rather expensive
-        db_profiler::enable_sql_debugging($self);
-    }
-
-    $OpenQA::Utils::app = $self;
-    return $log;
-}
-
-sub emit_event {
-    my ($self, $event, $data) = @_;
-    # nothing to see here, move along
-}
+use Scalar::Util 'looks_like_number';
+use OpenQA::Constants qw(DEFAULT_WORKER_TIMEOUT MAX_TIMER);
+use OpenQA::JobGroupDefaults;
+use OpenQA::Task::Job::Limit;
 
 sub read_config {
     my $app      = shift;
     my %defaults = (
         global => {
-            appname             => 'openQA',
-            base_url            => undef,
-            branding            => 'openSUSE',
-            download_domains    => undef,
-            suse_mirror         => undef,
-            scm                 => undef,
-            hsts                => 365,
-            audit_enabled       => 1,
-            max_rss_limit       => 0,
-            profiling_enabled   => 0,
-            monitoring_enabled  => 0,
-            plugins             => undef,
-            hide_asset_types    => 'repo',
-            recognized_referers => '',
-            changelog_file      => '/usr/share/openqa/public/Changelog',
+            appname                     => 'openQA',
+            base_url                    => undef,
+            branding                    => 'openSUSE',
+            download_domains            => undef,
+            suse_mirror                 => undef,
+            scm                         => undef,
+            hsts                        => 365,
+            audit_enabled               => 1,
+            max_rss_limit               => 0,
+            profiling_enabled           => 0,
+            monitoring_enabled          => 0,
+            plugins                     => undef,
+            hide_asset_types            => 'repo',
+            recognized_referers         => '',
+            changelog_file              => '/usr/share/openqa/public/Changelog',
+            job_investigate_ignore      => '"(JOBTOKEN|NAME)"',
+            job_investigate_git_timeout => 20,
+            worker_timeout              => DEFAULT_WORKER_TIMEOUT,
+            search_results_limit        => 50000,
+            auto_clone_regex            => '^(cache failure|terminated prematurely): ',
+        },
+        rate_limits => {
+            search => 5,
         },
         auth => {
             method => 'OpenID',
@@ -155,12 +76,34 @@ sub read_config {
             provider  => 'https://www.opensuse.org/openid/user/',
             httpsonly => 1,
         },
+        oauth2 => {
+            provider => '',
+            key      => '',
+            secret   => '',
+        },
         hypnotoad => {
             listen => ['http://localhost:9526/'],
             proxy  => 1,
         },
         audit => {
+            # backward-compatible name definition
             blacklist => '',
+            blocklist => '',
+        },
+        'audit/storage_duration' => {
+            startup     => undef,
+            jobgroup    => undef,
+            jobtemplate => undef,
+            table       => undef,
+            iso         => undef,
+            user        => undef,
+            asset       => undef,
+            needle      => undef,
+            other       => undef,
+        },
+        plugin_links => {
+            operator => {},
+            admin    => {}
         },
         amqp => {
             reconnect_timeout => 5,
@@ -168,17 +111,39 @@ sub read_config {
             exchange          => 'pubsub',
             topic_prefix      => 'suse',
         },
+        obs_rsync => {
+            home               => '',
+            retry_interval     => 60,
+            retry_max_count    => 1400,
+            queue_limit        => 200,
+            concurrency        => 2,
+            project_status_url => '',
+        },
         default_group_limits => {
-            asset_size_limit                  => OpenQA::Schema::JobGroupDefaults::SIZE_LIMIT_GB,
-            log_storage_duration              => OpenQA::Schema::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
-            important_log_storage_duration    => OpenQA::Schema::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
-            result_storage_duration           => OpenQA::Schema::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
-            important_result_storage_duration => OpenQA::Schema::JobGroupDefaults::KEEP_IMPORTANT_RESULTS_IN_DAYS,
+            asset_size_limit                  => OpenQA::JobGroupDefaults::SIZE_LIMIT_GB,
+            log_storage_duration              => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
+            important_log_storage_duration    => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
+            result_storage_duration           => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
+            important_result_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_RESULTS_IN_DAYS,
         },
         misc_limits => {
-            untracked_assets_storage_duration => 14,
+            untracked_assets_storage_duration         => 14,
+            screenshot_cleanup_batch_size             => OpenQA::Task::Job::Limit::DEFAULT_SCREENSHOTS_PER_BATCH,
+            screenshot_cleanup_batches_per_minion_job => OpenQA::Task::Job::Limit::DEFAULT_BATCHES_PER_MINION_JOB,
+            results_min_free_disk_space_percentage    => undef,
         },
-    );
+        job_settings_ui => {
+            keys_to_render_as_links => '',
+            default_data_dir        => 'data',
+        },
+        'assets/storage_duration' => {
+            # intentionally left blank for overview
+        },
+        # allow dynamic config keys based on job results
+        hooks    => {},
+        influxdb => {
+            ignored_failed_minion_jobs => '',
+        });
 
     # in development mode we use fake auth and log to stderr
     my %mode_defaults = (
@@ -206,28 +171,63 @@ sub read_config {
     my $cfg;
     my $cfgpath = $ENV{OPENQA_CONFIG} ? path($ENV{OPENQA_CONFIG}) : $app->home->child("etc", "openqa");
     my $cfgfile = $cfgpath->child('openqa.ini');
+    my $config  = $app->config;
 
     if (-e $cfgfile) {
         $cfg = Config::IniFiles->new(-file => $cfgfile->to_string) || undef;
-        $app->config->{ini_config} = $cfg;
+        $config->{ini_config} = $cfg;
     }
     else {
         $app->log->warn("No configuration file supplied, will fallback to default configuration");
     }
 
     for my $section (sort keys %defaults) {
-        for my $k (sort keys %{$defaults{$section}}) {
+        my @known_keys = sort keys %{$defaults{$section}};
+        # if no known_keys defined - just assign every key from the section
+        if (!@known_keys && $cfg) {
+            for my $k ($cfg->Parameters($section)) {
+                $config->{$section}->{$k} = $cfg->val($section, $k);
+            }
+        }
+        for my $k (@known_keys) {
             my $v = $cfg && $cfg->val($section, $k);
             $v //=
               exists $mode_defaults{$app->mode}{$section}->{$k}
               ? $mode_defaults{$app->mode}{$section}->{$k}
               : $defaults{$section}->{$k};
-            $app->config->{$section}->{$k} = $v if defined $v;
+            $config->{$section}->{$k} = trim $v if defined $v;
         }
     }
-    $app->config->{global}->{recognized_referers} = [split(/ /, $app->config->{global}->{recognized_referers})];
-    $app->config->{_openid_secret} = db_helpers::rndstr(16);
-    $app->config->{auth}->{method} =~ s/\s//g;
+    my $global_config = $config->{global};
+    $global_config->{recognized_referers} = [split(/\s+/, $global_config->{recognized_referers})];
+    if (my $regex = $global_config->{auto_clone_regex}) {
+        $app->log->warn(
+            "Specified auto_clone_regex is invalid: $@Not restarting any jobs reported as incomplete by workers.")
+          unless eval { $global_config->{auto_clone_regex} = qr/$regex/ };
+    }
+    $config->{_openid_secret} = random_string(16);
+    $config->{auth}->{method} =~ s/\s//g;
+    if ($config->{audit}->{blacklist}) {
+        $app->log->warn("Deprecated use of config key '[audit]: blacklist'. Use '[audit]: blocklist' instead");
+        $config->{audit}->{blocklist} = delete $config->{audit}->{blacklist};
+    }
+    if (my $minion_fail_job_blocklist = $config->{influxdb}->{ignored_failed_minion_jobs}) {
+        $config->{influxdb}->{ignored_failed_minion_jobs} = [split(/\s+/, $minion_fail_job_blocklist)];
+    }
+    _validate_worker_timeout($app);
+}
+
+sub _validate_worker_timeout {
+    my ($app)                     = @_;
+    my $global_config             = $app->config->{global};
+    my $configured_worker_timeout = $global_config->{worker_timeout};
+    if (!looks_like_number($configured_worker_timeout) || $configured_worker_timeout < MAX_TIMER) {
+        $global_config->{worker_timeout} = DEFAULT_WORKER_TIMEOUT;
+        $app->log->warn(
+            'The specified worker_timeout is invalid and will be ignored. The timeout must be an integer greather than '
+              . MAX_TIMER
+              . '.');
+    }
 }
 
 # Update config definition from plugin requests
@@ -261,7 +261,11 @@ sub update_config {
     }
 }
 
-sub schema { OpenQA::Schema->singleton }
+sub prepare_settings_ui_keys {
+    my ($app)     = shift;
+    my @link_keys = split ',', $app->config->{job_settings_ui}->{keys_to_render_as_links};
+    $app->config->{settings_ui_links} = {map { $_ => 1 } @link_keys};
+}
 
 sub setup_app_defaults {
     my ($server) = @_;
@@ -274,9 +278,27 @@ sub setup_template_search_path {
     unshift @{$server->renderer->paths}, '/etc/openqa/templates';
 }
 
+sub setup_plain_exception_handler {
+    my ($app) = @_;
+
+    $app->routes->any('/*whatever' => {whatever => ''})->to(status => 404, text => 'Not found');
+
+    $app->helper(
+        'reply.exception' => sub {
+            my ($c, $error) = @_;
+
+            my $app = $c->app;
+            $error = blessed $error && $error->isa('Mojo::Exception') ? $error : Mojo::Exception->new($error);
+            $error = $error->inspect;
+            $app->log->error($error);
+            $error = 'internal error' if ($app->mode ne 'development');
+            $c->render(text => $error, status => 500);
+        });
+}
+
 sub setup_mojo_tmpdir {
     unless ($ENV{MOJO_TMPDIR}) {
-        $ENV{MOJO_TMPDIR} = $OpenQA::Utils::assetdir . '/tmp';
+        $ENV{MOJO_TMPDIR} = assetdir() . '/tmp';
         # Try to create tmpdir if it doesn't exist but don't die if failed to create
         if (!-e $ENV{MOJO_TMPDIR}) {
             eval { make_path($ENV{MOJO_TMPDIR}); };
@@ -289,11 +311,11 @@ sub setup_mojo_tmpdir {
 }
 
 sub load_plugins {
-    my ($server, $monitoring_root_route) = @_;
+    my ($server, $monitoring_root_route, %options) = @_;
 
     push @{$server->plugins->namespaces}, 'OpenQA::WebAPI::Plugin';
 
-    foreach my $plugin (qw(Helpers CSRF REST HashedParams Gru YAMLRenderer)) {
+    foreach my $plugin (qw(Helpers MIMETypes CSRF REST HashedParams Gru YAML)) {
         $server->plugin($plugin);
     }
 
@@ -303,7 +325,7 @@ sub load_plugins {
     # Load arbitrary plugins defined in config: 'plugins' in section
     # '[global]' can be a space-separated list of plugins to load, by
     # module name under OpenQA::WebAPI::Plugin::
-    if (defined $server->config->{global}->{plugins}) {
+    if (defined $server->config->{global}->{plugins} && !$options{no_arbitrary_plugins}) {
         my @plugins = split(' ', $server->config->{global}->{plugins});
         for my $plugin (@plugins) {
             $server->log->info("Loading external plugin $plugin");
@@ -319,9 +341,13 @@ sub load_plugins {
     # load auth module
     my $auth_method = $server->config->{auth}->{method};
     my $auth_module = "OpenQA::WebAPI::Auth::$auth_method";
-    eval "require $auth_module";    ## no critic
-    if ($@) {
-        die sprintf('Unable to load auth module %s for method %s', $auth_module, $auth_method);
+    if (my $err = load_class $auth_module) {
+        $err = 'Module not found' unless ref $err;
+        die "Unable to load auth module $auth_module: $err";
+    }
+    # Optional initialization with access to the app
+    if (my $sub = $auth_module->can('auth_setup')) {
+        $server->$sub;
     }
 
     # Read configurations expected by plugins.

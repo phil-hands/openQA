@@ -43,7 +43,20 @@ main.pm.
 The *test_flags* subroutine specifies what should happen when test execution of the
 current test module is finished depending on the result.
 If we should skip execution of the following test modules if current one failed, or it
-should be used to create a snapshot of SUT to rollback to. See example below.
+should be used to create a snapshot of the SUT to rollback to. The following flags
+are supported:
+
+* *fatal*: The whole test suite is aborted if the test module fails. The overall state
+  is set to `failed`.
+* *ignore_failure*: If this module fails, it will not affect the overall result at all.
+* *milestone*: After this test succeeds, update the 'lastgood' snapshot.
+* *no_rollback*: Don't roll back to the 'lastgood' snapshot if the test module fails.
+* *always_rollback*: Roll back to the 'lastgood' snapshot even if test was successful.
+
+See the example below for how to enable a test flag.
+Note that snapshots are only supported by the QEMU backend. When using other backends
+`fatal` is therefore enabled by default. One can explicitly set it to `0` to disable
+the behavior for all backends even though it is not possible to roll back.
 
 There are several callbacks defined:
 
@@ -77,12 +90,7 @@ sub run {
 }
 
 sub test_flags {
-    # 'fatal'          - abort whole test suite if this fails (and set overall state 'failed')
-    # 'ignore_failure' - if this module fails, it will not affect the overall result at all
-    # 'milestone'      - after this test succeeds, update 'lastgood'
-    # 'no_rollback'     - don't roll back to 'lastgood' snapshot if this fails
-    # 'always_rollback'    - roll back to 'lastgood' snapshot even if test was successful (supported on QEMU backend only)
-    return { fatal => 1 };
+    return {fatal => 1};
 }
 
 1;
@@ -152,8 +160,8 @@ sub run() {
 == Variables
 
 Test case behavior can be controlled via variables. Some basic
-variables like +DISTRI+, +VERSION+, +ARCH+ are always set.
-Others like +DESKTOP+ are defined by the 'Test suites' in the openQA
+variables like `DISTRI`, `VERSION`, `ARCH` are always set.
+Others like `DESKTOP` are defined by the 'Test suites' in the openQA
 web UI.
 Check the existing tests at
 https://github.com/os-autoinst/os-autoinst-distri-opensuse[os-autoinst-distri-opensuse
@@ -163,18 +171,27 @@ Variables are accessible via the *get_var* and *check_var* functions.
 
 == Advanced test features
 
+=== Changing timeout
+
+By default, tests are aborted after two hours by the worker. To change this limit, set the test
+variable `MAX_JOB_TIME` to the desired number of seconds.
+
+To save disk space, increasing the timeout beyond the default will automatically disable the video
+by adding `NOVIDEO=1` to the test settings. This can be prevented by adding `NOVIDEO=0` explicitly.
+
 === Capturing kernel exceptions and/or any other exceptions from the serial console
 
 Soft and hard failures can be triggered on demand by regular expressions when they match the
-serial output which is done after the test is executed. In case it doesn't make sense
-to continue test run even if current test module doesn't have fatal flag, use `fatal` as
-serial failure type, so all subsequent test modules won't be executed if such failure
+serial output which is done after the test is executed. In case it does not make sense
+to continue the test run even if the current test module does not have the fatal flag, use `fatal`
+as serial failure type, so all subsequent test modules will not be executed if such failure
 was detected.
+
 To use this functionality the test developer needs to define the patterns to
 look for in the serial output either in the main.pm or in the test itself.
 Any pattern change done in a test it will be reflected in the next tests.
 
-The patterns defined in the main.pm will be valid for all the tests.
+The patterns defined in `main.pm` will be valid for all the tests.
 
 To simplify tests results review, if job fails with the same message, which is defined
 for the pattern, as previous job, automatic comment carryover will work even if
@@ -264,100 +281,139 @@ In short, writing multi-machine tests adds a few more layers of complexity:
 3. actual technical realization (i.e. <<Networking.asciidoc#networking,custom networking>>)
 
 ==== Job dependencies
+There are different dependency *types* (see subsequent section). Additionally, dependencies can be machine-specific (see "Inter-machine dependencies" section).
 
-There are 2 types of dependencies: +CHAINED+ and +PARALLEL+:
+===== Dependency types
+There are 3 types of dependencies: `CHAINED`, `DIRECTLY_CHAINED` and `PARALLEL`
 
-* +CHAINED+ describes when one test case depends on another and both are run sequentially, i.e. KDE test suite is run after and only after Installation test suite
-is successfully finished and cancelled if fail.
+====== Chained dependencies
+`CHAINED` and `DIRECTLY_CHAINED` describe when one test case depends on another and both are run sequentially, i.e. KDE test suite is run after and only after Installation test suite is successfully finished and cancelled if fail.
 
-To define +CHAINED+ dependency add variable +START_AFTER_TEST+ with the name(s) of test suite(s) after which selected test suite is supposed to run.
-Use comma separated list for multiple test suite dependency. E.g. +START_AFTER_TEST="kde,dhcp-server"+
+The difference between `CHAINED` and `DIRECTLY_CHAINED` dependencies is that `DIRECTLY_CHAINED` means the tests must run directly after another on the same worker slot.
+This can be useful to test efficiently on bare metal SUTs and other self-provisioning environments.
 
-* +PARALLEL+ describes MM test, test suites are scheduled to run at the same time and managed as a group. On top of that, +PARALLEL+ also describes
-test suites dependencies, where some test suites (children) run parallel with other test suites (parents) only when parents are running.
+To define a `CHAINED` dependency add the variable `START_AFTER_TEST` with the name(s) of test suite(s) after which the selected test suite is supposed to run.
+Use comma separated list for multiple test suite dependency. E.g. `START_AFTER_TEST="kde,dhcp-server"`
 
-To define +PARALLEL+ dependency, use +PARALLEL_WITH+ variable with the name(s) of test suite(s) which acts as a parent suite(s) to selected test suite.
-In other words, +PARALLEL_WITH+ describes "I need this test suite to be running during my run". Use comma separated list for multiple test suite dependency. E.g. +PARALLEL_WITH="web-server,dhcp-server"+
-Keep in mind that parent job _must be running until all children finish_, else scheduler will cancel child jobs once parent is done.
+To define a `DIRECTLY_CHAINED` dependency add the variable `START_DIRECTLY_AFTER_TEST`. It works in the same way as for `CHAINED` dependencies. Mismatching worker classes between jobs to run in direct sequence on the same worker are considered an error.
+
+====== Parallel dependencies
+`PARALLEL` describes multi-machine tests. That are test suites scheduled to run at the same time and managed as a group. On top of that, `PARALLEL` also describes
+test suite dependencies, where some test suites (children) run parallel with other test suites (parents) only when parents are running.
+
+To define a `PARALLEL` dependency, use the `PARALLEL_WITH` variable with the name(s) of test suite(s) which acts as a parent suite(s) to selected test suite.
+In other words, `PARALLEL_WITH` describes "I need this test suite to be running during my run". Use a comma separated list for multiple test suite dependency
+(e.g. `PARALLEL_WITH="web-server,dhcp-server"`).
+Keep in mind that the parent job _must be running until all children finish_. Otherwise the scheduler will cancel child jobs once parent is done.
 
 Job dependencies are only resolved when using the iso controller to
 create new jobs from job templates. Posting individual jobs manually
 won't work.
 
 ===== Inter-machine dependencies
-Those dependencies make it possible to create job dependencies between tests which are scheduled for the different machines.
-To use it, simply append the machine name for each dependent test suite with colon separated.
-If machine is not explicitly defined, the variable %MACHINE% of the current job is used for the dependent test suite.
+Those dependencies make it possible to create job dependencies between tests which are supposed to run on different machines.
 
-Eg.
- START_AFTER_TEST="kde:64bit-1G,dhcp-server:64bit-8G"
-or
- PARALLEL_WITH="web-server:ipmi-fly,dhcp-server:ipmi-bee,http-server"
+To use it, simply append the machine name for each dependent test suite with an `@` sign separated.
+If a machine is not explicitly defined, the variable `MACHINE` of the current job is used for the dependent test suite.
+
+Example 1:
+
+ START_AFTER_TEST="kde@64bit-1G,dhcp-server@64bit-8G"
+
+Example 2:
+
+ PARALLEL_WITH="web-server@ipmi-fly,dhcp-server@ipmi-bee,http-server"
 
 Then, in job templates, add test suite(s) and all of its dependent test suite(s). Keep in mind to place the machines which
 have been explicitly defined in a variable for each dependent test suite.
-Checkout the example sections to get a better understanding:
+Checkout the following example sections to get a better understanding.
 
 ===== Handling of related jobs on failure / cancellation / restart
-openQA tries to handle things sensibly when jobs with relations like this either fail, or are manually cancelled or restarted. When a chained or parallel parent fails or is cancelled, all children will be cancelled; if the parent is restarted, all children are also restarted. When a parallel child is restarted, the parent and any other children will also be restarted. When a chained child is restarted, the parent is not restarted; this will usually be fine, but be aware that if an asset uploaded by the chained parent has been cleaned up, the child may fail immediately. To deal with this case, just restart the parent.
+openQA tries to handle things sensibly when jobs with dependencies either fail, or are manually cancelled or restarted:
 
-By default, when a parallel *child* fails or is cancelled, the parent and all other children are also cancelled. This behaviour is intended for closely-related clusters of jobs, e.g. high availability tests, where it's sensible to assume the entire test is invalid if any of its components fails. A special variable can be used to change this behaviour. Setting a parallel parent job's PARALLEL_CANCEL_WHOLE_CLUSTER to any truth-y value (e.g. 1 or 'true') changes this so that, if one of its children fails or is cancelled but the parent has other pending or active children, the parent and the other children will not be cancelled. This behaviour makes more sense if the parent is providing services to the various children but the children themselves are not closely related and a failure of one does not imply that the tests run by the other children and the parent are invalid.
+* When a chained or parallel parent fails or is cancelled, all children will be cancelled.
+* When a parent is restarted, all children are also restarted recursively.
+* When a parallel child is restarted, the parent and siblings will also be restarted.
+* When a *regularly* chained child is restarted, the parent is not restarted. This will usually be fine, but be aware that if an asset uploaded by the chained parent has been cleaned up, the child may fail immediately. To deal with this case, just restart the parent to recreate the asset.
+* When a *directly* chained child is restarted, all directly chained parents are recursively restarted (but not directly chained siblings). Otherwise it would not be possible to guarantee that the jobs run directly after each other on the same worker.
+* When a parallel *child* fails or is cancelled, the parent and all other children are also cancelled. This behaviour is intended for closely-related clusters of jobs, e.g. high availability tests, where it's sensible to assume the entire test is invalid if any of its components fails. A special variable can be used to change this behaviour. Setting a parallel parent job's PARALLEL_CANCEL_WHOLE_CLUSTER to a false value, i.e. 0, changes this so that, if one of its children fails or is cancelled but the parent has other pending or active children, the parent and the other children will not be cancelled. This behaviour makes more sense if the parent is providing services to the various children but the children themselves are not closely related and a failure of one does not imply that the tests run by the other children and the parent are invalid.
 
-====== Example: correct dependency and machine placed
+====== Further notes
+* The API also allows to skip restarting parents via `skip_parents=1` and to skip restarting children via `skip_children=1`. It is also possible to skip restarting only passed and softfailed children via `skip_ok_result_children=1`.
+* Restarting multiple directly chained children individually is not possible because the parent would be restarted twice which is not possible. So one needs to restart the parent job instead. Use the mentioned `skip_ok_result_children=1` to restart only jobs which are not ok.
+
+===== Examples
+====== Specify machine explicitly
+Assume there is a test suite `A` supposed to run on machine `64bit-8G`. Additionally, test suite `B` supposed to run on machine `64bit-1G`.
+That means test suite `B` needs the variable `START_AFTER_TEST=A@64bit-8G`. This results in the following dependency:
 ----
-There is a test suite A placed on machine 64bit-8G,
-then test suite B placed on machine 64bit-1G with variable START_AFTER_TEST=A:64bit-8G
+A@64bit-8G --> B@64bit-1G
 ----
-This results in the following dependency:
+
+====== Implicitly inherit machines from parent
+Assume test suite `A` is supposed to run on the machines `64bit` and `ppc`. Additionally, test suite `B` is supposed to run on both of these
+machines as well. This can be achieved by simply adding the variable `START_AFTER_TEST=A` to test suite `B` (omitting the machine at all).
+openQA take the best matches. This results in the following dependencies:
+
 ----
-A:64bit-8G <- B:64bit-1G
+A@64bit --> B@64bit
+A@ppc --> B@ppc
 ----
-====== Example: best match with correct dependency and machine placed
+
+====== Conflicting machines prevent inheritence from parent
+Assume test suite `A` is supposed to run on machine `64bit-8G`. Additionally, test suite `B` is supposed to run on machine `64bit-1G`.
+
+Adding the variable `START_AFTER_TEST=A` to test suite `B` will *not* work. That means openQA will *not* create a job dependency and instead shows
+an error message. So it is required to explicitly define the variable as `START_AFTER_TEST=A@64bit-8G` in that case.
+
+Consider a different example: Assume test suite `A` is supposed to run on the machines `ppc`, `64bit` and `s390x`. Additionally, there are 3
+testsuites `B` on `ppc-1G`, `C` on `ppc-2G` and `D` on `ppc64le`.
+
+Adding the variable `PARALLEL_WITH=A@ppc` to the test suites `B`, `C` and `D` will result in the following dependencies:
+
 ----
-If test suite A placed on both of machines 64bit and ppc
-then test suite B placed on same machines 64bit and ppc with variable START_AFTER_TEST=A
-openQA take the best matches.
-----
-This results in the following dependency:
-----
-A:64bit <- B:64bit
-A:ppc <- B:ppc
-----
-====== Example: wrong dependency or wrong machine placed
-----
-If test suite A placed on machine 64bit-8G,
-then test suite B placed on machine 64bit-1G with variable START_AFTER_TEST=A
-openQA won't create job dependency and give an error message unless you have been explicitly define variable as START_AFTER_TEST=A:64bit-8G
-If test suite A placed on machine ppc, 64bit and s390x
-then there are 3 testsuites B on ppc-1G, C on ppc-2G, D on ppc64le with same variable PARALLEL_WITH=A:ppc
-----
-This results in the following dependency:
-----
-            A:ppc
+            A@ppc
               ^
            /  |  \
          /    |    \
-B:ppc-1G  C:ppc-2G  D:ppc64le
+B@ppc-1G  C@ppc-2G  D@ppc64le
 ----
-openQA will also show errors to inform users that test suite A on machines 64bit and s390x are not necessary.
 
-====== Example: dependency on same machine
+openQA will also show errors that test suite `A` is not necessary on the machines `64bit` and `s390x`.
+
+====== Implicitly creating a dependency on same machine
+Assume the value of the variable `START_AFTER_TEST` or `PARALLEL_WITH` *only* contains a test suite name but no
+machine (e.g. `START_AFTER_TEST=A,B` or `PARALLEL_WITH=A,B`).
+
+In this case openQA will create job dependencies that are scheduled on the same machine if all test suites are placed on the same machine.
+
+===== Notes regarding directly chained dependencies
+Having multiple jobs with `START_DIRECTLY_AFTER_TEST` pointing to the same parent job is possible, e.g.:
 ----
-If variable START_AFTER_TEST or PARALLEL_WITH *only* with name(s) of test suite(s).
-START_AFTER_TEST=A,B or PARALLEL_WITH=A,B
+   --> B --> C
+ /
+A
+ \
+   --> D --> E
 ----
-openQA will create job dependencies that are scheduled on the same machine if all test suites are placed on the same machine.
 
-==== OpenQA worker requirements
+Of course only either `B` or `D` jobs can really be started *directly* after `A`. However, the use of `START_DIRECTLY_AFTER_TEST` still makes sure that no completely different job is executed in the middle and of course that all of these jobs are executed on the same worker.
 
-+CHAINED+ dependency requires only one worker, since dependent jobs will run only after the first one finish.
-On the other hand +PARALLEL+ dependency requires at _least 2 workers_ for simple scenarios.
+The directly chained sub-trees are executed in alphabetical order. So the above tree would result in the following execution order: `A, B, C, D, E`.
 
-===== Examples
+If `A` fails, none of the other jobs are attempted to be executed. If `B` fails, `C` is not attempted to be executed but `D` and `E` are. The assumption is that the average error case does not leave the system in a completely broken state and possibly required cleanup is done in the post fail hook.
 
-.+CHAINED+ - i.e. test basic functionality before going advanced - requires 1 worker
+Directly chained dependencies and regularly chained dependencies can be mixed. This allows to create a dependency tree which contains multiple directly chained sub-trees. Be aware that these sub-trees might be executed on *different* workers and depending on the tree even be executed in parallel.
+
+===== Worker requirements
+`CHAINED` and `DIRECTLY_CHAINED` dependencies require only one worker. `PARALLEL` dependencies on the other hand require as many free workers as jobs are present in the
+parallel cluster.
+
+====== Examples
+
+.`CHAINED` - i.e. test basic functionality before going advanced - requires 1 worker
 ----
-A <- B <- C
+A --> B --> C
 
 Define test suite A,
 then define B with variable START_AFTER_TEST=A and then define C with START_AFTER_TEST=B
@@ -367,9 +423,9 @@ then define B with variable START_AFTER_TEST=A and then define C with START_AFTE
 Define test suite A, B
 and then define C with START_AFTER_TEST=A,B
 In this case however the start order of A and B is not specified.
-But C will start only after A, B are successfully done.
+But C will start only after A and B are successfully done.
 ----
-.+PARALLEL+ basic High-Availability
+.`PARALLEL` basic High-Availability
 ----
 A
 ^
@@ -379,7 +435,7 @@ Define test suite A
 and then define B with variable PARALLEL_WITH=A.
 A in this case is parent test suite to B and must be running throughout B run.
 ----
-.+PARALLEL+ with multiple parents - i.e. complex support requirements for one test - requires 4 workers
+.`PARALLEL` with multiple parents - i.e. complex support requirements for one test - requires 4 workers
 ----
 A B C
 \ | /
@@ -390,7 +446,7 @@ Define test suites A,B,C
 and then define D with PARALLEL_WITH=A,B,C.
 A,B,C run in parallel and are parent test suites for D and all must run until D finish.
 ----
-.+PARALLEL+ with one parent - i.e. running independent tests against one server - requires at least 2 workers
+.`PARALLEL` with one parent - i.e. running independent tests against one server - requires at least 2 workers
 ----
    A
    ^
@@ -405,24 +461,21 @@ Children B, C, D can run and finish anytime, but A must run until all B, C, D fi
 
 === Test synchronization and locking API
 
-OpenQA provides locking server through lock API. To use lock API import +lockapi+ package (_use lockapi;_) in your test file.
-Lock API provides functions: +mutex_create+, +mutex_lock+, +mutex_unlock+, +mutex_wait+. Each of these functions take at least one parameter: name of the lock. Note that lock name can't contain "-" character.
-Locks are associated with caller's job - locks can't be unlocked by different job then the one who locked the lock.
+OpenQA provides a locking API. To use it in your test files import the `lockapi` package (_use lockapi;_). It provides the following functions: `mutex_create`, `mutex_lock`, `mutex_unlock`, `mutex_wait`
 
-+mutex_lock+ tries to lock the mutex lock for caller's job. If lock is unavailable or locked by someone else, +mutex_lock+ call blocks.
+Each of these functions takes the name of the mutex lock as first parameter. The name must not contain the "-" character. Mutex locks are associated with the caller's job.
 
-+mutex_unlock+ tries to unlock the mutex lock. If lock is locked by different job, +mutex_unlock+ call blocks. When lock become available or if lock does not exist, call
-returns without doing anything.
+`mutex_lock` tries to lock the mutex for the caller's job. The `mutex_lock` call blocks if the mutex does not exist or has been locked by a different job.
 
-+mutex_wait+ is combination of +mutex_lock+ & +mutex_unlock+ that displays more information about mutex state (time spent waiting, location of lock). Use this if you wait for specific action from single place (apache is running on master node)
+`mutex_unlock` tries to unlock the mutex. If the mutex is locked by a different job, `mutex_unlock` call blocks until the lock becomes available. If the mutex does not exist the call returns immediately without doing anything.
 
-+mutex_create+ create new mutex lock. When lock is created by +mutex_create+,
- lock is automatically unlocked. When mutex lock already exists call returns without doing anything.
+`mutex_wait` is a combination of `mutex_lock` and `mutex_unlock`. It displays more information about mutex state (time spent waiting, location of the lock). Use it if you need to wait for a specific action from single place (e.g. that Apache is running on the master node).
 
-Locks are addressed by _their name_. This name is _valid in test group_ defined by their dependencies. If there are more groups running at the
-same time and the same lock name is used, these locks are independent of each other.
+`mutex_create` creates a new mutex which is initially unlocked. If the mutex already exists the call returns immediately without doing anything.
 
-The +mmapi+ package provides +wait_for_children+, which the parent can use to wait for the children to complete.
+Mutexes are addressed by _their name_. Each cluster of parallel jobs (defined via `PARALLEL_WITH` dependencies) has its own namespace. That means concurrently running jobs in different parallel job clusters use distinct mutexes (even if the same names are used).
+
+The `mmapi` package provides `wait_for_children` which the parent can use to wait for the children to complete.
 
 [caption="Example of mutex usage"]
 ====
@@ -473,14 +526,14 @@ sub run {
 ====
 
 
-Sometimes it is useful to wait for certain action from child or sibling job, not parent.
-In this case child or sibling will create a mutex and any cluster job can lock/unlock it.
+Sometimes it is useful to wait for a certain action from the child or sibling job rather than the parent.
+In this case the child or sibling will create a mutex and any cluster job can lock/unlock it.
 
 The child can however die at any time. To prevent parent deadlock in this situation,
-it's required to pass mutex owner job ID as a second parameter to mutex_lock and mutex_wait.
-Mutex owner is the job that creates the mutex.
-If a child job with given ID already finished, mutex_lock() calls die.
-Job ID is also required when unlocking such mutex.
+it is required to pass the mutex owner's job ID as a second parameter to `mutex_lock` and `mutex_wait`.
+The mutex owner is the job that creates the mutex.
+If a child job with a given ID has already finished, `mutex_lock` calls die.
+The job ID is also required when unlocking such a mutex.
 
 [caption="Example of mmapi: Parent Job"]
 .Wait until the child reaches given point
@@ -496,7 +549,7 @@ sub run {
     # let's suppose there is only one child
     my $child_id = (keys %$children)[0];
 
-    # this blocks until lock is available and then does nothing
+    # this blocks until the lock is available and then does nothing
     mutex_wait('child_reached_given_point', $child_id);
 
     # continue with the test
@@ -505,20 +558,21 @@ sub run {
 ====
 
 
-Mutexes are a way to wait for specific event from single job.
-When we need multiple jobs to reach required state we need to use barriers.
+Mutexes are a way to wait for specific events from a single job.
+When we need multiple jobs to reach a certain state we need to use barriers.
 
-Before first use barrier needs to be created with barrier_create with 2 parameters - name and count.
-Name behaves as ID (same as with mutexes), count is number of jobs needed to call barrier_wait to unlock barrier.
+To create a barrier call `barrier_create` with the parameters name and count.
+The name serves as an ID (same as with mutexes). The count parameter specifies the
+number of jobs needed to call `barrier_wait` to unlock barrier.
 
-There is optional barrier_wait parameter called check_dead_job.
-When used it will kill all jobs waiting in barrier_wait if one of cluster jobs die.
+There is an optional `barrier_wait` parameter called `check_dead_job`.
+When used it will kill all jobs waiting in `barrier_wait` if one of the cluster jobs
+dies. It prevents waiting for states that will never be reached (and eventually dies
+on job timeout). It should be set only on one of the `barrier_wait` calls.
 
-It prevents waiting for state that will never be reached (and eventually die on job timeout).
-Should be set only on one of barrier_wait calls.
-
-Example is situation with 1 master and 3 worker jobs. We need to wait until 3 worker jobs perform initial setup.
-After that we can make cluster from them, but if one of them fails it makes no sense waiting.
+An example would be one master and three worker jobs and you want to do initial setup
+in the three worker jobs before starting main actions. In such a case you might use
+`check_dead_job` to avoid useless actions when one of the worker jobs dies.
 
 
 [caption="Example of barriers: "]
@@ -542,7 +596,7 @@ sub run {
     script_run 'create_cluster';
     script_run 'test_cluster';
 
-    # Notify all nodes we are finished
+    # Notify all nodes that we are finished
     mutex_create 'CLUSTER_CREATED';
     wait_for_children;
 }
@@ -615,7 +669,7 @@ The idea is to have a dedicated "helper server" to allow advanced network based 
 
 Support server takes advantage of the basic parallel setup as described in the previous section, with the support server being the parent test 'A' and the test needing it being the child test 'B'. This ensures that the test 'B' always have the support server available.
 
-==== Preparing the supportserver:
+==== Preparing the supportserver
 
 
 The support server image is created by calling a special test, based on the autoyast test:
@@ -629,12 +683,12 @@ The support server image is created by calling a special test, based on the auto
     PUBLISH_HDD_1=supportserver.qcow2
 --------------------------------------------------------------------------------
 
-This produces qemu image 'supportserver.qcow2' that contains the supportserver. The 'autoyast_supportserver.xml'
+This produces QEMU image 'supportserver.qcow2' that contains the supportserver. The 'autoyast_supportserver.xml'
 should define correct user and password, as well as packages and the common configuration.
 
 More specific role the supportserver should take is then selected when the server is run in the actual test scenario.
 
-==== Using the supportserver:
+==== Using the supportserver
 
 
 In the Test suites, the supportserver is defined by setting:
@@ -647,13 +701,13 @@ SUPPORT_SERVER_ROLES=pxe,qemuproxy
 WORKER_CLASS=server,qemu_autoyast_tap_64
 --------------------------------------------------------------------------------
 
-where the +SUPPORT_SERVER_ROLES+ defines the specific role (see code in 'tests/support_server/setup.pm' for available roles and their definition), and
- +HDD_1+ variable must be the name of the supportserver image as defined via +PUBLISH_HDD_1+ variable during supportserver generation. If the support
-server is based on older SUSE versions (opensuse 11.x, SLE11SP4..) it may also be needed to add +HDDMODEL=virtio-blk+. In case of qemu backend, one can
-also use +BOOTFROM=c+, for faster boot directly from the +HDD_1+ image.
+where the `SUPPORT_SERVER_ROLES` defines the specific role (see code in 'tests/support_server/setup.pm' for available roles and their definition), and
+ `HDD_1` variable must be the name of the supportserver image as defined via `PUBLISH_HDD_1` variable during supportserver generation. If the support
+server is based on older SUSE versions (opensuse 11.x, SLE11SP4..) it may also be needed to add `HDDMODEL=virtio-blk`. In case of QEMU backend, one can
+also use `BOOTFROM=c`, for faster boot directly from the `HDD_1` image.
 
 Then for the 'child' test using this supportserver, the following additional variable must be set:
-+PARALLEL_WITH=supportserver-pxe-tftp+
+`PARALLEL_WITH=supportserver-pxe-tftp`
 where 'supportserver-pxe-tftp' is the name given to the supportserver in the test suites screen.
 Once the tests are defined, they can be added to openQA in the usual way:
 
@@ -663,8 +717,8 @@ Once the tests are defined, they can be added to openQA in the usual way:
         ISO=openSUSE-13.2-DVD-x86_64.iso ARCH=x86_64 FLAVOR=Server-DVD
 -----------------
 
-where the +DISTRI+, +VERSION+, +FLAVOR+ and +ARCH+ correspond to the job group containing the tests.
-Note that the networking is provided by tap devices, so both jobs should run on machines defined by (apart from others) having +NICTYPE=tap+, +WORKER_CLASS=qemu_autoyast_tap_64+.
+where the `DISTRI`, `VERSION`, `FLAVOR` and `ARCH` correspond to the job group containing the tests.
+Note that the networking is provided by tap devices, so both jobs should run on machines defined by (apart from others) having `NICTYPE=tap`, `WORKER_CLASS=qemu_autoyast_tap_64`.
 
 
 [caption="Example of Support Server: "]
@@ -681,9 +735,9 @@ WORKER_CLASS=server,qemu_autoyast_tap_64
 --------------------------------------------------------------------------------
 ====
 
-With a test-suites name +supportserver-opensuse-tftp+.
+With a test-suites name `supportserver-opensuse-tftp`.
 
-The actual test 'child' job, will then have to set +PARALLEL_WITH=supportserver-opensuse-tftp+, and also other variables according to the test requirements. For convenience, we have also started a dhcp server on the supportserver, but even without it, network could be set up manually by assigning a free ip address (e.g. 10.0.2.15) on the system of the test job.
+The actual test 'child' job, will then have to set `PARALLEL_WITH=supportserver-opensuse-tftp`, and also other variables according to the test requirements. For convenience, we have also started a dhcp server on the supportserver, but even without it, network could be set up manually by assigning a free ip address (e.g. 10.0.2.15) on the system of the test job.
 
 [caption="Example of Support Server: "]
 .The code in the *.pm module doing the actual tftp test could then look something like the example below
@@ -713,7 +767,7 @@ assuming of course, that the tested machine was already set up with necessary in
 .autoyast based tftp test
 ====
 
-Here we will use autoyast to setup the system of the test job and the os-autoinst autoyast testing infrastructure. For supportserver, this means using proxy to access qemu provided data, for dowloading autoyast profile and tftp verify script:
+Here we will use autoyast to setup the system of the test job and the os-autoinst autoyast testing infrastructure. For supportserver, this means using proxy to access QEMU provided data, for dowloading autoyast profile and tftp verify script:
 
 [source,ini]
 --------------------------------------------------------------------------------
@@ -735,10 +789,10 @@ PARALLEL_WITH=supportserver-opensuse-tftp
 --------------------------------------------------------------------------------
 ====
 
-again assuming the support server's name being +supportserver-opensuse-tftp+. Note that the +pxe+ role already contains +tftp+ and +dhcp+ server role, since they are needed for the pxe boot to work.
+again assuming the support server's name being `supportserver-opensuse-tftp`. Note that the `pxe` role already contains `tftp` and `dhcp` server role, since they are needed for the pxe boot to work.
 
 [caption="Example of Support Server: "]
-.The tftp test defined in the +autoyast_opensuse/opensuse_autoyast_tftp.sh+ file could be something like:
+.The tftp test defined in the `autoyast_opensuse/opensuse_autoyast_tftp.sh` file could be something like:
 ====
 [source,sh]
 --------------------------------------------------------------------------------
@@ -749,7 +803,7 @@ time tftp #SERVER_URL# -c get test2.txt
 diff -u test.txt test2.txt && echo "AUTOYAST OK"
 --------------------------------------------------------------------------------
 
-and the rest is done automatically, using already prepared test modules in +tests/autoyast+ subdirectory.
+and the rest is done automatically, using already prepared test modules in `tests/autoyast` subdirectory.
 ====
 
 === Using text consoles and the serial terminal
@@ -766,7 +820,7 @@ implemented with VNC and so I will referrer to it as the VNC text console.
 
 The serial port device which is used with the VNC text console is the default
 virtual serial port device in QEMU (i.e. the device configured with the
-+-serial+ command line option). I will refer to this as the "default serial
+`-serial` command line option). I will refer to this as the "default serial
 port". OpenQA currently only uses this serial port for one way communication
 from the SUT to the host.
 
@@ -777,7 +831,7 @@ machine. This is called the serial terminal console (or the virtio console,
 see implementation section for details).
 
 The VNC text console is very slow and expensive relative to the serial
-terminal console, but allows you to continue using +assert_screen+ and is more
+terminal console, but allows you to continue using `assert_screen` and is more
 widely supported. Below is an example of how to use the VNC text console.
 
 [caption="Switching to text mode: "]
@@ -804,15 +858,15 @@ This will select a text TTY and login as the root user (if necessary). Now
 that we are on a text console it is possible to run scripts and observe their
 output either as raw text or on the video feed.
 
-Note that +root-console+ is defined by the distribution, so on different
+Note that `root-console` is defined by the distribution, so on different
 distributions or operating systems this can vary. There are also many utility
-functions that wrap +select_console+, so check your distribution's utility
+functions that wrap `select_console`, so check your distribution's utility
 library before using it directly.
 
 ====
 
 [caption="Running a script: "]
-.Using the +assert_script_run+ and +script_output+ commands
+.Using the `assert_script_run` and `script_output` commands
 ====
 [source,perl]
 --------------------------------------------------------------------------------
@@ -831,19 +885,24 @@ and then searches it for the term 'avx2' using a regex.
 
 ====
 
-The +script_run+ and +script_output+ are high level commands which use
-+type_string+ and +wait_serial+ underneath. Sometimes you may wish to use
+The `script_run` and `script_output` are high level commands which use
+`type_string` and `wait_serial` underneath. Sometimes you may wish to use
 lower level commands which give you more control, but be warned that it may
 also make your code less portable.
 
-The command +wait_serial+ watches the SUT's serial port for text output and
-matches it against a regex. +type_string+ sends a string to the SUT like it
+The command `wait_serial` watches the SUT's serial port for text output and
+matches it against a regex. `type_string` sends a string to the SUT like it
 was typed in by the user over VNC.
 
 ==== Using a serial terminal
 
 IMPORTANT: You need a QEMU version >= 2.6.1 and to set the
-+VIRTIO_CONSOLE+ variable to 1 to use this with the QEMU backend.
+`VIRTIO_CONSOLE` variable to 1 to use this with the QEMU backend
+(it is enabled by default for
+https://github.com/os-autoinst/os-autoinst-distri-opensuse[os-autoinst-distri-opensuse]
+tests). The svirt backend uses the `SERIAL_CONSOLE` variable, but only on s390x
+machines it has been confirmed to be working (failing on Hyper-V, VMware and
+XEN, see https://progress.opensuse.org/issues/55985[poo#55985]).
 
 Usually OpenQA controls the system under test using VNC. This allows the use
 of both graphical and text based consoles. Key presses are sent individually
@@ -860,7 +919,7 @@ also much cheaper to transfer text and test it against regular expressions
 than encode images from a VNC feed and test them against sample images
 (needles).
 
-On the other hand you can no longer use +assert_screen+ or take a screen shot
+On the other hand you can no longer use `assert_screen` or take a screen shot
 because the text is never rendered as an image. A lot of programs will also
 send ANSI escape sequences which will appear as raw text to the test script
 instead of being interpreted by a terminal emulator which then renders the
@@ -871,10 +930,10 @@ text.
 select_console('root-virtio-terminal');  # Selects a virtio based serial terminal
 --------------------------------------------------------------------------------
 
-The above code will cause +type_string+ and +wait_serial+ to write and read
+The above code will cause `type_string` and `wait_serial` to write and read
 from a virtio serial port. A distribution specific call back will be made
 which allows os-autoinst to log into a serial terminal session running on the
-SUT. Once +select_console+ returns you should be logged into a TTY as root.
+SUT. Once `select_console` returns you should be logged into a TTY as root.
 
 NOTE: for https://github.com/os-autoinst/os-autoinst-distri-opensuse[os-autoinst-distri-opensuse]
 tests instead of using `select_console('root-virtio-terminal')` directly is
@@ -891,28 +950,28 @@ select_serial_terminal();
 If you are struggling to visualise what is happening, imagine SSH-ing into a
 remote machine as root, you can then type in commands and read the results as
 if you were sat at that computer. What we are doing is much simpler than using
-an SSH connection (it is more like using GNU +screen+ with a serial port), but
+an SSH connection (it is more like using GNU `screen` with a serial port), but
 the end result looks quite similar.
 
 As mentioned above, changing input and output to a serial terminal has the
-effect of changing where +wait_serial+ reads output from. On a QEMU VM
-+wait_serial+ usually reads from the default serial port which is also where
+effect of changing where `wait_serial` reads output from. On a QEMU VM
+`wait_serial` usually reads from the default serial port which is also where
 the kernel log is usually output to.
 
-When switching to a virtio based serial terminal, +wait_serial+ will then read
+When switching to a virtio based serial terminal, `wait_serial` will then read
 from a virtio serial port instead. However the default serial port still
 exists and can receive output. Some utility library functions are hard coded
-to redirect output to the default serial port and expect that +wait_serial+
+to redirect output to the default serial port and expect that `wait_serial`
 will be able to read it. Usually it is not too difficult to fix the utility
 function, you just need to remove some redirection from the relevant shell
 command.
 
 Another common problem is that some library or utility function tries to take
 a screen shot. The hard part is finding what takes the screen shot, but then
-it is just a simple case of checking +is_serial_terminal+ and not taking the
+it is just a simple case of checking `is_serial_terminal` and not taking the
 screen shot if we are on a serial terminal console.
 
-Distributions usually wrap +select_console+, so instead of using it directly,
+Distributions usually wrap `select_console`, so instead of using it directly,
 you can use something like the following which is from the OpenSUSE test
 suite.
 
@@ -925,24 +984,24 @@ if (select_serial_terminal()) {
 
 This selects the virtio based serial terminal console if possible. If it is
 available then it returns true. It is also possible to check if the current
-console is a serial terminal by calling +is_serial_terminal+.
+console is a serial terminal by calling `is_serial_terminal`.
 
 Once you have selected a serial terminal, the video feed will disappear from
 the live view, however at the bottom of the live screen there is a separate
 text feed. After the test has finished you can view the serial log(s) in the
-assets tab. You will probably have two serial logs; +serial0.txt+ which is
-written from the default serial port and +serial_terminal.txt+.
+assets tab. You will probably have two serial logs; `serial0.txt` which is
+written from the default serial port and `serial_terminal.txt`.
 
 Now that you are on a serial terminal console everything will start to go a
 lot faster. So much faster in fact that race conditions become a big
 issue. Generally these can be avoided by using the higher level functions such
-as +script_run+ and +script_output+.
+as `script_run` and `script_output`.
 
 It is rarely necessary to use the lower level functions, however it helps to
 recognise problems caused by race conditions at the lower level, so please
 read the following section regardless.
 
-So if you do need to use +type_string+ and +wait_serial+ directly then try to
+So if you do need to use `type_string` and `wait_serial` directly then try to
 use the following pattern:
 
 1) Wait for the terminal prompt to appear.
@@ -975,10 +1034,10 @@ if (is_serial_terminal) {
 my $test_log = wait_serial(qr/$fin_msg\d+/, $timeout, 0, record_output => 1); #Step 5
 --------------------------------------------------------------------------------
 
-The first +wait_serial+ (Step 1) ensures that the shell prompt has
+The first `wait_serial` (Step 1) ensures that the shell prompt has
 appeared. If we do not wait for the shell prompt then it is possible that we
 can send input to whatever command was run before. In this case that command
-would be 'echo' which is used by +script_run+ to print a 'finished' message.
+would be 'echo' which is used by `script_run` to print a 'finished' message.
 
 It is possible that echo was able to print the finish message, but was then
 suspended by the OS before it could exit. In which case the test script is
@@ -991,19 +1050,19 @@ this results in the input being displayed twice: once by the terminal's echo
 (explained later) and once by Bash. Depending on your configuration the
 behavior could be completely different
 
-The function +serial_term_prompt+ is a distribution specific function which
+The function `serial_term_prompt` is a distribution specific function which
 returns the characters previously set as the shell prompt (e.g. export PS1="#
 ", see the bash(1) or dash(1) man pages). If you are adapting a new
 distribution to use the serial terminal console, then we recommend setting a
 simple shell prompt and keeping track of it with utility functions.
 
-The +no_regex+ argument tells wait_serial to use simple string matching
+The `no_regex` argument tells wait_serial to use simple string matching
 instead of regular expressions, see the implementation section for more
-details. The other arguments are the timeout (+undef+ means we use the
-default) and a boolean which inverts the result of +wait_serial+. These are
-explained in the +os-autoinst/testapi.pm+ documentation.
+details. The other arguments are the timeout (`undef` means we use the
+default) and a boolean which inverts the result of `wait_serial`. These are
+explained in the `os-autoinst/testapi.pm` documentation.
 
-Then the test script enters our command with +type_string+ (Step 2) and waits
+Then the test script enters our command with `type_string` (Step 2) and waits
 for the command's text to be echoed back by the system under test. Terminals
 usually echo back the characters sent to them so that the user can see what
 they have typed.
@@ -1024,12 +1083,12 @@ any string which results in a significant state change should be treated as a
 potential source of race conditions.
 
 Finally we send the newline character and wait for our custom finish
-message. +record_output+ is set to ensure all the output from the SUT is
+message. `record_output` is set to ensure all the output from the SUT is
 saved (see the next section for more info).
 
 What we do *not* do at this point, is wait for the shell prompt to appear.
 That would consume the prompt character breaking the next call to
-+script_run+.
+`script_run`.
 
 We choose to wait for the prompt just before sending a command, rather than
 after it, so that Step 5 can be deferred to a later time. In theory this
@@ -1037,8 +1096,8 @@ allows the test script to perform some other work while the SUT is busy.
 
 ==== Sending new lines and continuation characters
 
-The following command will timeout: +script_run("echo \"1\n2\"")+. The reason
-being +script_run+ will call +wait_serial("echo \"1\n2\"")+ to check that the
+The following command will timeout: `script_run("echo \"1\n2\"")`. The reason
+being `script_run` will call `wait_serial("echo \"1\n2\"")` to check that the
 command was entered successfully and echoed back (see above for explanation of
 serial terminal echo, note the echo shell command has not been executed
 yet). However the shell will translate the newline characters into a newline
@@ -1051,17 +1110,17 @@ echo "1
 --------------------------------------------------------------------------------
 
 The '>' is unexpected and will cause the match to fail. One way to fix this is
-simply to do +echo -e \"1\\n2\"+. In this case Perl will not replace \n with a
+simply to do `echo -e \"1\\n2\"`. In this case Perl will not replace \n with a
 newline character, instead it will be passed to echo which will do the
 substitution instead (note the '-e' switch for echo).
 
 In general you should be aware that, Perl, the guest kernel and the shell may
 transform whatever character sequence you enter. Transformations can be
-spotted by comparing the input string with what +wait_serial+ actually finds.
+spotted by comparing the input string with what `wait_serial` actually finds.
 
 ==== Sending signals - ctrl-c and ctrl-d
 
-On a VNC based console you simply use +send_key+ like follows.
+On a VNC based console you simply use `send_key` like follows.
 
 [source,perl]
 --------------------------------------------------------------------------------
@@ -1072,7 +1131,7 @@ This usually (see termios(3)) has the effect of sending SIGINT to whatever
 command is running. Most commands terminate upon receiving this signal (see
 signal(7)).
 
-On a serial terminal console the +send_key+ command is not implemented (see
+On a serial terminal console the `send_key` command is not implemented (see
 implementation section). So instead the following can be done to achieve the
 same effect.
 
@@ -1082,19 +1141,19 @@ type_string('', terminate_with => 'ETX');
 --------------------------------------------------------------------------------
 
 The ETX ASCII code means End of Text and usually results in SIGINT being
-raised. In fact pressing +ctrl-c+ may just be translated into ETX, so you
+raised. In fact pressing `ctrl-c` may just be translated into ETX, so you
 might consider this a more direct method. Also you can use 'EOT' to do the
-same thing as pressing +ctrl-d+.
+same thing as pressing `ctrl-d`.
 
 You also have the option of using Perl's control character escape sequences in
-the first argument to +type_string+. So you can also send ETX with:
+the first argument to `type_string`. So you can also send ETX with:
 
 [source,perl]
 --------------------------------------------------------------------------------
 type_string("\cC");
 --------------------------------------------------------------------------------
 
-The +terminate_with+ parameter just exists to display intention. It is also
+The `terminate_with` parameter just exists to display intention. It is also
 possible to send any character using the hex code like '\x0f' which may have
 the effect of pressing the magic SysRq key if you are lucky.
 
@@ -1103,37 +1162,37 @@ the effect of pressing the magic SysRq key if you are lucky.
 The os-autoinst package supports several types of 'consoles' of which the
 virtio serial terminal is one. The majority of code for this console is
 located in consoles/virtio_terminal.pm and consoles/serial_screen.pm (used also
-svirt serial console). However there is also related code in backends/qemu.pm
-and distribution.pm.
+by the svirt serial console). However there is also related code in
+backends/qemu.pm and distribution.pm.
 
 You may find it useful to read the documentation in virtio_terminal.pm and
 serial_screen.pm if you need to perform some special action on a terminal such
 as triggering a signal or simulating the SysRq key. There are also some
-console specific arguments to +wait_serial+ and +type_string+ such as
-+record_output+.
+console specific arguments to `wait_serial` and `type_string` such as
+`record_output`.
 
 The virtio 'screen' essentially reads data from a socket created by QEMU into
 a ring buffer and scans it after every read with a regular expression. The
 ring buffer is large enough to hold anything you are likely to want to match
 against, but not too large as to cause performance issues. Usually the
 contents of this ring buffer, up to the end of the match, are returned by
-+wait_serial+. This means earlier output will be overwritten once the ring
-buffer's length is exceeded. However you can pass +record_output+ which saves
+`wait_serial`. This means earlier output will be overwritten once the ring
+buffer's length is exceeded. However you can pass `record_output` which saves
 the output to a separate unlimited buffer and returns that instead.
 
-Like +record_output+, the +no_regex+ argument is a console specific argument
+Like `record_output`, the `no_regex` argument is a console specific argument
 supported by the serial terminal console. It may or may not have some
 performance benefits, but more importantly it allows you to easily match
 arbitrary strings which may contain regex escape sequences. To be clear,
-+no_regex+ hints that +wait_serial+ should just treat its input as a plain
-string and use the Perl library function +index+ to search for a match in the
+`no_regex` hints that `wait_serial` should just treat its input as a plain
+string and use the Perl library function `index` to search for a match in the
 ring buffer.
 
-The +send_key+ function is not implemented for the serial terminal console
+The `send_key` function is not implemented for the serial terminal console
 because the OpenQA console implementation would need to map key actions like
-+ctrl-c+ to a character and then send that character. This may mislead some
-people into thinking they are actually sending +ctrl-c+ to the SUT and also
-requires OpenQA to choose what character +ctrl-c+ represents which varies
+`ctrl-c` to a character and then send that character. This may mislead some
+people into thinking they are actually sending `ctrl-c` to the SUT and also
+requires OpenQA to choose what character `ctrl-c` represents which varies
 across terminal configurations.
 
 Very little of the code (perhaps none) is specific to a virtio based serial
@@ -1147,7 +1206,7 @@ console' unless specifically referring to the QEMU virtio implementation.
 As mentioned previously, ANSI escape sequences can be a pain. So we try to
 avoid them by informing the shell that it is running on a 'dumb' terminal (see
 the SUSE distribution's serial terminal utility library). However some
-programs ignore this, but piping there output into +tee+ is usually enough to
+programs ignore this, but piping there output into `tee` is usually enough to
 stop them outputting non-printable characters.
 
 
@@ -1155,44 +1214,44 @@ stop them outputting non-printable characters.
 === Trigger new tests by modifying settings from existing test runs
 
 To trigger new tests with custom settings the command line client
-+openqa-client+ can be used. To trigger new tests relying on all settings from
-existing tests runs but modifying specific settings the +openqa-clone-job+
-script can be used. Within the openQA repository the script is called
-+clone_job.pl+ and is located at +/usr/share/openqa/script/+.  This tool can
-be used to create a new job that adds, removes or changes settings.
+`openqa-cli` can be used. To trigger new tests relying on all settings from
+existing tests runs but modifying specific settings the `openqa-clone-job`
+script can be used. Within the openQA repository the script is located at
+`/usr/share/openqa/script/`.  This tool can be used to create a new job that
+adds, removes or changes settings.
 
 [source,sh]
 --------------------------------------------------------------------------------
-/usr/share/openqa/script/clone_job.pl --from localhost --host localhost 42 FOO=bar BAZ=
+openqa-clone-job --from localhost --host localhost 42 FOO=bar BAZ=
 --------------------------------------------------------------------------------
 
 If you do not want a cloned job to start up in the same job group as the job
 you cloned from, e.g. to not pollute build results, the job group can be
-overwritten, too, using the special variable +_GROUP+. Add the quoted group
+overwritten, too, using the special variable `_GROUP`. Add the quoted group
 name, e.g.:
 
 [source,sh]
 -------------
-clone_job.pl --from localhost 42 _GROUP="openSUSE Tumbleweed"
+openqa-clone-job --from localhost 42 _GROUP="openSUSE Tumbleweed"
 -------------
 
-The special group value +0+ means that the group connection will be separated
+The special group value `0` means that the group connection will be separated
 and the job will not appear as a job in any job group, e.g.:
 
 [source,sh]
 -------------
-clone_job.pl --from localhost 42 _GROUP=0
+openqa-clone-job --from localhost 42 _GROUP=0
 -------------
 
 === Backend variables for faster test execution
 
-The +os-autoinst+ backend offers multiple test variables which are helpful for
+The `os-autoinst` backend offers multiple test variables which are helpful for
 test development. For example:
 
-* Set +_EXIT_AFTER_SCHEDULE=1+ if you only want to evaluate the test schedule
+* Set `_EXIT_AFTER_SCHEDULE=1` if you only want to evaluate the test schedule
   before the test modules are executed
 
-* Use +_SKIP_POST_FAIL_HOOKS=1+ to prevent lengthy post_fail_hook execution in
+* Use `_SKIP_POST_FAIL_HOOKS=1` to prevent lengthy post_fail_hook execution in
   case of expected and known test fails, for examples when you need to create
   needles anyway
 
@@ -1201,49 +1260,53 @@ test development. For example:
 [id="snapshots"]
 
 For lower turn-around times during test development based on virtual machines
-the +QEMU backend+ provides a feature that allows a job to start from a
-snapshot which can help in this situation.
+the QEMU backend provides a feature that allows a job to start from a snapshot
+which can help in this situation.
 
 Depending on the use case, there are two options to help:
 
-* Create and *preserve* snapshots for *every test* module run (+MAKETESTSNAPSHOTS+)
+* Create and *preserve* snapshots for *every test* module run (`MAKETESTSNAPSHOTS`)
   - Offers more flexibility as the test can be resumed almost at any point.
     However disk space requirements are high (expect more than 30GB for one
-    job)
+    job).
   - This mode is useful for fixing non-fatal issues in tests and debugging SUT
     as more than just the snapshot of the last failed module is saved.
 
 * Create a snapshot *after every successful* test module while *always
-  overwriting* the existing snapshot to preserve only the latest (+TESTDEBUG+)
+  overwriting* the existing snapshot to preserve only the latest (`TESTDEBUG`)
   - Allows to skip just before the start of the first failed test module,
     which can be limiting, but preserves disk space in comparison to
-    +MAKETESTSNAPSHOTS+.
+    `MAKETESTSNAPSHOTS`.
   - This mode is useful for iterative test development
 
-In both modes there is no need to modify tests (i.e. adding +milestone+ test
-flag as the behaviour  is implied). In the later mode every test module is
-also considered +fatal+. This means the job is aborted after the first failed
+In both modes there is no need to modify tests (i.e. adding `milestone` test
+flag as the behaviour is implied). In the later mode every test module is
+also considered `fatal`. This means the job is aborted after the first failed
 test module.
 
+[id="snapshots-for-each-module"]
 ==== Enable snapshots for each module
 
-* Run the worker with --no-cleanup parameter. This will preserve the hard
- disks after test runs.
+* Run the worker with `--no-cleanup` parameter. This will preserve the hard
+ disks after test runs. If the worker(s) are being started via the systemd unit,
+ then this can achieved by using the `openqa-worker-no-cleanup@.service` unit
+ instead of `openqa-worker@.service`.
 
-* Set +MAKETESTSNAPSHOTS=1+ on a job. This will make openQA save a
+* Set `MAKETESTSNAPSHOTS=1` on a job. This will make openQA save a
 snapshot for every test module run. One way to do that is by cloning an
 existing job and adding the setting:
 
 [source,sh]
 ----
-clone_job.pl --from https://openqa.opensuse.org  --host localhost 24 MAKETESTSNAPSHOTS=1
+openqa-clone-job --from https://openqa.opensuse.org  --host localhost 24 MAKETESTSNAPSHOTS=1
 ----
 
-* Create a job again, this time setting the +SKIPTO+ variable to the snapshot you need. Again, +clone_job.pl+ comes handy here:
+* Create a job again, this time setting the `SKIPTO` variable to the snapshot
+* you need. Again, `openqa-clone-job` comes handy here:
 
 [source,sh]
 ----
-clone_job.pl --from https://openqa.opensuse.org  --host localhost 24 SKIPTO=consoletest-yast2_i
+openqa-clone-job --from https://openqa.opensuse.org  --host localhost 24 SKIPTO=consoletest-yast2_i
 ----
 
 * Use qemu-img snapshot -l something.img to find out what snapshots are in the image. Snapshots are named
@@ -1251,36 +1314,36 @@ clone_job.pl --from https://openqa.opensuse.org  --host localhost 24 SKIPTO=cons
 
 ==== Storing only the last sucessful snapshot
 
-* Run the worker with +--no-cleanup parameter+. This will preserve the hard disks after test runs.
-* Set +TESTDEBUG=1+ on a job. This will make openQA save a snapshot after each
+* Run the worker with `--no-cleanup parameter`. This will preserve the hard disks after test runs.
+* Set `TESTDEBUG=1` on a job. This will make openQA save a snapshot after each
 successful test module run. Snapshots are overwritten. The snapshot is named `lastgood` in all cases.
 
 [source,sh]
 ----
-clone_job.pl --from https://openqa.opensuse.org  --host localhost 24 TESTDEBUG=1
+openqa-clone-job --from https://openqa.opensuse.org  --host localhost 24 TESTDEBUG=1
 ----
 
-* Create a job again, this time setting the +SKIPTO+ variable to the snapshot
+* Create a job again, this time setting the `SKIPTO` variable to the snapshot
 which failed on previous run. Make sure the new job will also have
-+TESTDEBUG=1+ set. This can be ensured by the use of the clone_job script on
+`TESTDEBUG=1` set. This can be ensured by the use of the clone_job script on
 the clone source job or specifying the variable explicitly:
 
 [source,sh]
 ----
-clone_job.pl --from https://openqa.opensuse.org  --host localhost 24 TESTDEBUG=1 SKIPTO=consoletest-yast2_i
+openqa-clone-job --from https://openqa.opensuse.org  --host localhost 24 TESTDEBUG=1 SKIPTO=consoletest-yast2_i
 ----
 
 === Defining a custom test schedule or custom test modules
 
 Normally the test schedule, that is which test modules should be executed and
-which order, is prescribed by the +main.pm+ file within the test distribution.
+which order, is prescribed by the `main.pm` file within the test distribution.
 Additionally it is possible to exclude certain test modules from execution
-using the os-autoinst test variables +INCLUDE_MODULES+ and +EXCLUDE_MODULES+ as
-well as define a custom schedule using the test variable +SCHEDULE+.
+using the os-autoinst test variables `INCLUDE_MODULES` and `EXCLUDE_MODULES` as
+well as define a custom schedule using the test variable `SCHEDULE`.
 Also test modules can be defined and overridden on-the-fly using a
 downloadable asset.
 
-===== EXCLUDE_MODULES
+==== EXCLUDE_MODULES
 
 If a job has the following schedule:
 
@@ -1301,7 +1364,7 @@ The schedule would be:
 
 NOTE: Excluding modules that are not scheduled does not raise an error.
 
-===== INCLUDE_MODULES
+==== INCLUDE_MODULES
 
 If a job has the following schedule:
 
@@ -1322,9 +1385,9 @@ The schedule would be:
 
 NOTE: Including modules that are not scheduled does not raise an error, but they are not scheduled.
 
-===== SCHEDULE
+==== SCHEDULE
 
-Additionally it is possible to define a custom schedule using the test variable +SCHEDULE+.
+Additionally it is possible to define a custom schedule using the test variable `SCHEDULE`.
 
 ----
 openqa-clone-job --from https://openqa.opensuse.org --host https://openqa.opensuse.org 24 SCHEDULE=tests/boot/boot_to_desktop,tests/console/consoletest_setup
@@ -1332,7 +1395,7 @@ openqa-clone-job --from https://openqa.opensuse.org --host https://openqa.opensu
 
 NOTE: Any existing test module within *CASEDIR* can be scheduled.
 
-===== SCHEDULE + ASSET_<NR>_URL
+==== SCHEDULE + ASSET_<NR>_URL
 Test modules can be defined and overridden on-the-fly using a
 downloadable asset (combining *ASSET_<NR>_URL* and *SCHEDULE*).
 
@@ -1367,26 +1430,26 @@ sub post_run_hook {}
 For example this can be used in bug investigations or trying out new test
 modules which are hard to test locally.
 https://github.com/os-autoinst/os-autoinst/blob/master/doc/backend_vars.asciidoc
-describes the +SCHEDULE+ parameter in details as well as the others. The
+describes the `SCHEDULE` parameter in details as well as the others. The
 section "Asset handling" in the <<UsersGuide.asciidoc#usersguide,Users Guide>>
 describes how downloadable assets can be specified. It is important to note
 that the specified asset is only downloaded once. New versions must be
 supplied as new, unambiguous download target file names.
 
-===== Triggering tests based on an any remote git refspec or open github pull request
+=== Triggering tests based on an any remote git refspec or open github pull request
 
 openQA also supports to trigger tests using test code from an open pull
 request on github or any branch or git refspec. That means that code changes
 that are not yet available on a production instance of openQA can be tested
 safely to ensure the code changes work as expected before merging the code
 intro a production repository and branch. This works by setting the
-+CASEDIR+ parameter of os-autoinst to a valid git repository path including
+`CASEDIR` parameter of os-autoinst to a valid git repository path including
 an optional branch/refspec specifier.
 See
 https://github.com/os-autoinst/os-autoinst/blob/master/doc/backend_vars.asciidoc
 for details.
 
-A helper script +openqa-clone-custom-git-refspec+ is available for
+A helper script `openqa-clone-custom-git-refspec` is available for
 convenience that supports some combinations.
 
 To clone one job within a remote instance based on an open github pull request
@@ -1402,8 +1465,8 @@ For example:
 openqa-clone-custom-git-refspec https://github.com/os-autoinst/os-autoinst-distri-opensuse/pull/6649 https://openqa.opensuse.org/tests/839191
 ----
 
-Keep in mind that if +PRODUCTDIR+ is overwritten it might not relate to the
+Keep in mind that if `PRODUCTDIR` is overwritten it might not relate to the
 state of the specified git refspec. For example the asset caching
-functionality will override the +PRODUCTDIR+ variable. The above method can
+functionality will override the `PRODUCTDIR` variable. The above method can
 still be used in this case in the common case that the test schedule does not
-need to be changed or in case a custom schedule is defined by +SCHEDULE+.
+need to be changed or in case a custom schedule is defined by `SCHEDULE`.

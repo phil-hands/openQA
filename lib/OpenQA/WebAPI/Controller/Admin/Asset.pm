@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2018 SUSE Linux Products GmbH
+# Copyright (C) 2014-2018 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,14 +11,14 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::WebAPI::Controller::Admin::Asset;
 use Mojo::Base 'Mojolicious::Controller';
 
 use Mojolicious::Static;
 use Mojo::File;
+use OpenQA::Log 'log_debug';
 
 sub index {
     my ($self) = @_;
@@ -32,7 +32,7 @@ sub _serve_status_json_from_cache {
     my $cache_file = OpenQA::Schema::ResultSet::Assets::status_cache_file();
     return unless (-f $cache_file);
 
-    OpenQA::Utils::log_debug('Serving static asset status: ' . $cache_file);
+    log_debug('Serving static asset status: ' . $cache_file);
     $self->{static} = Mojolicious::Static->new;
     $self->{static}->extra({'cache.json' => $cache_file});
     $self->{static}->serve($self, 'cache.json');
@@ -42,22 +42,20 @@ sub _serve_status_json_from_cache {
 sub status_json {
     my ($self) = @_;
 
-    # fail if cleanup is currently ongoing (the static JSON file might be written right now)
+    # serve previously cached, static JSON file unless $force_refresh has been specified
+    my $force_refresh = $self->param('force_refresh');
+    return !!$self->rendered if !$force_refresh && $self->_serve_status_json_from_cache;
+
+    # fail if cleanup is currently ongoing and there is no cache file yet
     if ($self->gru->is_task_active('limit_assets')) {
         return $self->render(json => {error => 'Asset cleanup is currently ongoing.'}, status => 400);
     }
 
     # allow to force scan for untracked assets and refresh
-    my $force_refresh = $self->param('force_refresh');
-    my $assets        = $self->app->schema->resultset('Assets');
+    my $assets = $self->app->schema->resultset('Assets');
     if ($force_refresh) {
         $assets->scan_for_untracked_assets();
         $assets->refresh_assets();
-    }
-
-    # serve previously cached, static JSON file unless $force_refresh has been specified
-    if (!$force_refresh) {
-        return !!$self->rendered if $self->_serve_status_json_from_cache;
     }
 
     # generate new static JSON file
@@ -67,7 +65,7 @@ sub status_json {
     );
 
     return !!$self->rendered if $self->_serve_status_json_from_cache;
-    return $self->render(json => {error => 'cache file for asset status not found'}, status => 500);
+    $self->render(json => {error => 'Cache file for asset status could not be generated.'}, status => 500);
 }
 
 1;

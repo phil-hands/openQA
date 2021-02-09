@@ -1,0 +1,221 @@
+% layout 'bootstrap';
+% content_for 'head' => begin
+  %= asset 'codemirror.js'
+  %= asset 'codemirror.css'
+% end
+
+% title 'Job templates for ' . $group->name;
+
+% unless ($force_yaml_editor) {
+    <div class="alert alert-danger">
+        The old job group view is deprecated and will be removed from
+        future versions of openQA. Please save the job templates in YAML
+        format as soon as possible.
+    </div>
+% }
+
+% content_for 'ready_function' => begin
+    user_is_admin = <%= is_admin_js %>;
+    % if ($force_yaml_editor) {
+        toggleTemplateEditor();
+    % }
+    % else {
+        setupJobTemplates("<%= url_for('apiv1_job_templates') %>", <%= $group->id %>);
+    % }
+    $('#expand-template').click(function() { submitTemplateEditor('expand'); });
+    $('#preview-template').click(function() { submitTemplateEditor('preview'); });
+    $('#save-template').click(function() { submitTemplateEditor('save'); });
+% end
+
+<div class="row">
+    <div class="col-sm-12">
+        <form action="<%= url_for('admin_groups') %>" class="corner-buttons">
+            % if (!$force_yaml_editor) {
+            <button type="button" id="toggle-yaml-editor" class="btn btn-default" onclick="toggleTemplateEditor();">
+                <span>
+                    <i class="fas fa-edit"></i>
+                    % if (is_admin) {
+                        Edit YAML
+                    % }
+                    % else {
+                        Show YAML
+                    % }
+                </span>
+            </button>
+            % }
+            <button type="button" id="toggle-group-properties" class="btn btn-default" onclick="toggleEdit();">
+                <span>
+                    <i class="fas fa-edit"></i>
+                    % if (is_admin) {
+                        Edit job group properties
+                    % }
+                    % else {
+                        Show job group properties
+                    % }
+                </span>
+            </button>
+            <button type="submit" class="btn btn-default">
+                <span>
+                    <i class="fas fa-th-list"></i>
+                    % if (is_admin) {
+                        Manage all job groups
+                    % }
+                    % else {
+                        Show all job groups
+                    % }
+                </span>
+            </button>
+        </form>
+        <h2><span id="job-config-page-heading">Job templates for</span> group <span id="job-group-name"><%= $group->name %></span></h2>
+        %= include 'layouts/info'
+        %= include 'admin/group/group_property_editor', group => $group, is_parent => 0
+        <h3 id="job-config-templates-heading" style="display: none;">Job templates</h3>
+        <p>
+            A job template is a combination of machine, product and test suite settings. These combination are used
+            to produce actual jobs within a certain job group. Checkout
+            <a href="http://open.qa/docs/#_using_job_templates_to_automate_jobs_creation" target="blank">the documentation</a>
+            for more details.
+        </p>
+        % if (!$force_yaml_editor) {
+            <div id="media">
+                <p id="loading"><i class="fa fa-spinner fa-spin"></i> Loading…</p>
+
+                <select id="machines-template" multiple="true" disabled data-placeholder="None" style="display: none">
+                    % for my $machine (@$machines) {
+                        <option value="<%= $machine->name %>"
+                                data-machine-id="<%= $machine->id %>" >
+                            %= $machine->name
+                        </option>
+                    % }
+                </select>
+
+                <select id="tests-template" disabled style="display: none">
+                    <option value="">Select…</option>
+                    % for my $test (@$tests) {
+                        <option value="<%= $test->name %>" data-test-id="<%= $test->id %>">
+                            %= $test->name
+                        </option>
+                    % }
+                </select>
+
+            </div>
+        % }
+        <form action="#" id="editor-form" class="form-horizontal" style="display: none;"
+              data-put-url="<%= url_for('apiv1_job_templates_schedules' => (id => $group->id)) %>" data-reference="<%= $yaml_template %>">
+            <div class="form-group row">
+                <label for="editor-template" class="col-sm-5 control-label editor-yaml-guide">
+                    <div>
+                        <div>Basic YAML structure for defining job templates:</div>
+<code>defaults:
+  <b>ARCH</b>:
+    machine: <b>MACHINE</b>
+    priority: <b>PRIORITY</b>
+products:
+  <i>medium</i>-<b>ARCH</b>:
+    distri: <b>DISTRI</b>
+    flavor: <b>FLAVOR</b>
+    version: <b>VERSION</b>
+scenarios:
+  <b>ARCH</b>:
+    <i>medium</i>-<b>ARCH</b>:
+    - <b>TESTSUITE</b>
+                        </code>
+                        <div>Override machine, priority, settings or description:</div>
+<code>scenarios:
+  ARCH:
+    medium-ARCH:
+    - <b>TESTSUITE</b>:
+        machine: <b>MACHINE</b>
+        priority: <b>PRIORITY</b>
+        settings:
+          <b>SOME_TEST_VARIABLE</b>: <b>VALUE</b>
+        description: >-
+          <b>A description similar to the one
+          defined on test suite level.</b>
+                        </code>
+                        <div>Specify multiple machines:</div>
+<code>scenarios:
+  ARCH:
+    medium-ARCH:
+    - <b>TESTSUITE</b>:
+        machine: [<b>MACHINE1</b>, <b>MACHINE2</b>]
+                        </code>
+                        <div>Re-use a test suite with a custom job template name:</div>
+<code>scenarios:
+  ARCH:
+    medium-ARCH:
+    - <b>JOBNAME</b>:
+        testsuite: <b>TESTSUITE</b>
+        settings:
+          <b>ANOTHER_VARIABLE</b>: <b>YET_ANOTHER_VALUE</b>
+                        </code>
+                        <div>Re-use test suites with YAML aliases:</div>
+<code>scenarios:
+  <b>i586</b>:
+    <i>medium</i>-<b>i586</b>: <b>&amp;tests</b>
+    - foo
+    - bar:
+        machine: <b>64bit</b>
+        priority: <b>70</b>
+  <b>x86_64</b>:
+    <i>medium</i>-<b>x86_64</b>:
+      <b>*tests</b>
+                        </code>
+                        <div>Re-use settings with YAML merge keys:</div>
+<code>scenarios:
+  <b>i586</b>:
+    <i>medium</i>-<b>i586</b>:
+    - foo
+    - bar:
+        machine: <b>64bit</b>
+        priority: <b>70</b>
+        settings: <b>&amp;common</b>
+          FOO: <b>a</b>
+          BAR: <b>b</b>
+    - baz:
+        machine: <b>64bit</b>
+        priority: <b>70</b>
+        settings:
+          &lt;&lt;: <b>*common</b>
+          BAZ: <b>z</b>
+                        </code>
+                    </div>
+                </label>
+                <div class="col-sm-7">
+                    <textarea class="form-control" id="editor-template" name="template" spellcheck="false"></textarea>
+                </div>
+            </div>
+            <div class="form-group row">
+                <div class="col-sm-5 editor-yaml-guide">
+                    <p class="buttons">
+                        <a href="http://open.qa/docs/#_job_group_editor_gh2111" target="blank" class="btn">
+                            <i class="fas fa-book"></i>YAML editor documentation
+                        </a>
+                    </p>
+                </div>
+                <div class="col-sm-7">
+                    <p class="buttons">
+                        <button id="toggle-yaml-guide" type="button" class="btn btn-help"><i class="fas fa-question-circle"></i>Show YAML guide</button>
+                    % if (is_admin) {
+                        <button id="expand-template" type="button" class="btn btn-tertiary"><i class="fas fa-expand"></i>Show expanded version</button>
+                        <button id="preview-template" type="button" class="btn btn-secondary"><i class="fas fa-check-circle"></i>Preview changes</button>
+                        <button id="save-template" type="button" class="btn btn-primary"><i class="fas fa-save"></i>Save changes</button>
+                    % }
+                    </p>
+                    <p class="progress-indication">
+                        <i class="fa fa-cog fa-spin fa-3x fa-fw"></i>
+                        <span class="sr-only">Loading…</span>
+                    </p>
+                    <div class="result"></div>
+                </div>
+            </div>
+        </form>
+
+        % if (!$force_yaml_editor && is_admin) {
+            <p>
+                <i class="fa fa-plus-square"></i> Please save as YAML to add new medium as part of this group
+            </p>
+        % }
+    </div>
+
+</div>

@@ -2,15 +2,12 @@
 Description=The openQA web UI
 Wants=apache2.service openqa-setup-db.service
 Before=apache2.service
-After=postgresql.service openqa-setup-db.service openqa-scheduler.service
-Requires=openqa-livehandler.service openqa-websockets.service openqa-gru.service
+After=postgresql.service openqa-setup-db.service openqa-scheduler.service nss-lookup.target remote-fs.target
+Requires=openqa-livehandler.service openqa-websockets.service openqa-gru.service openqa-enqueue-asset-cleanup.timer openqa-enqueue-result-cleanup.timer openqa-enqueue-bug-cleanup.timer
 
 [Service]
-# TODO: define whether we want to run the web ui with the same user
 User=geekotest
-Environment="DBUS_STARTER_BUS_TYPE=system"
-# Our API commands are very expensive, so the default timeouts are too tight
-ExecStart=/usr/share/openqa/script/openqa prefork -m production --proxy -i 100 -H 400 -w 20 -G 800
+ExecStart=/usr/share/openqa/script/openqa-webui-daemon
 
 [Install]
 WantedBy=multi-user.target

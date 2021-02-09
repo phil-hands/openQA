@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2018 SUSE Linux Products GmbH
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,15 +11,13 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::Client;
 use Mojo::Base 'OpenQA::UserAgent';
-
 use OpenQA::Client::Upload;
 use OpenQA::Client::Archive;
-use Scalar::Util ();
+
 
 has upload => sub {
     my $upload = OpenQA::Client::Upload->new(client => shift);
@@ -107,4 +105,3 @@ the api.
 L<Mojo::UserAgent>, L<Config::IniFiles>
 
 =cut
-# vim: set sw=4 et:

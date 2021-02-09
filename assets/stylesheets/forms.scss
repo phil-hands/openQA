@@ -2,11 +2,17 @@
 .btn, .form-control {
     font-size: 0.94rem;
     padding: 0.6rem;
-    line-height: 0.7rem;
+    line-height: 0.8rem;
+}
+.btn .fas {
+    padding-right: 3pt;
 }
 .form-control {
     padding: 0.4rem;
     line-height: normal;
+}
+.form-control:invalid {
+    background: #ffaaaa80;
 }
 .form-group .control-label {
     font-weight: bold;
@@ -18,10 +24,6 @@
         text-align: right;
     }
 }
-.btn {
-    padding: 0.6rem;
-    line-height: 0.7rem;
-}
 select.form-control {
     padding: 0rem;
 }
@@ -31,7 +33,7 @@ select.form-control {
 }
 
 // enhance style buttons on hover and focus
-@mixin btn($class,$bg){
+@mixin btn($class,$bg) {
     .btn-#{$class} {
         background-size: 200% 200%;
         background-position: 50%;
@@ -121,4 +123,9 @@ select.form-control {
 // round images (used for comments) and badges inside summary
 .img-circle {
     border-radius: 50%;
+}
+
+.editor-yaml-guide {
+    display: none;
+    text-align: left !important;
 }

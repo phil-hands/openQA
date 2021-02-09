@@ -1,4 +1,4 @@
-# Copyright (C) 2018 SUSE Linux Products GmbH
+# Copyright (C) 2018 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,8 +11,7 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::UserAgent;
 use Mojo::Base 'Mojo::UserAgent';
@@ -61,6 +60,8 @@ sub new {
         start => sub {
             $self->_add_auth_headers(@_);
         });
+    #read proxy environment variables
+    $self->proxy->detect;
 
     return $self;
 }
@@ -71,15 +72,17 @@ sub _add_auth_headers {
     my $timestamp = time;
     my %headers   = (
         Accept            => 'application/json',
-        'X-API-Microtime' => $timestamp
+        'X-API-Microtime' => $timestamp,
     );
     if ($self->apisecret && $self->apikey) {
         $headers{'X-API-Key'}  = $self->apikey;
         $headers{'X-API-Hash'} = hmac_sha1_sum($self->_path_query($tx) . $timestamp, $self->apisecret);
     }
 
-    while (my ($k, $v) = each %headers) {
-        $tx->req->headers->header($k, $v);
+    my $set_headers = $tx->req->headers;
+    foreach my $key (keys %headers) {
+        # don't overwrite headers that were set manually
+        $set_headers->header($key, $headers{$key}) unless defined $set_headers->header($key);
     }
 }
 
@@ -168,4 +171,3 @@ the api.
 L<Mojo::UserAgent>, L<Config::IniFiles>
 
 =cut
-# vim: set sw=4 et:

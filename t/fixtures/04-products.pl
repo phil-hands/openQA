@@ -1,3 +1,6 @@
+use strict;
+use warnings;
+
 [
     Machines => {
         id       => 1001,
@@ -32,8 +35,8 @@
     },
 
     TestSuites => {
-        id   => 1013,
-        name => "RAID0",
+        id       => 1013,
+        name     => "RAID0",
         settings =>
           [{key => "RAIDLEVEL", value => 0}, {key => "INSTALLONLY", value => 1}, {key => "DESKTOP", value => "kde"},],
     },
@@ -88,16 +91,28 @@
             },
         ],
         job_templates => [
-            {machine => {name => '32bit'}, test_suite => {name => 'textmode'},     prio => 40, group_id => 1001},
-            {machine => {name => '64bit'}, test_suite => {name => 'textmode'},     prio => 40, group_id => 1001},
-            {machine => {name => '64bit'}, test_suite => {name => 'kde'},          prio => 40, group_id => 1001},
-            {machine => {name => '32bit'}, test_suite => {name => 'client1'},      prio => 40, group_id => 1001},
-            {machine => {name => '32bit'}, test_suite => {name => 'client2'},      prio => 40, group_id => 1001},
-            {machine => {name => '32bit'}, test_suite => {name => 'server'},       prio => 40, group_id => 1001},
-            {machine => {name => '64bit'}, test_suite => {name => 'client1'},      prio => 40, group_id => 1001},
-            {machine => {name => '64bit'}, test_suite => {name => 'client2'},      prio => 40, group_id => 1001},
-            {machine => {name => '64bit'}, test_suite => {name => 'server'},       prio => 40, group_id => 1001},
-            {machine => {name => '64bit'}, test_suite => {name => 'advanced_kde'}, prio => 40, group_id => 1001},
+            {
+                machine     => {name => '32bit'},
+                test_suite  => {name => 'textmode'},
+                prio        => 40,
+                group_id    => 1001,
+                description => '32bit textmode prio 40'
+            },
+            {machine => {name => '64bit'}, test_suite => {name => 'textmode'}, prio => 40, group_id => 1001},
+            {machine => {name => '64bit'}, test_suite => {name => 'kde'},      prio => 40, group_id => 1001},
+            {machine => {name => '32bit'}, test_suite => {name => 'client1'},  prio => 40, group_id => 1001},
+            {machine => {name => '32bit'}, test_suite => {name => 'client2'},  prio => 40, group_id => 1001},
+            {machine => {name => '32bit'}, test_suite => {name => 'server'},   prio => 40, group_id => 1001},
+            {machine => {name => '64bit'}, test_suite => {name => 'client1'},  prio => 40, group_id => 1001},
+            {machine => {name => '64bit'}, test_suite => {name => 'client2'},  prio => 40, group_id => 1001},
+            {machine => {name => '64bit'}, test_suite => {name => 'server'},   prio => 40, group_id => 1001},
+            {
+                machine    => {name => '64bit'},
+                test_suite => {name => 'advanced_kde'},
+                prio       => 40,
+                group_id   => 1001,
+                settings   => [{key => 'DESKTOP', value => 'advanced_kde'}, {key => 'ADVANCED', value => '1'},],
+            },
         ],
     },
     Products => {
@@ -117,4 +132,3 @@
         arch    => 'ppc64',
     },
 ]
-# vim: set sw=4 et:

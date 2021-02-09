@@ -1,4 +1,4 @@
-# Copyright (C) 2014 SUSE Linux Products GmbH
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -11,41 +11,24 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    $ENV{OPENQA_TEST_IPC} = 1;
-    unshift @INC, 'lib';
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings;
+use Test::Warnings ':report_warnings';
+use OpenQA::Test::TimeLimit '10';
 use OpenQA::Test::Case;
-use OpenQA::Client;
+use OpenQA::Test::Client 'client';
 use Mojo::IOLoop;
-use OpenQA::Scheduler;
 
-# create Test DBus bus and service for fake WebSockets and Scheduler call
-my $sh = OpenQA::Scheduler->new;
-
-OpenQA::Test::Case->new->init_data;
-
-my $t = Test::Mojo->new('OpenQA::WebAPI');
-
-# XXX: Test::Mojo loses it's app when setting a new ua
-# https://github.com/kraih/mojo/issues/598
-my $app = $t->app;
-$t->ua(OpenQA::Client->new(apikey => 'ARTHURKEY01', apisecret => 'EXCALIBUR')->ioloop(Mojo::IOLoop->singleton));
-$t->app($app);
-
-my $get = $t->get_ok('/api/v1/test_suites')->status_is(200);
+OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 04-products.pl');
+my $t = client(Test::Mojo->new('OpenQA::WebAPI'), apikey => 'ARTHURKEY01', apisecret => 'EXCALIBUR');
+$t->get_ok('/api/v1/test_suites')->status_is(200);
 is_deeply(
-    $get->tx->res->json,
+    $t->tx->res->json,
     {
         'TestSuites' => [
             {
@@ -150,12 +133,12 @@ is_deeply(
                     }]}]
     },
     "Initial test suites"
-) || diag explain $get->tx->res->json;
+) || diag explain $t->tx->res->json;
 
 $t->post_ok('/api/v1/test_suites', form => {})->status_is(400);    #no name
 
 
-my $res = $t->post_ok(
+$t->post_ok(
     '/api/v1/test_suites',
     form => {
         name              => "testsuite",
@@ -163,13 +146,19 @@ my $res = $t->post_ok(
         "settings[TEST2]" => "val1",
         description       => "this is a new testsuite"
     })->status_is(200);
-my $test_suite_id = $res->tx->res->json->{id};
-
-$res = $t->post_ok('/api/v1/test_suites', form => {name => "testsuite"})->status_is(400);    #already exists
-
-$get = $t->get_ok("/api/v1/test_suites/$test_suite_id")->status_is(200);
+my $test_suite_id = $t->tx->res->json->{id};
+my $event         = OpenQA::Test::Case::find_most_recent_event($t->app->schema, 'table_create');
 is_deeply(
-    $get->tx->res->json,
+    [sort keys %$event],
+    ['description', 'id', 'name', 'settings', 'table'],
+    'testsuite event was logged correctly'
+);
+
+$t->post_ok('/api/v1/test_suites', form => {name => "testsuite"})->status_is(400);    #already exists
+
+$t->get_ok("/api/v1/test_suites/$test_suite_id")->status_is(200);
+is_deeply(
+    $t->tx->res->json,
     {
         'TestSuites' => [
             {
@@ -187,14 +176,14 @@ is_deeply(
                     }]}]
     },
     "Add test_suite"
-) || diag explain $get->tx->res->json;
+) || diag explain $t->tx->res->json;
 
 $t->put_ok("/api/v1/test_suites/$test_suite_id", form => {name => "testsuite", "settings[TEST2]" => "val1"})
   ->status_is(200);
 
-$get = $t->get_ok("/api/v1/test_suites/$test_suite_id")->status_is(200);
+$t->get_ok("/api/v1/test_suites/$test_suite_id")->status_is(200);
 is_deeply(
-    $get->tx->res->json,
+    $t->tx->res->json,
     {
         'TestSuites' => [
             {
@@ -207,19 +196,16 @@ is_deeply(
                     }]}]
     },
     "Delete test_suite variable"
-) || diag explain $get->tx->res->json;
+) || diag explain $t->tx->res->json;
 
-$res = $t->delete_ok("/api/v1/test_suites/$test_suite_id")->status_is(200);
-$res = $t->delete_ok("/api/v1/test_suites/$test_suite_id")->status_is(404);    #not found
+$t->delete_ok("/api/v1/test_suites/$test_suite_id")->status_is(200);
+$t->delete_ok("/api/v1/test_suites/$test_suite_id")->status_is(404);    #not found
 
-# switch to operator (percival) and try some modifications
-$app = $t->app;
-$t->ua(
-    OpenQA::Client->new(apikey => 'PERCIVALKEY02', apisecret => 'PERCIVALSECRET02')->ioloop(Mojo::IOLoop->singleton));
-$t->app($app);
+# switch to operator (default client) and try some modifications
+client($t);
 $t->post_ok('/api/v1/test_suites', form => {name => "testsuite"})->status_is(403);
 $t->put_ok("/api/v1/test_suites/$test_suite_id", form => {name => "testsuite", "settings[TEST2]" => "val1"})
   ->status_is(403);
-$res = $t->delete_ok("/api/v1/test_suites/$test_suite_id")->status_is(403);
+$t->delete_ok("/api/v1/test_suites/$test_suite_id")->status_is(403);
 
 done_testing();

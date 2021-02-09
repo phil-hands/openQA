@@ -1,0 +1,14 @@
+% layout 'bootstrap';
+% content_for 'head' => begin
+  %= asset 'codemirror.js'
+  %= asset 'codemirror.css'
+% end
+
+% title 'OBS synchronization Log';
+<h2>OBS synchronization log: <%= $alias %>/<%= $subfolder %></h2>
+<h5>Full directory path: <%= $full %></h5>
+<ul>
+% for my $filename (@$files) {
+    <li><%= link_to $filename => url_for('plugin_obs_rsync_download_file', alias => $alias, subfolder => $subfolder, filename => $filename) %></li>
+% }
+</ul>

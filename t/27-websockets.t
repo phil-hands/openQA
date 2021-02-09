@@ -1,6 +1,6 @@
-#!/usr/bin/perl
+#!/usr/bin/env perl
 
-# Copyright (C) 2017 SUSE LLC
+# Copyright (C) 2017-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,174 +15,231 @@
 # You should have received a copy of the GNU General Public License along
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
+use Test::Most;
+
 use 5.018;
-use warnings;
-use strict;
-use Test::More;
 use POSIX;
 use FindBin;
-use lib ("$FindBin::Bin/lib", "../lib", "lib");
-use OpenQA::Client;
+use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
+use OpenQA::Test::TimeLimit '10';
+use OpenQA::Jobs::Constants;
 use OpenQA::WebSockets;
-use OpenQA::WebSockets::Controller::Worker;
+use OpenQA::WebSockets::Model::Status;
 use OpenQA::Constants 'WEBSOCKET_API_VERSION';
+use OpenQA::Test::Client 'client';
 use OpenQA::Test::Database;
-use OpenQA::Test::Utils 'redirect_output';
+use OpenQA::Test::FakeWebSocketTransaction;
+use Test::Output;
 use Test::MockModule;
 use Test::Mojo;
 use Mojo::JSON;
 
-# Pretend the class was loaded with "require"
-$INC{'FooBarWorker.pm'} = 1;
-
-OpenQA::Test::Database->new->create;
-my $t = Test::Mojo->new('OpenQA::WebSockets');
+my $schema = OpenQA::Test::Database->new->create(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
+my $t      = Test::Mojo->new('OpenQA::WebSockets');
 
 subtest 'Authentication' => sub {
-    $t->get_ok('/test')->status_is(404);
     my $app = $t->app;
-    $t->get_ok('/')->status_is(200)->json_is({name => $app->defaults('appname')});
-    local $t->app->config->{no_localhost_auth} = 0;
-    $t->get_ok('/')->status_is(403)->json_is({error => 'Not authorized'});
-    $t->ua(
-        OpenQA::Client->new(apikey => 'PERCIVALKEY02', apisecret => 'PERCIVALSECRET02')->ioloop(Mojo::IOLoop->singleton)
-    )->app($app);
-    $t->get_ok('/')->status_is(200)->json_is({name => $app->defaults('appname')});
+
+    combined_like {
+        $t->get_ok('/test')->status_is(404)->content_like(qr/Not found/);
+        $t->get_ok('/')->status_is(200)->json_is({name => $app->defaults('appname')});
+        local $t->app->config->{no_localhost_auth} = 0;
+        $t->get_ok('/')->status_is(403)->json_is({error => 'Not authorized'});
+        client($t);
+        $t->get_ok('/')->status_is(200)->json_is({name => $app->defaults('appname')});
+    }
+    qr/auth by user: percival/, 'auth logged';
+
+    my $c = $t->app->build_controller;
+    $c->tx->remote_address('127.0.0.1');
+    ok $c->is_local_request, 'is localhost';
+    $c->tx->remote_address('::1');
+    ok $c->is_local_request, 'is localhost';
+    $c->tx->remote_address('192.168.2.1');
+    ok !$c->is_local_request, 'not localhost';
+};
+
+subtest 'Exception' => sub {
+    $t->app->plugins->once(before_dispatch => sub { die 'Just a test exception!' });
+    $t->get_ok('/whatever')->status_is(500)->content_like(qr/Just a test exception!/);
+    $t->get_ok('/whatever')->status_is(404);
 };
 
 subtest 'API' => sub {
-    $t->get_ok('/api/is_worker_connected/1')->status_is(200)->json_is({connected => Mojo::JSON::false});
-    local $t->app->status->workers->{1} = {socket => 1};
-    $t->get_ok('/api/is_worker_connected/1')->status_is(200)->json_is({connected => Mojo::JSON::true});
+    $t->tx($t->ua->start($t->ua->build_websocket_tx('/ws/23')))->status_is(400)->content_like(qr/Unknown worker/);
 };
 
-subtest 'WebSocket Server workers_checker' => sub {
-    my $mock_schema = Test::MockModule->new('OpenQA::Schema');
-    my $mock_singleton_called;
-    $mock_schema->mock(singleton => sub { $mock_singleton_called++; FooBarTransaction->new });
-    my $buffer;
-    {
-        open my $handle, '>', \$buffer;
-        local *STDOUT = $handle;
-        OpenQA::WebSockets->new->workers_checker;
+my $workers   = $schema->resultset('Workers');
+my $jobs      = $schema->resultset('Jobs');
+my $worker    = $workers->search({host => 'localhost', instance => 1})->first;
+my $worker_id = $worker->id;
+my $status    = OpenQA::WebSockets::Model::Status->singleton->workers;
+$status->{$worker_id} = {id => $worker_id, db => $worker};
+
+subtest 'web socket message handling' => sub {
+    subtest 'unexpected message' => sub {
+        combined_like {
+            $t->websocket_ok('/ws/1', 'establish ws connection');
+            $t->send_ok('');
+            $t->finished_ok(1003, 'connection closed on unexpected message');
+        }
+        qr/Received unexpected WS message .* from worker 1/s, 'unexpected message logged';
     };
-    like $buffer,              qr/Failed dead job detection/;
-    ok $mock_singleton_called, 'mocked singleton method has been called';
-};
 
-subtest 'WebSocket Server get_stale_worker_jobs' => sub {
-    my $mock_schema = Test::MockModule->new('OpenQA::Schema');
-    my $mock_singleton_called;
-    $mock_schema->mock(singleton => sub { $mock_singleton_called++; FooBarTransaction->new });
-    FooBarTransaction->new->OpenQA::WebSockets::Controller::Worker::ws();
-    my $buffer;
-    {
-        open my $handle, '>', \$buffer;
-        local *STDOUT = $handle;
-        OpenQA::WebSockets->new->get_stale_worker_jobs(-9999999999);
+    subtest 'incompatible version' => sub {
+        combined_like {
+            $t->websocket_ok('/ws/1', 'establish ws connection');
+            $t->send_ok('{}');
+            $t->message_ok('message received');
+            $t->json_message_is({type => 'incompatible'});
+            $t->finished_ok(1008, 'connection closed when version incompatible');
+        }
+        qr/Received a message from an incompatible worker 1/s, 'incompatible version logged';
     };
-    like $buffer,              qr/Worker Boooo not seen since \d+ seconds/;
-    ok $mock_singleton_called, 'mocked singleton method has been called';
-};
 
-subtest 'WebSocket Server _message()' => sub {
-    my $mock_controller = Test::MockModule->new('OpenQA::WebSockets::Controller::Worker');
-    my $mock_get_worker_called;
-    $mock_controller->mock(_get_worker => sub { $mock_get_worker_called++; FooBarWorker->new });
-    my $fake_tx = FooBarTransaction->new;
-    my $buf;
-    redirect_output(\$buf);
+    # make sure the API version matches in subsequent tests
+    $worker->set_property('WEBSOCKET_API_VERSION', WEBSOCKET_API_VERSION);
+    $worker->{_websocket_api_version_} = WEBSOCKET_API_VERSION;
 
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message("");
-    is @{$fake_tx->{out}}[0], "1003,Received unexpected data from worker, forcing close",
-      "WS Server returns 1003 when message is not a hash";
-    ok $mock_get_worker_called, 'mocked _get_worker method has been called';
+    subtest 'unknown type' => sub {
+        combined_like {
+            $t->websocket_ok('/ws/1', 'establish ws connection');
+            $t->send_ok('{"type":"foo"}');
+            $t->finish_ok(1000, 'finished ws connection');
+        }
+        qr/Received unknown message type "foo" from worker 1/s, 'unknown type logged';
+    };
 
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message({type => "status", jobid => 1, data => "mydata"});
-    is @{$fake_tx->{w}->{status}}[0], "mydata", "status got updated";
+    $schema->txn_begin;
 
-    $buf = undef;
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message({type => "FOOBAR"});
-    like $buf, qr/Received unknown message type "FOOBAR" from worker/, "log_error on unknown message";
+    subtest 'accepted' => sub {
+        combined_like {
+            $t->websocket_ok('/ws/1', 'establish ws connection');
+            $t->send_ok('{"type":"accepted","jobid":42}');
+            $t->finish_ok(1000, 'finished ws connection');
+        }
+        qr/Worker 1 accepted job 42.*never assigned/s, 'warning logged when job has never been assigned';
 
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message({type => 'worker_status'});
-    like($buf, qr/Could not send the population number to worker/, 'worker population unavailable')
-      or diag explain $buf;
+        $jobs->create({id => 42, state => ASSIGNED, assigned_worker_id => 1, TEST => 'foo'});
+        combined_like {
+            $t->websocket_ok('/ws/1', 'establish ws connection');
+            $t->send_ok('{"type":"accepted","jobid":42}');
+            $t->finish_ok(1000, 'finished ws connection');
+        }
+        qr/Worker 1 accepted job 42\n/s, 'debug message logged when job matches previous assignment';
+        is($jobs->find(42)->state,    SETUP, 'job is in setup state');
+        is($workers->find(1)->job_id, 42,    'job is considered the current job of the worker');
+    };
 
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message({type => 'worker_status'});
-    like($buf, qr/Failed updating worker seen and error status/, 'seen/error not available')
-      or diag explain $buf;
+    $schema->txn_rollback;
+    $schema->txn_begin;
 
-    my $mock_foo = Test::MockModule->new('FooBarWorker');
-    my $mock_version_called;
-    $mock_foo->mock(websocket_api_version => sub { $mock_version_called++; undef });
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message({type => 'worker_status'});
-    like($buf, qr/Received a message from an incompatible worker/, 'worker incompatible')
-      or diag explain $buf;
-    is @{$fake_tx->{out}}[1],
-      "1008,Connection terminated from WebSocket server - incompatible communication protocol version";
-    ok $mock_version_called, 'mocked websocket_api_version method has been called';
+    subtest 'rejected' => sub {
+        $jobs->create({id => 42, state => ASSIGNED, assigned_worker_id => 1, TEST => 'foo'});
+        $jobs->create({id => 43, state => DONE,     assigned_worker_id => 1, TEST => 'foo'});
+        $workers->find(1)->update({job_id => 42});
+        combined_like {
+            $t->websocket_ok('/ws/1', 'establish ws connection');
+            $t->send_ok('{"type":"rejected","job_ids":[42,43],"reason":"foo"}');
+            $t->finish_ok(1000, 'finished ws connection');
+        }
+        qr/Worker 1 rejected job\(s\) 42, 43: foo.*Job 42 reset to state scheduled/s,
+          'info logged when worker rejects job';
+        is($jobs->find(42)->state,    SCHEDULED, 'job is again in scheduled state');
+        is($jobs->find(43)->state,    DONE,      'completed job not affected');
+        is($workers->find(1)->job_id, undef,     'job not considered the current job of the worker anymore');
+    };
 
-    $buf                 = undef;
-    $mock_version_called = undef;
-    $mock_foo->mock(websocket_api_version => sub { $mock_version_called++; 0 });
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message({type => 'property_change'});
-    like $buf, qr/Received a message from an incompatible worker/ or diag explain $buf;
-    is @{$fake_tx->{out}}[2],
-      "1008,Connection terminated from WebSocket server - incompatible communication protocol version";
-    ok $mock_version_called, 'mocked websocket_api_version method has been called';
+    $schema->txn_rollback;
+    $schema->txn_begin;
 
-    $buf                 = undef;
-    $mock_version_called = undef;
-    $mock_foo->mock(websocket_api_version => sub { $mock_version_called++; WEBSOCKET_API_VERSION + 1 });
-    $fake_tx->OpenQA::WebSockets::Controller::Worker::_message({type => 'accepted'});
-    like $buf, qr/Received a message from an incompatible worker/ or diag explain $buf;
-    is @{$fake_tx->{out}}[3],
-      "1008,Connection terminated from WebSocket server - incompatible communication protocol version";
-    ok $mock_version_called, 'mocked websocket_api_version method has been called';
+    subtest 'quit' => sub {
+        $jobs->create({id => 42, state => ASSIGNED, assigned_worker_id => 1, TEST => 'foo'});
+        my $worker = $workers->find(1);
+        $worker->seen;
+        combined_like {
+            $t->websocket_ok('/ws/1', 'establish ws connection');
+            $t->send_ok('{"type":"quit"}');
+            $t->finish_ok(1000, 'finished ws connection');
+        }
+        qr/Job 42 reset to state scheduled/s, 'info logged when worker rejects job';
+        is($jobs->find(42)->state, SCHEDULED,
+                'job is immediately set back to scheduled if assigned worker goes offline '
+              . 'gracefully before starting to work on the job');
+        $worker->discard_changes;
+        ok($worker->dead, 'worker considered immediately dead when it goes offline gracefully');
+        like($worker->error, qr/graceful disconnect at .*/, 'graceful disconnect logged');
+    };
 
+    $schema->txn_rollback;
+    $t->websocket_ok('/ws/1', 'establish ws connection');
+
+    subtest 'worker status: broken' => sub {
+        combined_like {
+            $t->send_ok({json => {type => 'worker_status', status => 'broken', reason => 'test'}});
+            $t->message_ok('message received');
+            $t->json_message_is({type => 'info', population => $workers->count});
+        }
+        qr/Received.*worker_status message.*Updating seen of worker 1 from worker_status/s, 'update logged';
+        is($workers->find($worker_id)->error, 'test', 'broken message set');
+    };
+
+    subtest 'worker status: idle but worker supposed to run a job' => sub {
+        # assume the worker sends a status update claiming it is free when that's actually the case
+        $workers->find($worker_id)->update({job_id => undef});
+        combined_like {
+            $t->send_ok({json => {type => 'worker_status', status => 'idle'}});
+            $t->message_ok('message received');
+        }
+        qr/Received.*worker_status message.*Updating seen of worker 1 from worker_status/s, 'update logged';
+        ok(!$status->{$worker_id}->{idle_despite_job_assignment},
+            'the idle message has not been remarked because there is no job assignment');
+
+        # assign now a job to the worker
+        my $assigned_job_id = 99963;
+        my $assigned_job    = $jobs->find($assigned_job_id);
+        $workers->find($worker_id)->update({job_id => $assigned_job_id});
+        $assigned_job->update({state => ASSIGNED});
+
+        # assume the worker sends another status update claiming it is free - the worker should have a 2nd attempt
+        # to process the assignment before it is removed
+        combined_like {
+            $t->send_ok({json => {type => 'worker_status', status => 'idle'}});
+            $t->message_ok('message received');
+        }
+        qr/Received.*worker_status message.*Updating seen of worker 1 from worker_status/s, 'update logged';
+        is($workers->find($worker_id)->error,                    undef, 'broken status unset');
+        is($status->{$worker_id}->{idle_despite_job_assignment}, 1,     'the first idle message has been remarked');
+        is($workers->find($worker_id)->job_id, $assigned_job_id,        'but job assignment has not been removed yet');
+
+        # assume the worker sends another status update claiming it is free - the worker failed its 2nd attempt
+        # to process the assignment so it is supposed to be removed
+        combined_like {
+            $t->send_ok({json => {type => 'worker_status', status => 'idle'}});
+            $t->message_ok('message received');
+        }
+        qr/Rescheduling jobs assigned to worker $worker_id/s, 'rescheduling logged';
+        is($workers->find($worker_id)->job_id,   undef,     'job assignment removed on 2nd idle status');
+        is($jobs->find($assigned_job_id)->state, SCHEDULED, 'job set back to scheduled');
+    };
+
+    subtest 'worker status: idle and worker supposed to be idle' => sub {
+        $workers->find($worker_id)->update({error => 'assume worker is broken'});
+        combined_like {
+            $t->send_ok({json => {type => 'worker_status', status => 'idle'}});
+            $t->message_ok('message received');
+            $t->json_message_is({type => 'info', population => $workers->count});
+        }
+        qr/Received.*worker_status message.*Updating seen of worker 1 from worker_status/s, 'update logged';
+        is($workers->find($worker_id)->error, undef, 'broken status unset');
+    };
+
+    combined_like {
+        $t->finish_ok(1000, 'finished ws connection');
+    }
+    qr/Worker 1 websocket connection closed - 1000/s, 'connection closed logged';
 };
 
 done_testing();
-
-sub _store { push(@{shift->{+shift()}}, join(",", @_)); }
-
-package FooBarTransaction;
-
-sub new { bless({w => FooBarWorker->new()->set}, shift) }
-sub tx  { shift }
-sub app { shift }
-sub log { shift }
-sub schema             { shift }
-sub status             { OpenQA::WebSockets::Model::Status->singleton }
-sub resultset          { shift }
-sub find               { shift->{w} }
-sub on                 { shift }
-sub param              { 1 }
-sub warn               { return $_[1] }
-sub finish             { main::_store(shift, "out", @_) }
-sub send               { main::_store(shift, "send", @_) }
-sub storage            { shift }
-sub datetime_parser    { shift }
-sub inactivity_timeout { shift }
-sub max_websocket_size { shift }
-sub format_datetime    { shift }
-sub search             { shift }
-sub txn_do             { die "BHUAHUAHUAHUA"; }
-
-package FooBarWorker;
-my $singleton;
-sub new { $singleton ||= bless({}, shift) }
-sub set {
-    $singleton->{db} = $singleton;
-    $singleton->{id} = \&id;
-    $singleton;
-}
-sub id                    { 1 }
-sub update_status         { main::_store(shift, "status", @_) }
-sub set_property          { main::_store(shift, "property", @_) }
-sub tx                    { shift }
-sub name                  { "Boooo" }
-sub websocket_api_version { OpenQA::Constants::WEBSOCKET_API_VERSION() }
 
 1;

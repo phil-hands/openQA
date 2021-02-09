@@ -1,6 +1,5 @@
-#! /usr/bin/perl
-
-# Copyright (C) 2014-2017 SUSE LLC
+#!/usr/bin/env perl
+# Copyright (C) 2014-2020 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -13,39 +12,30 @@
 # GNU General Public License for more details.
 #
 # You should have received a copy of the GNU General Public License along
-# with this program; if not, write to the Free Software Foundation, Inc.,
-# 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA.
+# with this program; if not, see <http://www.gnu.org/licenses/>.
 
-BEGIN {
-    unshift @INC, 'lib';
-    $ENV{OPENQA_TEST_IPC} = 1;
-}
+use Test::Most;
 
-use Mojo::Base -strict;
 use FindBin;
-use lib "$FindBin::Bin/../lib";
-use Test::More;
+use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
-use Test::Warnings ':all';
+use Test::Warnings qw(:all :report_warnings);
+use OpenQA::Test::TimeLimit '20';
 use OpenQA::Test::Case;
 
 my $test_case = OpenQA::Test::Case->new;
-$test_case->init_data;
+$test_case->init_data(fixtures_glob => '01-jobs.pl 05-job_modules.pl');
 
 use OpenQA::SeleniumTest;
 
-my $driver = call_driver();
-unless ($driver) {
-    plan skip_all => $OpenQA::SeleniumTest::drivermissing;
-    exit(0);
-}
+plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
 
 $driver->title_is("openQA", "on main page");
 $driver->find_element_by_link_text('Login')->click();
 # we're back on the main page
 $driver->title_is("openQA", "back on main page");
 
-my @texts = map { $_->get_text() } $driver->find_elements('.progress-bar-softfailed', 'css');
+my @texts = map { $_->get_text() } wait_for_element(selector => '.progress-bar-softfailed');
 is_deeply(\@texts, ['2 softfailed'], 'Progress bars show soft fails');
 
 is($driver->find_element('#user-action a')->get_text(), 'Logged in as Demo', "logged in as demo");
@@ -61,7 +51,7 @@ $driver->title_is('openQA: opensuse-Factory-DVD-x86_64-Build0048-doc@64bit test 
 
 # expect the failure to be displayed
 is(
-    $driver->find_element_by_id('step_view')->get_attribute('data-image'),
+    wait_for_element(selector => '#step_view')->get_attribute('data-image'),
     '/tests/99938/images/logpackages-1.png',
     'Failure displayed'
 );
