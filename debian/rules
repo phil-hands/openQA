@@ -13,35 +13,10 @@ override_dh_install:
 	find $(CURDIR)/debian/openqa*/usr/share/openqa -type f -print0 | \
 		xargs -r0 sed -i -e '1s|^#!/usr/bin/env perl|#!/usr/bin/perl|'
 	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
-		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa.conf.template
-	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
-		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa-ssl.conf.template
+		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
 
 override_dh_fixperms:
 	dh_fixperms
-	# for common: adjust owner, need priviledge
-	for dir in usr/share/openqa/lib \
-		var/lib/openqa/share \
-		var/lib/openqa/factory \
-		var/lib/openqa/script \
-		var/lib/openqa/tests \
-		usr/share/openqa/lib \
-		;\
-	do chown root.root -R $(CURDIR)/debian/openqa-common/$$dir; done
-	# for client: adjust owner, need priviledge
-	for dir in usr/share/openqa/script/client \
-		usr/share/openqa/script/clone_job.pl \
-		usr/share/openqa/script/dump_templates \
-		usr/share/openqa/script/load_templates \
-		;\
-	do chown root.root -R $(CURDIR)/debian/openqa-client/$$dir; done
-	# for worker:
-	for dir in etc/openqa/client.conf \
-		var/lib/openqa/cache \
-		var/lib/openqa/pool/1 \
-		etc/openqa/workers.ini \
-		;\
-	do chown root.root $(CURDIR)/debian/openqa-worker/$$dir; done
 	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
 	chmod -x $(CURDIR)/debian/openqa/etc/logrotate.d/openqa
 

@@ -77,7 +77,6 @@ Build-Depends: debhelper (>= 10),
                liburi-perl,
                libwww-perl,
                perl,
-               perltidy,
                libminion-perl,
 ### for testcases
                libperl-critic-perl,
