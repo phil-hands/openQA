@@ -98,6 +98,7 @@ Build-Depends: debhelper (>= 10),
                rsync,
                shellcheck,
                jsbeautifier,
+               libclass-c3-componentised-perl,
                libtest-most-perl,
                libyaml-pp-perl,
                python3-future,
@@ -128,6 +129,7 @@ Depends: ${misc:Depends}, openqa-common (>= ${binary:Version}), openqa-client (>
          libmojo-pg-perl,
          libcommonmark-perl,
          postgresql,
+         libclass-c3-componentised-perl,
 Recommends: apparmor-profiles, apparmor-utils,
             apache2, logrotate,
             libdatetime-format-pg-perl,
@@ -209,6 +211,7 @@ Depends: ${misc:Depends}, openqa-client (>= ${binary:Version}), os-autoinst (>= 
          libmojo-ioloop-readwriteprocess-perl,
          libnet-dns-native-perl,
          vde2,
+         libfile-map-perl,
 Recommends: qemu,
 Description: testing framework openQA worker
  The openQA worker manages test engine (provided by os-autoinst package).
