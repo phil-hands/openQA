@@ -14,6 +14,8 @@ override_dh_install:
 		xargs -r0 sed -i -e '1s|^#!/usr/bin/env perl|#!/usr/bin/perl|'
 	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
 		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
+	# we need a local/ file to include
+	touch $(CURDIR)/debian/openqa/etc/apparmor.d/local/usr.share.openqa.script.openqa
 
 override_dh_fixperms:
 	dh_fixperms

@@ -8,3 +8,5 @@ var/lib/openqa/share/factory/repo
 var/lib/openqa/share/factory/other
 
 var/lib/openqa/webui/cache
+
+etc/apparmor.d/local
