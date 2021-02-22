@@ -1,0 +1,21 @@
+From: Philip Hands <phil@hands.com>
+Date: Mon, 22 Feb 2021 11:52:10 +0100
+Subject: Debian uses 'dpkg -l' to list packages
+
+---
+ etc/openqa/workers.ini | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/etc/openqa/workers.ini b/etc/openqa/workers.ini
+index 1761f80..015d67f 100644
+--- a/etc/openqa/workers.ini
++++ b/etc/openqa/workers.ini
+@@ -36,7 +36,7 @@
+ # packages against the list of packages during the previous last good job.
+ # Configuring this variable provides a command line to list the packages and
+ # their versions in plain text.
+-#PACKAGES_CMD = rpm -qa
++#PACKAGES_CMD = dpkg -l
+ 
+ # The section ids are the instance of the workers.
+ # The key/value pairs will appear in vars.json

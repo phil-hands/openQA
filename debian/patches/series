@@ -1,1 +1,3 @@
-add-dash-to-apparmor-profile-of-worker.patch
+0001-Debian-tweaks-for-apache-config.patch
+debian-apparmor-profile-additions.patch
+0004-Debian-uses-dpkg-l-to-list-packages.patch
