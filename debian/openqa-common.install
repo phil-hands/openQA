@@ -22,6 +22,7 @@ usr/share/openqa/lib/OpenQA/Parser
 usr/share/openqa/lib/OpenQA/Parser.pm
 usr/share/openqa/lib/OpenQA/Scheduler.pm
 usr/share/openqa/lib/OpenQA/Schema.pm
+usr/share/openqa/lib/OpenQA/ScreenshotDeletion.pm
 usr/share/openqa/lib/OpenQA/Script
 usr/share/openqa/lib/OpenQA/Setup.pm
 usr/share/openqa/lib/OpenQA/Shared

@@ -18,3 +18,4 @@ usr/share/openqa/script/worker
 usr/share/openqa/script/openqa-workercache
 usr/share/openqa/script/openqa-workercache-daemon
 usr/share/openqa/script/openqa-worker-cacheservice-minion
+etc/openqa/workers.ini
