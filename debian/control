@@ -130,6 +130,7 @@ Depends: ${misc:Depends}, openqa-common (>= ${binary:Version}), openqa-client (>
          libcommonmark-perl,
          postgresql,
          libclass-c3-componentised-perl,
+         libfilesys-df-perl,
 Recommends: apparmor-profiles, apparmor-utils,
             apache2, logrotate,
             libdatetime-format-pg-perl,
