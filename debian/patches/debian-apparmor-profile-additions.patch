@@ -8,6 +8,7 @@ Content-Transfer-Encoding: 8bit
 o Debian uses dash as its default shell
 o Debian has it's git components under /usr/lig/git-core/
 o /usr/bin/git is being called directly when scm=git
+o unzip is called just 'unzip' on Debian
 o git takes a look at /etc/mailname for creating commit messages
   (perhaps it wouldn't if the Author were explicitly set, so maybe this
   is not really needed?)
@@ -19,12 +20,12 @@ o needles need to be writable to enable editing
 Author: Philip Hands <phil@hands.com>,
         Frédéric Bonnard <frediz@debian.org>
 ---
- profiles/apparmor.d/usr.share.openqa.script.openqa | 22 +++++++++++++++-------
+ profiles/apparmor.d/usr.share.openqa.script.openqa | 24 ++++++++++++++--------
  profiles/apparmor.d/usr.share.openqa.script.worker |  6 ++++--
- 2 files changed, 19 insertions(+), 9 deletions(-)
+ 2 files changed, 20 insertions(+), 10 deletions(-)
 
 diff --git a/profiles/apparmor.d/usr.share.openqa.script.openqa b/profiles/apparmor.d/usr.share.openqa.script.openqa
-index 7966abf..b071ccf 100644
+index 7966abf..6642731 100644
 --- a/profiles/apparmor.d/usr.share.openqa.script.openqa
 +++ b/profiles/apparmor.d/usr.share.openqa.script.openqa
 @@ -20,19 +20,25 @@
@@ -38,7 +39,7 @@ index 7966abf..b071ccf 100644
    /usr/bin/perl ix,
    /usr/bin/ssh rcx,
    /usr/bin/timeout rix,
-   /usr/bin/unzip-plain rix,
+-  /usr/bin/unzip-plain rix,
 -  /usr/lib/git/git rix,
 -  /usr/lib/git/git-add rix,
 -  /usr/lib/git/git-commit rix,
@@ -46,6 +47,7 @@ index 7966abf..b071ccf 100644
 -  /usr/lib/git/git-rebase rix,
 -  /usr/lib/git/git-remote rix,
 -  /usr/lib/git/git-rm rix,
++  /usr/bin/unzip{,-plain} rix,
 +  /usr/bin/git rix,
 +  /usr/lib/git{,-core}/git rix,
 +  /usr/lib/git{,-core}/git-add rix,
