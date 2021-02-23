@@ -18,6 +18,7 @@ usr/lib/systemd/system/openqa-enqueue-result-cleanup.service lib/systemd/system
 usr/lib/systemd/system/openqa-enqueue-result-cleanup.timer lib/systemd/system
 usr/lib/systemd/system/openqa-enqueue-bug-cleanup.service lib/systemd/system
 usr/lib/systemd/system/openqa-enqueue-bug-cleanup.timer lib/systemd/system
+usr/lib/systemd/system/openqa-setup-db.service lib/systemd/system
 usr/lib/tmpfiles.d/openqa-webui.conf
 usr/share/openqa/lib/DBIx/
 usr/share/openqa/lib/OpenQA/LiveHandler.pm
@@ -47,6 +48,7 @@ usr/share/openqa/script/openqa-scheduler-daemon
 usr/share/openqa/script/openqa-websockets
 usr/share/openqa/script/openqa-websockets-daemon
 usr/share/openqa/script/openqa-webui-daemon
+usr/share/openqa/script/setup-db
 usr/share/openqa/script/upgradedb
 usr/share/openqa/script/modify_needle
 var/lib/openqa/db
