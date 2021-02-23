@@ -5,6 +5,8 @@ Maintainer: Hideki Yamane <henrich@debian.org>
 Uploaders: Adam Majer <adamm@debian.org>,
            Andrew Lee (李健秋) <ajqlee@debian.org>,
 Build-Depends: debhelper (>= 10),
+               dh-python,
+               python3,
                os-autoinst,
                systemd,
                ruby-sass,
@@ -199,7 +201,8 @@ Depends: ${misc:Depends},
          libconfig-inifiles-perl,
          libdata-dump-perl,
          libmojolicious-perl (>= 7.24),
-	 openqa-common (= ${source:Version}),
+         openqa-common (= ${source:Version}),
+Recommends: python3, ${python3:Depends},
 Description: client tools for remote openQA management
  Tools and support files for openQA client script. Client script is
  a convenient helper for interacting with openQA webui REST API.
