@@ -4,6 +4,7 @@ Priority: optional
 Maintainer: Hideki Yamane <henrich@debian.org>
 Uploaders: Adam Majer <adamm@debian.org>,
            Andrew Lee (李健秋) <ajqlee@debian.org>,
+           Philip Hands <phil@hands.com>,
 Build-Depends: debhelper (>= 10),
                dh-python,
                python3,
