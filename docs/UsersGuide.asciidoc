@@ -318,7 +318,7 @@ image::images/review_badges.png[Review badges]
 === Bug references, labels and flags
 ==== Bug references
 It is possible to reference a bug by writing `<bugtracker_shortname>#<bug_nr>`
-in a comment, e.g. `bsc#1234`. It is also possible to spell out the full URL,
+in a comment, e.g. `deb#1234`. It is also possible to spell out the full URL,
 e.g. `https://bugzilla.suse.com/show_bug.cgi?id=1234` which will then be
 shortened automatically. A bug reference is rendered as link and a bug icon
 is displayed for the job in various places as shown in the figure below.
@@ -329,7 +329,7 @@ carryover.
 
 WARNING: If you want to reference a bug without making it count as a bug
 reference you need to wrap it into a label (see subsequent section), e.g.
-`label:bsc#1234`.
+`label:deb#1234`.
 
 [[bug_icon]]
 .Bug icon for job with bug reference on test result overview
@@ -368,7 +368,7 @@ icon is shown and the comment does *not* become subject to carry over.
 One special label format is available which allows to forcefully overwrite the
 result of an openQA job using a convenient openQA comment. The expected format
 is `label:force_result:<new_result>[:<description>]`, for example
-`label:force_result:failed` or `label:force_result:softfailed:bsc#1234`. For
+`label:force_result:failed` or `label:force_result:softfailed:deb#1234`. For
 this command to be effective the according user needs to have at least
 operator permissions.
 

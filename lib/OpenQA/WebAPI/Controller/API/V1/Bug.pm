@@ -34,7 +34,7 @@ OpenQA API implementation for bug handling methods.
 =item list()
 
 Returns a dictionary of bugs reported in the system of the form { id: bug } where the key
-is the ID in the database and the value is the external bug, eg. bsc#123 or poo#123.
+is the ID in the database and the value is the external bug, eg. deb#123 or bsc#123.
 
 The optional parameter "refreshable" limits the results to bugs not updated recently.
 Bugs that were already checked and don't actually exist in the bugtracker are not returned

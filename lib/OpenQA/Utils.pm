@@ -39,6 +39,8 @@ my $FRAG_REGEX = FRAGMENT_REGEX;
 my (%BUGREFS, %BUGURLS, $MARKER_REFS, $MARKER_URLS, $BUGREF_REGEX);
 BEGIN {
     %BUGREFS = (
+        bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
+        deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
         bnc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
         bsc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
         boo => 'https://bugzilla.opensuse.org/show_bug.cgi?id=',
@@ -56,6 +58,7 @@ BEGIN {
         gfs => 'https://gitlab.com/fedora/sigs/',
     );
     %BUGURLS = (
+        $BUGREFS{deb} => 'deb',
         'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
         $BUGREFS{bsc} => 'bsc',
         $BUGREFS{boo} => 'boo',

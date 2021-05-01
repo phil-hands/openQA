@@ -137,7 +137,7 @@
                                 <label for="property_workaround">workaround</label>
                                 <%= help_popover('Help for the workaround property' =>
                                     'If a needle with the workaround property matches the match result is recorded as
-                                    a \'soft-fail\'. It is suggested to input the reason in the \'Description\' textbox(e.g. bsc#12345 - summary of ticket).')
+                                    a \'soft-fail\'. It is suggested to input the reason in the \'Description\' textbox(e.g. deb#12345 - summary of ticket).')
                                 %>
                                 <span id="workaround_reason" style="display:none;">
                                     <br>
