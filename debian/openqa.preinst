@@ -1,0 +1,15 @@
+#!/bin/sh
+
+set -e
+
+case "$1" in
+install|upgrade)
+
+getent passwd geekotest >/dev/null || \
+ useradd -r -g nogroup -c "openQA user" -d /var/lib/openqa geekotest
+
+;;
+esac
+
+#DEBHELPER#
+exit 0

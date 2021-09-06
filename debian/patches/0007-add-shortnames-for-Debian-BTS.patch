@@ -1,0 +1,43 @@
+From: Philip Hands <phil@hands.com>
+Date: Sat, 1 May 2021 06:58:11 +0200
+Subject: add shortnames for Debian BTS
+
+---
+ lib/OpenQA/Utils.pm                                       | 3 +++
+ templates/webapi/comments/add_comment_form_groups.html.ep | 2 +-
+ 2 files changed, 4 insertions(+), 1 deletion(-)
+
+diff --git a/lib/OpenQA/Utils.pm b/lib/OpenQA/Utils.pm
+index ba34100..a6138cc 100644
+--- a/lib/OpenQA/Utils.pm
++++ b/lib/OpenQA/Utils.pm
+@@ -354,6 +354,8 @@ my %bugrefs = (
+     kde => 'https://bugs.kde.org/show_bug.cgi?id=',
+     fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
+     jsc => 'https://jira.suse.de/browse/',
++    deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
++    bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
+ );
+ my %bugurls = (
+     'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
+@@ -367,6 +369,7 @@ my %bugurls = (
+     $bugrefs{kde}                                  => 'kde',
+     $bugrefs{fdo}                                  => 'fdo',
+     $bugrefs{jsc}                                  => 'jsc',
++    $bugrefs{deb}                                  => 'deb',
+ );
+ 
+ my $MARKER_REFS = join('|', keys %bugrefs);
+diff --git a/templates/webapi/comments/add_comment_form_groups.html.ep b/templates/webapi/comments/add_comment_form_groups.html.ep
+index 708d510..d863aa8 100644
+--- a/templates/webapi/comments/add_comment_form_groups.html.ep
++++ b/templates/webapi/comments/add_comment_form_groups.html.ep
+@@ -19,7 +19,7 @@
+                 </p>
+                 <ul>
+                     <li>
+-                        For bugreferences write <code><i>bugtracker_shortname</i>#<i>bug_nr</i></code> in a comment, e.g. <code>bsc#1234</code>.
++                        For bugreferences write <code><i>bugtracker_shortname</i>#<i>bug_nr</i></code> in a comment, e.g. <code>deb#1234</code>.
+                     </li>
+                     <li>
+                         For generic labels use <code>label:<i>keyword</i></code> where <i>keyword</i> can be any valid character up to the next whitespace, e.g. "false_positive".

@@ -1,0 +1,12 @@
+usr/share/openqa/script/client
+usr/share/openqa/script/clone_job.pl
+usr/share/openqa/script/dump_templates
+usr/share/openqa/script/load_templates
+usr/share/openqa/script/openqa-cli
+usr/share/openqa/script/openqa-clone-job
+usr/share/openqa/script/openqa-clone-custom-git-refspec
+usr/share/openqa/script/openqa-label-all
+usr/share/openqa/script/openqa-validate-yaml
+usr/share/openqa/lib/OpenQA/Client.pm
+usr/share/openqa/lib/OpenQA/Client
+usr/share/openqa/lib/OpenQA/UserAgent.pm

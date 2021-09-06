@@ -1,0 +1,12 @@
+var/log/openqa
+usr/share/openqa/etc
+
+# iso hdd repo must be geekotest writable to enable *_URL and HDD upload functionality
+var/lib/openqa/share/factory/iso
+var/lib/openqa/share/factory/hdd
+var/lib/openqa/share/factory/repo
+var/lib/openqa/share/factory/other
+
+var/lib/openqa/webui/cache
+
+etc/apparmor.d/local

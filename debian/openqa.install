@@ -1,0 +1,60 @@
+etc/openqa/openqa.ini
+etc/openqa/database.ini
+etc/logrotate.d/openqa
+etc/apache2/vhosts.d/openqa.conf.template etc/apache2/sites-available
+etc/apache2/vhosts.d/openqa-common.inc etc/apache2/sites-available
+etc/apache2/vhosts.d/openqa-ssl.conf.template etc/apache2/sites-available
+etc/apparmor.d/usr.share.openqa.script.openqa
+usr/lib/systemd/system/openqa-webui.service lib/systemd/system
+usr/lib/systemd/system/openqa-livehandler.service lib/systemd/system
+usr/lib/systemd/system/openqa-gru.service lib/systemd/system
+usr/lib/systemd/system/openqa-scheduler.service lib/systemd/system
+usr/lib/systemd/system/openqa-websockets.service lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.service lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.timer lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-asset-cleanup.service lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-asset-cleanup.timer lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-result-cleanup.service lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-result-cleanup.timer lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-bug-cleanup.service lib/systemd/system
+usr/lib/systemd/system/openqa-enqueue-bug-cleanup.timer lib/systemd/system
+usr/lib/systemd/system/openqa-setup-db.service lib/systemd/system
+usr/lib/tmpfiles.d/openqa-webui.conf
+usr/share/openqa/lib/DBIx/
+usr/share/openqa/lib/OpenQA/LiveHandler.pm
+usr/share/openqa/lib/OpenQA/Resource/
+usr/share/openqa/lib/OpenQA/Scheduler/
+usr/share/openqa/lib/OpenQA/Schema/
+usr/share/openqa/lib/OpenQA/WebAPI/
+usr/share/openqa/lib/OpenQA/WebSockets/
+usr/share/openqa/templates
+usr/share/openqa/public
+usr/share/openqa/assets
+usr/share/openqa/dbicdh
+usr/share/openqa/script/configure-web-proxy
+usr/share/openqa/script/create_admin
+usr/share/openqa/script/initdb
+usr/share/openqa/script/openqa
+usr/share/openqa/script/openqa-enqueue-asset-cleanup
+usr/share/openqa/script/openqa-enqueue-audit-event-cleanup
+usr/share/openqa/script/openqa-enqueue-bug-cleanup
+usr/share/openqa/script/openqa-enqueue-result-cleanup
+usr/share/openqa/script/openqa-gru
+usr/share/openqa/script/openqa-livehandler
+usr/share/openqa/script/openqa-livehandler-daemon
+usr/share/openqa/script/openqa-scheduler
+usr/share/openqa/script/openqa-scheduler-daemon
+usr/share/openqa/script/openqa-websockets
+usr/share/openqa/script/openqa-websockets-daemon
+usr/share/openqa/script/openqa-webui-daemon
+usr/share/openqa/script/setup-db
+usr/share/openqa/script/upgradedb
+usr/share/openqa/script/modify_needle
+var/lib/openqa/db
+var/lib/openqa/images
+var/lib/openqa/testresults
+var/lib/openqa/share/tests
+var/lib/openqa/share/factory/iso
+var/lib/openqa/share/factory/hdd
+var/lib/openqa/share/factory/repo
+var/lib/openqa/share/factory/other

@@ -1,0 +1,70 @@
+#!/usr/bin/make -f
+#export DH_VERBOSE = 1
+
+%:
+	dh $@
+
+override_dh_auto_install:
+	dh_auto_install -- SHELL="/bin/bash"
+
+override_dh_install:
+	dh_install
+	# make #! lines Debian Perl/Python Policy compliant
+	find $(CURDIR)/debian/openqa*/usr/share/openqa -type f -print0 | \
+		xargs -r0 sed -i -e '1s%^\(#!/usr/bin/\)env \(perl\|python3\)%\1\2%'
+	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
+		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
+	# we need a local/ file to include
+	touch $(CURDIR)/debian/openqa/etc/apparmor.d/local/usr.share.openqa.script.openqa
+
+override_dh_fixperms:
+	dh_fixperms
+	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
+	chmod -x $(CURDIR)/debian/openqa/etc/logrotate.d/openqa
+	chmod +x $(CURDIR)/debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/87-88/001-migrate-jobs.pl \
+	         $(CURDIR)/debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/89-90/002-initialized-worker-last-seen.pl
+
+override_dh_auto_test:
+	# From the spec file :
+
+	# we don't really need the tidy test
+	rm -f t/00-tidy.t
+	# Skip tests not working currently, or flaky, and Selenium tests
+	# https://progress.opensuse.org/issues/19652
+	# 01-test-utilities.t: https://progress.opensuse.org/issues/73162
+	# 17-labels_carry_over.t: https://progress.opensuse.org/issues/60209
+	# api/14-plugin_obs_rsync_async.t: https://progress.opensuse.org/issues/68836
+	rm -f \
+		t/01-test-utilities.t \
+		t/17-labels_carry_over.t \
+		t/25-cache-service.t \
+		t/api/14-plugin_obs_rsync_async.t \
+		t/ui/*.t
+
+	# On debian we can't run test connecting to internet
+	rm -f ./t/40-script_openqa-clone-custom-git-refspec.t \
+		./t/40-openqa-clone-job.t
+	# Not enough permission for unshare use
+	rm -f ./t/32-openqa_client-script.t
+
+	-export CI=1; export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
+		PATH=$$PATH:$$(ls -d /usr/lib/postgresql/*/bin) FULLSTACK=1 \
+		dh_auto_test -- \
+		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
+
+#NOTE should provide libjs-chosen for public/javascripts/chosen.jquery.js
+
+override_dh_auto_clean:
+	rm -fr t/data/openqa/testresults/ .sass-cache/ assets/cache
+	rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
+	rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
+	rm -fr $(CURDIR)/debian/DB
+	dh_auto_clean
+
+override_dh_installman:
+	mkdir -p scratch/man
+	for src in client load_templates dump_templates openqa-clone-job ; do \
+		dst=$$(echo $$src | sed -e 's/_/-/;s/^\(openqa-\)\?/openqa-/') ; \
+		pod2man --errors=stderr --section=1 --name=$$dst script/$$src scratch/man/$$dst.1 ; \
+	done
+	dh_installman

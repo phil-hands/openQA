@@ -1,0 +1,1 @@
+openqa-worker: non-standard-file-perm etc/openqa/client.conf 0400 != 0644
