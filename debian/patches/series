@@ -1,7 +1,0 @@
-0001-Debian-tweaks-for-apache-config.patch
-0002-debian-apparmor-profile-additions.patch
-0003-Debian-uses-apt-to-list-packages.patch
-0004-stop-upsetting-pod2man.patch
-0005-fetchneedles-h-mention-the-needles-repo-if-set.patch
-0006-Debian-ify-fetchneedles.patch
-0007-add-shortnames-for-Debian-BTS.patch
