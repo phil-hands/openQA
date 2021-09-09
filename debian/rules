@@ -4,6 +4,24 @@
 %:
 	dh $@
 
+override_dh_auto_build:
+	# create links to locally installed assets
+	mkdir -p assets/_debian
+	ln -s /usr/share/fonts-fork-awesome assets/_debian
+	sed -i -e 's%https://cdn\.jsdelivr\.net/npm/fork-awesome@1\.2\.0/css/fork-awesome.min.css%_debian/fonts-fork-awesome/css/fork-awesome.css%' assets/assetpack.def
+	# convince assetpack to use local copies of the fonts:
+	for ext in eot svg ttf woff woff2 ; do \
+		printf '\n! forkawesome-webfont.%s\n< _debian/fonts-fork-awesome/fonts/forkawesome-webfont.%s\n' $ext $ext >> assets/assetpack.def ; \
+	done
+	ln -s -s /usr/share/javascript/chosen assets/_debian/libjs-chosen
+	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/chosen/1.7.0/%_debian/libjs-chosen/%' assets/assetpack.def
+	mkdir -p assets/_debian/datatables
+	cp --dereference -v -s /usr/share/javascript/jquery-datatables/css/dataTables.bootstrap4.css \
+		/usr/share/javascript/jquery-datatables/jquery.dataTables.js \
+		/usr/share/javascript/jquery-datatables/dataTables.bootstrap4.js assets/_debian/datatables
+	sed -i -e 's%https://cdn\.datatables\.net/1.10.16/\(css\|js\)/%_debian/datatables/%' assets/assetpack.def
+	cp --dereference -v -r -s /usr/share/sass/bootstrap assets/_debian
+
 override_dh_auto_install:
 	dh_auto_install -- SHELL="/bin/bash"
 
@@ -54,6 +72,7 @@ override_dh_auto_test:
 #NOTE should provide libjs-chosen for public/javascripts/chosen.jquery.js
 
 override_dh_auto_clean:
+	-rm -rf assets/_debian/
 	rm -fr t/data/openqa/testresults/ .sass-cache/ assets/cache
 	rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
 	rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
