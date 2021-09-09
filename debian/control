@@ -108,6 +108,10 @@ Build-Depends: debhelper (>= 10),
                yamllint,
                libfilesys-df-perl,
                libfile-map-perl,
+               fonts-fork-awesome,
+               libjs-chosen,
+               libjs-jquery-datatables,
+               libjs-bootstrap4,
 Standards-Version: 4.1.1
 Homepage: http://open.qa
 Vcs-Git: https://salsa.debian.org/debian/openqa.git
@@ -137,7 +141,6 @@ Depends: ${misc:Depends}, ${perl:Depends},
          libclass-c3-componentised-perl,
          libfilesys-df-perl,
          fonts-fork-awesome,
-         libjs-chosen,
          libjs-jquery-datatables,
 Recommends: apparmor-profiles, apparmor-utils,
             apache2, logrotate,
