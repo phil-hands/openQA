@@ -21,8 +21,7 @@ override_dh_fixperms:
 	dh_fixperms
 	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
 	chmod -x $(CURDIR)/debian/openqa/etc/logrotate.d/openqa
-	chmod +x $(CURDIR)/debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/87-88/001-migrate-jobs.pl \
-	         $(CURDIR)/debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/89-90/002-initialized-worker-last-seen.pl
+	chmod +x $(CURDIR)/debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
 
 override_dh_auto_test:
 	# From the spec file :
