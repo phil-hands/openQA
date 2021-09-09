@@ -21,7 +21,6 @@ BEGIN {
     # require the scheduler to be fixed in its actions since tests depends on timing
     $ENV{OPENQA_SCHEDULER_MAX_JOB_ALLOCATION} = 10;
     $ENV{OPENQA_SCHEDULER_SCHEDULE_TICK_MS}   = 100;
-    $ENV{FULLSTACK}                           = 1 if $ENV{SCHEDULER_FULLSTACK};
 }
 
 use Test::MockModule;
@@ -50,7 +49,7 @@ use OpenQA::Test::Utils qw(
 use OpenQA::Test::TimeLimit '150';
 
 # treat this test like the fullstack test
-plan skip_all => "set SCHEDULER_FULLSTACK=1 (be careful)" unless $ENV{SCHEDULER_FULLSTACK};
+plan skip_all => "set FULLSTACK=1 (be careful)" unless $ENV{FULLSTACK};
 
 setup_mojo_app_with_default_worker_timeout;
 
@@ -177,20 +176,20 @@ subtest 're-scheduling and incompletion of jobs when worker rejects jobs or goes
     for (0 .. 100) {
         my $job_state = $jobs->find(99982)->state;
         if ($job_state eq OpenQA::Jobs::Constants::ASSIGNED) {
-            note 'job is assigned' unless $job_assigned;
-            $job_assigned = 1;
+            note 'job is assigned' unless $job_assigned;    # uncoverable statement
+            $job_assigned = 1;                              # uncoverable statement
         }
         elsif ($job_state eq OpenQA::Jobs::Constants::SCHEDULED) {
             $job_scheduled = 1;
             last;
         }
-        sleep .2;
+        sleep .2;                                           # uncoverable statement
     }
     ok $job_scheduled, 'assigned job set back to scheduled if worker reports back again but has abandoned the job';
     stop_workers;
     dead_workers($schema);
 
-    # start an unstable worker; it will register itself but ignore any job assignment (also not explicitely reject
+    # start an unstable worker; it will register itself but ignore any job assignment (also not explicitly reject
     # assignments)
     @workers = unstable_worker(@$worker_settings, 3, -1);
     wait_for_worker($schema, 5);

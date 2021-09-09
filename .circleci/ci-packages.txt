@@ -2,6 +2,7 @@ aspell-0.60.8
 aspell-en-2017.08.24
 aspell-spell-0.60.8
 cmark-0.28.3
+hostname-3.16
 jq-1.6
 libaspell15-0.60.8
 libcmark0_28_3-0.28.3
@@ -23,7 +24,7 @@ perl-B-Hooks-OP-Check-0.22
 perl-B-Keywords-1.18
 perl-BSD-Resource-1.2911
 perl-Capture-Tiny-0.46
-perl-Carp-Always-0.13
+perl-Carp-Always-0.16
 perl-Carp-Clan-6.06
 perl-Class-Accessor-0.51
 perl-Class-Accessor-Chained-0.01
@@ -47,7 +48,7 @@ perl-Config-IniFiles-2.94
 perl-Config-Tiny-2.23
 perl-Context-Preserve-0.03
 perl-CPAN-DistnameInfo-0.12
-perl-Cpanel-JSON-XS-4.25
+perl-Cpanel-JSON-XS-4.26
 perl-CPAN-Meta-Check-0.014
 perl-CPAN-Meta-Requirements-2.140000
 perl-Crypt-DES-2.07
@@ -64,8 +65,8 @@ perl-DateTime-Format-Pg-0.16013
 perl-DateTime-Format-Strptime-1.74
 perl-DateTime-Locale-1.170000
 perl-DateTime-TimeZone-2.15
-perl-DBD-Pg-3.14.2
-perl-DBD-SQLite-1.66
+perl-DBD-Pg-3.15.0
+perl-DBD-SQLite-1.70
 perl-DBI-1.643
 perl-DBIx-Class-0.082841
 perl-DBIx-Class-DeploymentHandler-0.002233
@@ -74,7 +75,7 @@ perl-DBIx-Class-OptimisticLocking-0.02
 perl-DBIx-Class-Schema-Config-0.001011
 perl-Devel-Cover-1.36
 perl-Devel-Cover-Report-Codecov-0.25
-perl-Devel-Cover-Report-Codecovbash-0.03
+perl-Devel-Cover-Report-Codecovbash-0.04
 perl-Devel-GlobalDestruction-0.14
 perl-Devel-OverloadInfo-0.005
 perl-Devel-StackTrace-2.03
@@ -88,6 +89,7 @@ perl-Exception-Class-1.44
 perl-Export-Attrs-0.1.0
 perl-Exporter-Declare-0.114
 perl-Exporter-Tiny-1.000000
+perl-File-chdir-0.1010
 perl-File-Copy-Recursive-0.38
 perl-File-HomeDir-1.002
 perl-File-Listing-6.04
@@ -98,7 +100,7 @@ perl-File-ShareDir-1.104
 perl-Filesys-Df-0.92
 perl-File-Touch-0.11
 perl-File-Which-1.22
-perl-Furl-3.13
+perl-Furl-3.14
 perl-Getopt-Long-Descriptive-0.102
 perl-Hash-Merge-0.200
 perl-HTML-Parser-3.72
@@ -135,8 +137,8 @@ perl-Log-Contextual-0.008001
 perl-LWP-MediaTypes-6.02
 perl-LWP-Protocol-https-6.06
 perl-Meta-Builder-0.003
-perl-Minion-10.21
-perl-Minion-Backend-SQLite-5.0.4
+perl-Minion-10.22
+perl-Minion-Backend-SQLite-5.0.5
 perl-Module-Build-0.422400
 perl-Module-Find-0.13
 perl-Module-Implementation-0.09
@@ -144,12 +146,12 @@ perl-Module-Pluggable-5.2
 perl-Module-Runtime-0.016
 perl-Module-Runtime-Conflicts-0.003
 perl-Mojo-IOLoop-ReadWriteProcess-0.28
-perl-Mojolicious-9.14
+perl-Mojolicious-9.21
 perl-Mojolicious-Plugin-AssetPack-2.13
 perl-Mojolicious-Plugin-OAuth2-1.59
 perl-Mojo-Pg-4.25
 perl-Mojo-RabbitMQ-Client-0.3.1
-perl-Mojo-SQLite-3.005
+perl-Mojo-SQLite-3.007
 perl-Moo-2.003004
 perl-Moose-2.2010
 perl-MooseX-Role-Parameterized-1.10
@@ -181,7 +183,7 @@ perl-Perl-Critic-1.130
 perl-Perl-Critic-Freenode-0.026
 perl-Perl-Critic-Pulp-96
 perl-PerlIO-Layers-0.012
-perl-Perl-Tidy-20210111
+perl-Perl-Tidy-20210717
 perl-Pod-MinimumVersion-50
 perl-Pod-POM-2.01
 perl-Pod-Spell-1.20
@@ -223,12 +225,13 @@ perl-Test-Fatal-0.014
 perl-Test-LongString-0.17
 perl-Test-MockModule-0.13
 perl-Test-MockObject-1.20161202
+perl-Test-MockRandom-1.01
 perl-Test-Mock-Time-0.1.7
 perl-Test-Most-0.35
 perl-Test-Output-1.031
 perl-Test-Strict-0.40
 perl-Test-Warn-0.32
-perl-Test-Warnings-0.030
+perl-Test-Warnings-0.031
 perl-Text-Brew-0.02
 perl-Text-Diff-1.45
 perl-TimeDate-2.30
@@ -250,12 +253,10 @@ perl-XML-SAX-Expat-0.51
 perl-XML-SemanticDiff-1.0006
 perl-XML-Simple-2.24
 perl-YAML-1.24
-perl-YAML-LibYAML-0.82
-perl-YAML-PP-0.026
+perl-YAML-LibYAML-0.83
+perl-YAML-PP-0.027
 psmisc-23.0
 python3-appdirs-1.4.3
-python3-EditorConfig-0.12.2
-python3-jsbeautifier-1.6.14
 python3-packaging-20.3
 python3-pathspec-0.7.0
 python3-pyparsing-2.2.0
@@ -263,4 +264,4 @@ python3-PyYAML-5.3.1
 python3-setuptools-40.5.0
 python3-yamllint-1.22.1
 ShellCheck-0.7.1
-sqlite3-3.28.0
+sqlite3-3.36.0

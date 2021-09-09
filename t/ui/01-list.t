@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (C) 2014-2020 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -21,9 +21,12 @@ use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common
 use Date::Format 'time2str';
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
+use Time::Seconds;
 use OpenQA::Test::TimeLimit '40';
 use OpenQA::Test::Case;
 use OpenQA::Test::Database;
+use OpenQA::Test::Utils qw(assume_all_assets_exist);
+use OpenQA::Jobs::Constants qw(NONE RUNNING);
 
 my $test_case   = OpenQA::Test::Case->new;
 my $schema_name = OpenQA::Test::Database->generate_schema_name;
@@ -34,30 +37,33 @@ use OpenQA::SeleniumTest;
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
-my %job_param = (
+my @job_params = (
     group_id   => 1002,
     priority   => 35,
-    result     => OpenQA::Jobs::Constants::NONE,
-    state      => OpenQA::Jobs::Constants::RUNNING,
+    result     => NONE,
+    state      => RUNNING,
     t_finished => undef,
-    # 5 minutes ago
-    t_started => time2str('%Y-%m-%d %H:%M:%S', time - 300, 'UTC'),
-    # 1 hour ago
-    t_created => time2str('%Y-%m-%d %H:%M:%S', time - 3600, 'UTC'),
-    TEST      => 'kde',
-    ARCH      => 'x86_64',
-    BUILD     => '0092',
-    DISTRI    => 'opensuse',
-    FLAVOR    => 'NET',
-    MACHINE   => '64bit',
-    VERSION   => '13.1'
-
+    t_started  => time2str('%Y-%m-%d %H:%M:%S', time - 5 * ONE_MINUTE, 'UTC'),
+    t_created  => time2str('%Y-%m-%d %H:%M:%S', time - ONE_HOUR,       'UTC'),
+    TEST       => 'kde',
+    ARCH       => 'x86_64',
+    BUILD      => '0092',
+    DISTRI     => 'opensuse',
+    FLAVOR     => 'NET',
+    MACHINE    => '64bit',
+    VERSION    => '13.1'
 );
 
 # Customize the database based on fixtures.
 # We do not need job 99981 right now so delete it here just to have a helpful
 # example for customizing the test database
 sub prepare_database {
+    my $bugs     = $schema->resultset('Bugs');
+    my %bug_args = (refreshed => 1, existing => 1);
+    my $bug1     = $bugs->create({bugid => 'poo#1', title => 'open poo bug',        open => 1, %bug_args});
+    my $bug2     = $bugs->create({bugid => 'poo#2', title => 'closed poo bug',      open => 0, %bug_args});
+    my $bug4     = $bugs->create({bugid => 'bsc#4', title => 'closed bugzilla bug', open => 0, %bug_args});
+
     my $jobs = $schema->resultset('Jobs');
     $jobs->find(99981)->delete;
 
@@ -70,44 +76,24 @@ sub prepare_database {
     $job99963_comments->create({text => 'test2', user_id => 99901});
     my $job99928_comments = $jobs->find(99928)->comments;
     $job99928_comments->create({text => 'test1', user_id => 99901});
+    my $job99936_comments = $jobs->find(99936)->comments;
+    $job99936_comments->create({text => 'poo#1', user_id => 99901});
+    $job99936_comments->create({text => 'poo#2', user_id => 99901});
+    # This bugref doesn't have a corresponding bug entry
+    $job99936_comments->create({text => 'bsc#3', user_id => 99901});
+    $job99936_comments->create({text => 'bsc#4', user_id => 99901});
 
-    # add another running job which is half done
-    my $running_job = $jobs->create(
-        {
-            %job_param,
-            id    => 99970,
-            state => OpenQA::Jobs::Constants::RUNNING,
-            TEST  => 'kde'
-        });
-    my $running_job_modules = $running_job->modules;
-    $running_job_modules->create(
-        {
-            script   => 'tests/installation/start_install.pm',
-            category => 'installation',
-            name     => 'start_install',
-            result   => 'passed',
-        });
-    $running_job_modules->create(
-        {
-            script   => 'tests/installation/livecdreboot.pm',
-            category => 'installation',
-            name     => 'livecdreboot',
-            result   => 'passed',
-        });
-    $running_job_modules->create(
-        {
-            script   => 'tests/console/aplay.pm',
-            category => 'console',
-            name     => 'aplay',
-            result   => 'running',
-        });
-    $running_job_modules->create(
-        {
-            script   => 'tests/console/glibc_i686.pm',
-            category => 'console',
-            name     => 'glibc_i686',
-            result   => 'none',
-        });
+    # add another running job which is "half done"
+    my $running_job = $jobs->create({id => 99970, state => RUNNING, TEST => 'kde', @job_params});
+    my @modules     = (
+        {name => 'start_install', category => 'installation', script => 'start_install.pm', result => 'passed'},
+        {name => 'livecdreboot',  category => 'installation', script => 'livecdreboot.pm',  result => 'passed'},
+        {name => 'aplay',         category => 'console',      script => 'aplay.pm',         result => 'running'},
+        {name => 'glibc_i686',    category => 'console',      script => 'glibc_i686.pm',    result => 'none'},
+    );
+    $running_job->discard_changes;
+    $running_job->insert_test_modules(\@modules);
+    $running_job->update_module($_->{name}, {result => $_->{result}}) for @modules;
 
     my $job99940 = $jobs->find(99940);
     my %modules  = (a => 'skip', b => 'ok', c => 'none', d => 'softfail', e => 'fail');
@@ -118,17 +104,19 @@ sub prepare_database {
 
     my $schedule_job = $jobs->create(
         {
-            %job_param,
+            @job_params,
             id       => 99991,
             state    => OpenQA::Jobs::Constants::SCHEDULED,
             TEST     => 'kde_variant',
             settings =>
               [{key => 'JOB_TEMPLATE_NAME', value => 'kde_variant'}, {key => 'TEST_SUITE_NAME', value => 'kde'}]});
+
+    assume_all_assets_exist;
 }
 
 prepare_database();
 
-plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
+driver_missing unless my $driver = call_driver;
 
 $driver->title_is("openQA", "on main page");
 is($driver->get("/results"), 1, "/results gets");
@@ -149,15 +137,18 @@ $time->text_like(qr/about 3 hours ago/, 'finish time of 99946');
 
 subtest 'running jobs, progress bars' => sub {
     is($driver->find_element('#job_99961 .progress-bar-striped')->get_text(),
-        'running', 'striped progress bar if not modules');
+        'running', 'striped progress bar if not modules present yet');
     is($driver->find_element('#job_99970 .progress-bar')->get_text(),
-        '50 %', 'progress is 50 % if module 3 of 4 is currently executed');
+        '67 %', 'progress is 67 % if 2 modules finished, 1 is running and 1 is queued');
+    # note: For simplicity the running module is ignored. That means 2 of only 3 modules
+    #       have been finished and hence we get 67 %. I suppose that's not worse than counting
+    #       the currently running module always as zero progress.
 
     # job which is still running but all modules are completed or skipped after failure
     isnt($driver->find_element('#running #job_99963'), undef, '99963 still running');
     like($driver->find_element('#job_99963 td.test a')->get_attribute('href'), qr{.*/tests/99963}, 'right link');
     is($driver->find_element('#job_99963 .progress-bar')->get_text(),
-        '100 %', 'progress is 100 % if all modules completed');
+        '40 %', 'progress is 40 % if job fatally failed at this point (but status not updated to uploading/done)');
     $time = $driver->find_element('#job_99963 td.time span');
     $time->attribute_like('title', qr/.*Z/, 'right time title for running');
     $time->text_like(qr/1[01] minutes ago/, 'right time for running');
@@ -189,6 +180,27 @@ subtest 'available comments shown' => sub {
     );
     is(@{$driver->find_elements('#job_99962 .fa-comment')},
         0, 'available comments only shown if at least one comment available');
+    is(
+        $driver->find_element('#job_99936 .fa-bolt')->get_attribute('title'),
+        "Bug referenced: poo#1\nopen poo bug",
+        'available bugref (poo#1) shown for finished jobs'
+    );
+    is(
+        $driver->find_element('#job_99936 .fa-bug')->get_attribute('title'),
+        "Bug referenced: bsc#3",
+        'available bugref (bsc#3) shown for finished jobs'
+    );
+    my @closed = $driver->find_elements('#job_99936 .bug_closed');
+    is(
+        $closed[1]->get_attribute('title'),
+        "Bug referenced: poo#2\nclosed poo bug",
+        'available bugref (poo#2) shown for finished jobs'
+    );
+    is(
+        $closed[0]->get_attribute('title'),
+        "Bug referenced: bsc#4\nclosed bugzilla bug",
+        'available bugref (bsc#4) shown for finished jobs'
+    );
 
   SKIP: {
         skip 'comment icon for running and scheduled jobs skipped to imporove performance', 2;
@@ -360,9 +372,9 @@ $driver->get('/tests?match=staging_e');
 wait_for_ajax();
 
 @jobs = map { $_->get_attribute('id') } @{$driver->find_elements('tbody tr', 'css')};
-is_deeply(\@jobs, ['', '', 'job_99926'], '1 job matching');
-# note: the first 2 empty IDs are the 'not found' row of the data tables for running and
-#       scheduled jobs
+ok !$jobs[0], 'no running job matching';
+ok !$jobs[1], 'no scheduled job matching';
+is $jobs[2], 'job_99926', 'exactly one finished job matching';
 
 $driver->get('/tests');
 wait_for_ajax();

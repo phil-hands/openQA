@@ -34,7 +34,7 @@ use OpenQA::Jobs::Constants;
 use OpenQA::Log qw(setup_log);
 use OpenQA::Test::Utils
   qw(mock_service_ports setup_mojo_app_with_default_worker_timeout),
-  qw(create_user_for_workers create_webapi setup_share_dir create_websocket_server),
+  qw(create_user_for_workers create_webapi create_websocket_server),
   qw(stop_service setup_fullstack_temp_dir);
 use OpenQA::Test::TimeLimit '20';
 use OpenQA::Utils 'testcasedir';
@@ -49,9 +49,6 @@ BEGIN {
     # is assigned to constant)
     $ENV{OPENQA_SCHEDULER_MAX_JOB_ALLOCATION} = $ENV{SCALABILITY_TEST_JOB_COUNT};
 }
-
-# skip test if not explicitly enabled
-plan skip_all => 'set SCALABILITY_TEST to run the scalability test' unless $ENV{SCALABILITY_TEST};
 
 setup_mojo_app_with_default_worker_timeout;
 
@@ -73,11 +70,11 @@ my $workers = $schema->resultset('Workers');
 my $jobs    = $schema->resultset('Jobs');
 
 # create web UI and websocket server
-my $web_socket_server = create_websocket_server(undef, 0, 1, 1);
-my $webui             = create_webapi(undef, sub { });
+my $web_socket_server = create_websocket_server(undef, 0, 1, 1, 1);
+my $webui             = create_webapi(undef, 1);
 
 # prepare spawning workers
-my $sharedir        = setup_share_dir($ENV{OPENQA_BASEDIR});
+my $testsdir        = path($ENV{OPENQA_BASEDIR}, 'openqa', 'share', 'tests')->make_path;
 my $resultdir       = path($ENV{OPENQA_BASEDIR}, 'openqa', 'testresults')->make_path;
 my $api_credentials = create_user_for_workers;
 my $api_key         = $api_credentials->key;
@@ -91,7 +88,7 @@ my @worker_args = (
     "--apikey=$api_key", "--apisecret=$api_secret", "--host=$webui_host", "--isotovideo=$isotovideo_path",
     '--verbose',         '--no-cleanup',
 );
-note("Share dir: $sharedir");
+note("Tests dir: $testsdir");
 note("Result dir: $resultdir");
 
 # spawn workers
@@ -99,6 +96,7 @@ note("Spawning $worker_count workers");
 sub spawn_worker {
     my ($instance) = @_;
 
+    local $ENV{PERL5OPT} = '';                                             # uncoverable statement
     note("Starting worker '$instance'");                                   # uncoverable statement
     $0 = 'openqa-worker';                                                  # uncoverable statement
     start ['perl', $worker_path, "--instance=$instance", @worker_args];    # uncoverable statement

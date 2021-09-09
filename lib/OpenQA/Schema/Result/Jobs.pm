@@ -18,9 +18,9 @@ package OpenQA::Schema::Result::Jobs;
 use strict;
 use warnings;
 
+use Mojo::Base -strict, -signatures;
 use base 'DBIx::Class::Core';
 
-use Encode qw(decode);
 use Try::Tiny;
 use Mojo::JSON 'encode_json';
 use Fcntl;
@@ -37,6 +37,7 @@ use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
 use OpenQA::ScreenshotDeletion;
 use File::Basename qw(basename dirname);
+use File::Copy::Recursive qw();
 use File::Spec::Functions 'catfile';
 use File::Path ();
 use DBIx::Class::Timestamps 'now';
@@ -68,6 +69,10 @@ __PACKAGE__->add_columns(
     result_dir => {    # this is the directory below testresults
         data_type   => 'text',
         is_nullable => 1
+    },
+    archived => {
+        data_type     => 'boolean',
+        default_value => 0,
     },
     state => {
         data_type     => 'varchar',
@@ -252,12 +257,35 @@ sub delete {
 
     my $ret = $self->SUPER::delete;
 
-    # last step: remove result directory if already existant
+    # last step: remove result directory if already existent
     # This must be executed after $self->SUPER::delete because it might fail and result_dir should not be
     # deleted in the error case
     my $res_dir = $self->result_dir();
     File::Path::rmtree($res_dir) if $res_dir && -d $res_dir;
     return $ret;
+}
+
+sub archivable_result_dir ($self) {
+    return undef
+      if $self->archived || OpenQA::Jobs::Constants::meta_state($self->state) ne OpenQA::Jobs::Constants::FINAL;
+    my $result_dir = $self->result_dir;
+    return $result_dir && -d $result_dir ? $result_dir : undef;
+}
+
+sub archive ($self) {
+    return undef unless my $normal_result_dir = $self->archivable_result_dir;
+
+    my $archived_result_dir = $self->add_result_dir_prefix($self->remove_result_dir_prefix($normal_result_dir), 1);
+    if (!File::Copy::Recursive::dircopy($normal_result_dir, $archived_result_dir)) {
+        my $error = $!;
+        File::Path::rmtree($archived_result_dir);    # avoid leftovers
+        die "Unable to copy '$normal_result_dir' to '$archived_result_dir': $error";
+    }
+
+    $self->update({archived => 1});
+    $self->discard_changes;
+    File::Path::remove_tree($normal_result_dir);
+    return $archived_result_dir;
 }
 
 sub name {
@@ -391,7 +419,10 @@ sub prepare_for_work {
         $job_hashref->{settings}->{NICVLAN} = join(',', @vlans);
     }
 
-    # TODO: cleanup previous tmpdir
+    # assign new tmpdir, clean previous one
+    if (my $tmpdir = $worker->get_property('WORKER_TMPDIR')) {
+        File::Path::rmtree($tmpdir);
+    }
     $worker->set_property(WORKER_TMPDIR => $worker_properties->{WORKER_TMPDIR} // tempdir());
 
     return $job_hashref;
@@ -430,14 +461,12 @@ sub settings_hash {
     return $settings;
 }
 
-sub add_result_dir_prefix {
-    my ($self, $rd) = @_;
-    return $rd ? catfile($self->num_prefix_dir, $rd) : undef;
+sub add_result_dir_prefix ($self, $result_dir, $archived = undef) {
+    return $result_dir ? catfile($self->num_prefix_dir($archived), $result_dir) : undef;
 }
 
-sub remove_result_dir_prefix {
-    my ($self, $rd) = @_;
-    return $rd ? basename($rd) : undef;
+sub remove_result_dir_prefix ($self, $result_dir) {
+    return $result_dir ? basename($result_dir) : undef;
 }
 
 sub set_prio {
@@ -550,24 +579,25 @@ sub _strip_parent_job_id {
 sub missing_assets {
     my ($self) = @_;
 
-    my $assets = parse_assets_from_settings($self->settings_hash);
-    return [] unless keys %$assets;
-
+    my $assets_settings = parse_assets_from_settings($self->settings_hash);
+    return [] unless keys %$assets_settings;
 
     # ignore UEFI_PFLASH_VARS; to keep scheduling simple it is present in lots of jobs which actually don't need it
-    delete $assets->{UEFI_PFLASH_VARS};
+    delete $assets_settings->{UEFI_PFLASH_VARS};
 
     my $parent_job_ids = $self->_parent_job_ids;
     # ignore repos, as they're not really clonable: see
     # https://github.com/os-autoinst/openQA/pull/2676#issuecomment-616312026
     my @relevant_assets
-      = grep { $_->{name} ne '' && $_->{type} ne 'repo' } values %$assets;
+      = grep { $_->{name} ne '' && $_->{type} ne 'repo' } values %$assets_settings;
     my @assets_query = map {
         {
             type => $_->{type},
-            name => {-in => _compute_asset_names_considering_parent_jobs($parent_job_ids, $_->{name})}}
+            name => {-in => _compute_asset_names_considering_parent_jobs($parent_job_ids, $_->{name})},
+        }
     } @relevant_assets;
-    my @existing_assets = $self->result_source->schema->resultset('Assets')->search(\@assets_query);
+    my $assets          = $self->result_source->schema->resultset('Assets');
+    my @existing_assets = $assets->search({-or => \@assets_query, size => \'is not null'});
     return [] if scalar @$parent_job_ids == 0 && scalar @assets_query == scalar @existing_assets;
     my %missing_assets = map { ("$_->{type}/$_->{name}" => 1) } @relevant_assets;
     delete $missing_assets{$_->type . '/' . _strip_parent_job_id($parent_job_ids, $_->name)} for @existing_assets;
@@ -629,7 +659,7 @@ sub _create_clone {
     # not be created, somebody else was faster at cloning)
     my $orig_id       = $self->id;
     my $affected_rows = $rset->search({id => $orig_id, clone_id => undef})->update({clone_id => $new_job->id});
-    die "Job $orig_id has already been cloned as " . $self->clone_id . "\n" unless $affected_rows == 1;
+    die "Job $orig_id already has clone " . $rset->find($orig_id)->clone_id . "\n" unless $affected_rows == 1;
 
     # Needed to load default values from DB
     $new_job->discard_changes;
@@ -859,7 +889,7 @@ sub _cluster_children {
 
 =item Arguments: optional hash reference containing the key 'prio'
 
-=item Return value: hash of duplicated jobs if duplication suceeded,
+=item Return value: hash of duplicated jobs if duplication succeeded,
                     an error message otherwise
 
 =back
@@ -923,7 +953,7 @@ sub duplicate {
             log_error("Unable to roll back after duplication error: $error");
             return "Rollback failed after failure to clone cluster of job $orig_id";
         }
-        return $error if $error =~ /has already been cloned/;
+        return $error if $error =~ /already has clone/;
         log_warning("Duplication rolled back after error: $error");
         return "An internal error occurred when cloning cluster of job $orig_id";
     }
@@ -1035,9 +1065,7 @@ sub calculate_result {
             $overall ||= PASSED;
         }
         elsif ($m->result eq SOFTFAILED) {
-            if (!defined $overall || $overall eq PASSED) {
-                $overall = SOFTFAILED;
-            }
+            $overall = SOFTFAILED if !defined $overall || $overall eq PASSED;
         }
         elsif ($m->result eq SKIPPED) {
             $overall ||= PASSED;
@@ -1046,8 +1074,7 @@ sub calculate_result {
             $overall = FAILED;
         }
     }
-
-    return $overall || FAILED;
+    return $overall || INCOMPLETE;
 }
 
 sub save_screenshot {
@@ -1239,10 +1266,9 @@ END_SQL
     return [map { $_->[0] } @{$sth->fetchall_arrayref // []}];
 }
 
-sub num_prefix_dir {
-    my ($self)    = @_;
+sub num_prefix_dir ($self, $archived = undef) {
     my $numprefix = sprintf "%05d", $self->id / 1000;
-    return catfile(resultdir(), $numprefix);
+    return catfile(resultdir($archived // $self->archived), $numprefix);
 }
 
 sub create_result_dir {
@@ -1314,30 +1340,10 @@ sub update_module {
 }
 
 # computes the progress info for the current job
-# important: modules need to be prefetched before in ascending order
-sub progress_info {
-    my ($self) = @_;
-    my @modules = $self->modules->all;
-
-    my $donecount = 0;
-    my $modstate  = 'done';
-    for my $module (@modules) {
-        my $result = $module->result;
-        if ($result eq 'running') {
-            $modstate = 'current';
-        }
-        elsif ($modstate eq 'current') {
-            $modstate = 'todo';
-        }
-        elsif ($modstate eq 'done') {
-            $donecount++;
-        }
-    }
-
-    return {
-        modcount => int(@modules),
-        moddone  => $donecount,
-    };
+sub progress_info ($self) {
+    my $processed = $self->passed_module_count + $self->softfailed_module_count + $self->failed_module_count;
+    my $pending   = $self->skipped_module_count + $self->externally_skipped_module_count;
+    return {modcount => $processed + $pending, moddone => $processed};
 }
 
 sub account_result_size {
@@ -1508,7 +1514,7 @@ sub has_failed_modules {
 sub failed_modules {
     my ($self) = @_;
 
-    my $fails = $self->modules->search({result => 'failed'}, {order_by => 't_updated'});
+    my $fails = $self->modules->search({result => 'failed'}, {select => ['name'], order_by => 't_updated'});
     my @failedmodules;
 
     while (my $module = $fails->next) {
@@ -1547,7 +1553,10 @@ sub update_status {
     }
     $ret->{known_images} = [sort keys %known_image];
     $ret->{known_files}  = [sort keys %known_files];
-    $ret->{error}        = 'Failed modules: ' . join ', ', @failed_modules if @failed_modules;
+    if (@failed_modules) {
+        $ret->{error}        = 'Failed modules: ' . join ', ', @failed_modules;
+        $ret->{error_status} = 490;    # let the worker do its usual retries (see poo#91902)
+    }
 
     # update info used to compose the URL to os-autoinst command server
     if (my $assigned_worker = $self->assigned_worker) {
@@ -1564,10 +1573,10 @@ sub update_status {
     return $ret;
 }
 
-sub _parent_job_ids {
-    my ($self)    = @_;
-    my %condition = (dependency => {-in => [OpenQA::JobDependencies::Constants::CHAINED_DEPENDENCIES]});
-    my @parents   = $self->parents->search(\%condition, {columns => ['parent_job_id']});
+my %CHAINED_DEPENDENCY_QUERY = (dependency => {-in => [OpenQA::JobDependencies::Constants::CHAINED_DEPENDENCIES]});
+
+sub _parent_job_ids ($self) {
+    my @parents = $self->parents->search(\%CHAINED_DEPENDENCY_QUERY, {columns => ['parent_job_id']});
     return [map { $_->parent_job_id } @parents];
 }
 
@@ -1585,6 +1594,7 @@ sub register_assets_from_settings {
     my %updated;
 
     # check assets and fix the file names
+    my $assets = $self->result_source->schema->resultset('Assets');
     for my $k (keys %assets) {
         my $asset = $assets{$k};
         my ($name, $type) = ($asset->{name}, $asset->{type});
@@ -1598,24 +1608,32 @@ sub register_assets_from_settings {
             delete $assets{$k};
             next;
         }
-        my $f_asset = _asset_find($name, $type, $parent_job_ids);
-        unless (defined $f_asset) {
-            # don't register asset not yet available
-            delete $assets{$k};
-            next;
+        my $existing_asset = _asset_find($name, $type, $parent_job_ids);
+        if (defined $existing_asset && $existing_asset ne $name) {
+            # remove possibly previously registered asset
+            # note: This is expected to happen if an asset turns out to be a private asset.
+            $assets->untie_asset_from_job_and_unregister_if_unused($type, $name, $self);
+            $name = $asset->{name} = $existing_asset;
         }
-        $asset->{name} = $f_asset;
-        $updated{$k} = $f_asset;
+        $updated{$k} = $name;
     }
 
-    for my $asset (values %assets) {
+    for my $asset_info (values %assets) {
         # avoid plain create or we will get unique constraint problems
         # in case ISO_1 and ISO_2 point to the same ISO
-        my $aid = $self->result_source->schema->resultset('Assets')->find_or_create($asset);
-        $self->jobs_assets->find_or_create({asset_id => $aid->id});
+        my $asset = $assets->find_or_create($asset_info);
+        $asset->ensure_size;
+        $self->jobs_assets->find_or_create({asset_id => $asset->id});
     }
 
     return \%updated;
+}
+
+# calls `register_assets_from_settings` on all children to re-evaluate associated assets
+sub reevaluate_children_asset_settings ($self, $include_self = 0, $visited = {}) {
+    return undef                         if $visited->{$self->id}++;    # uncoverable statement
+    $self->register_assets_from_settings if $include_self;
+    $_->child->reevaluate_children_asset_settings(1, $visited) for $self->children->search(\%CHAINED_DEPENDENCY_QUERY);
 }
 
 sub _asset_find {
@@ -1714,8 +1732,7 @@ sub release_networks {
     $self->networks->delete;
 }
 
-sub needle_dir() {
-    my ($self) = @_;
+sub needle_dir ($self) {
     unless ($self->{_needle_dir}) {
         my $distri  = $self->DISTRI;
         my $version = $self->VERSION;
@@ -1740,32 +1757,26 @@ sub _previous_scenario_jobs {
     return $schema->resultset("Jobs")->search({-and => $conds}, \%attrs)->all;
 }
 
+sub _relevant_module_result_for_carry_over_evaluation ($module_result) {
+    $module_result eq FAILED || $module_result eq SOFTFAILED || $module_result eq NONE;
+}
+
 # internal function to compare two failure reasons
 sub _failure_reason {
     my ($self) = @_;
 
-    my @failed_modules;
+    my %failed_modules;
     my $modules = $self->modules;
-
     while (my $m = $modules->next) {
-        if ($m->result eq FAILED || $m->result eq SOFTFAILED) {
-            last unless my $results = $m->results(skip_text_data => 1);
-            last unless my $details = $results->{details};
-            # Look for serial failures which have bug reference
-            my @bugrefs = map { find_bugref($_->{title}) || '' } @$details;
-            # If bug reference is in title, put it as a failure reason, otherwise use module name
-            if (my $failure_reason = join('', @bugrefs)) {
-                return $failure_reason;
-            }
-            push(@failed_modules, $m->name . ':' . $m->result);
-        }
+        next unless _relevant_module_result_for_carry_over_evaluation my $module_result = $m->result;
+        # look for steps which reference a bug within the title to use it as failure reason (instead of the module name)
+        # note: This allows the carry-over to happen if the same bug is found via different test modules.
+        my $details     = ($m->results(skip_text_data => 1) // {})->{details};
+        my $bugrefs     = ref $details eq 'ARRAY' ? join('', map { find_bugref($_->{title}) || '' } @$details) : '';
+        my $module_name = $bugrefs                ? $bugrefs : $m->name;
+        $failed_modules{"$module_name:$module_result"} = 1;
     }
-
-    if (@failed_modules) {
-        return join(',', @failed_modules) || $self->result;
-    }
-    # No failed modules found
-    return 'GOOD';
+    return keys %failed_modules ? (join(',', sort keys %failed_modules) || $self->result) : 'GOOD';
 }
 
 sub _carry_over_candidate {
@@ -1965,6 +1976,10 @@ sub investigate {
     return {error => 'No result directory available for current job'} unless $self->result_dir();
     my $ignore = OpenQA::App->singleton->config->{global}->{job_investigate_ignore};
     for my $prev (@previous) {
+        if ($prev->result eq 'failed') {
+            $inv{first_bad} = {type => 'link', link => '/tests/' . $prev->id, text => $prev->id};
+            next;
+        }
         next unless $prev->result =~ /(?:passed|softfailed)/;
         $inv{last_good} = {type => 'link', link => '/tests/' . $prev->id, text => $prev->id};
         last unless $prev->result_dir;
@@ -2061,8 +2076,11 @@ sub done {
         # limit length of the reason
         # note: The reason can be anything the worker picked up as useful information so better cut it at a
         #       reasonable, human-readable length. This also avoids growing the database too big.
-        $reason = substr($reason, 0, 300) . decode('UTF-8', '…') if defined $reason && length $reason > 300;
+        $reason = substr($reason, 0, 300) . '…' if defined $reason && length $reason > 300;
         $new_val{reason} = $reason;
+    }
+    elsif ($reason_unknown && !defined $reason && $result eq INCOMPLETE) {
+        $new_val{reason} = 'no test modules scheduled/uploaded';
     }
     $self->update(\%new_val);
     # bugrefs are there to mark reasons of failure - the function checks itself though
@@ -2100,7 +2118,7 @@ sub cancel {
 }
 
 sub dependencies {
-    my ($self) = @_;
+    my ($self, $children_list, $parents_list) = @_;
 
     # make arrays for returning parents/children by the dependency type
     my @dependency_names = OpenQA::JobDependencies::Constants::display_names;
@@ -2115,14 +2133,16 @@ sub dependencies {
     my $is_final   = grep { $_ eq $state } FINAL_STATES;
     my $parents_ok = $result ne SKIPPED && $result ne PARALLEL_FAILED && $result ne PARALLEL_RESTARTED;
 
-    my $jp = $self->parents;
-    while (my $s = $jp->next) {
+    $parents_list ||= [$self->parents->all];
+    for my $s (@$parents_list) {
         push(@{$parents{$s->to_string}}, $s->parent_job_id);
         $has_parents = 1;
-        $parents_ok  = $s->parent->is_ok if $is_final && $parents_ok;
+        my $jobs = $self->result_source->schema->resultset('Jobs');
+        $parents_ok = $jobs->find($s->parent_job_id, {select => ['result']})->is_ok
+          if $is_final && $parents_ok;
     }
-    my $jc = $self->children;
-    while (my $s = $jc->next) {
+    $children_list ||= [$self->children->all];
+    for my $s (@$children_list) {
         push(@{$children{$s->to_string}}, $s->child_job_id);
     }
 
@@ -2224,8 +2244,7 @@ sub status_info {
 }
 
 sub _overview_result_done {
-    my ($self, $jobid, $job_labels, $aggregated, $failed_modules, $todo) = @_;
-    my $actually_failed_modules = $self->failed_modules;
+    my ($self, $jobid, $job_labels, $aggregated, $failed_modules, $actually_failed_modules, $todo) = @_;
     return undef
       unless !$failed_modules
       || OpenQA::Utils::any_array_item_contained_by_hash($actually_failed_modules, $failed_modules);
@@ -2233,15 +2252,11 @@ sub _overview_result_done {
     my $result_stats = $self->result_stats;
     my $overall      = $self->result;
 
-    if ($todo) {
-        # skip all jobs NOT needed to be labeled for the black certificate icon to show up
-        return undef
-          if $self->result eq OpenQA::Jobs::Constants::PASSED
-          || $job_labels->{$jobid}{bugs}
-          || $job_labels->{$jobid}{label}
-          || ($self->result eq OpenQA::Jobs::Constants::SOFTFAILED
-            && ($job_labels->{$jobid}{label} || !$self->has_failed_modules));
-    }
+    # skip all jobs NOT needed to be labeled for the black certificate icon to show up
+    my $comment_data = $job_labels->{$jobid};
+    return undef
+      if $todo
+      && ($comment_data->{reviewed} || $overall eq PASSED || ($overall eq SOFTFAILED && !$self->has_failed_modules));
 
     $aggregated->{OpenQA::Jobs::Constants::meta_result($overall)}++;
     return {
@@ -2252,19 +2267,20 @@ sub _overview_result_done {
         jobid      => $jobid,
         state      => OpenQA::Jobs::Constants::DONE,
         failures   => $actually_failed_modules,
-        bugs       => $job_labels->{$jobid}{bugs},
-        bugdetails => $job_labels->{$jobid}{bugdetails},
-        label      => $job_labels->{$jobid}{label},
-        comments   => $job_labels->{$jobid}{comments},
+        bugs       => $comment_data->{bugs},
+        bugdetails => $comment_data->{bugdetails},
+        label      => $comment_data->{label},
+        comments   => $comment_data->{comments},
     };
 }
 
 sub overview_result {
-    my ($self, $job_labels, $aggregated, $failed_modules, $todo) = @_;
+    my ($self, $job_labels, $aggregated, $failed_modules, $actually_failed_modules, $todo) = @_;
 
     my $jobid = $self->id;
     if ($self->state eq OpenQA::Jobs::Constants::DONE) {
-        return $self->_overview_result_done($jobid, $job_labels, $aggregated, $failed_modules, $todo);
+        return $self->_overview_result_done($jobid, $job_labels, $aggregated, $failed_modules,
+            $actually_failed_modules, $todo);
     }
     return undef if $todo;
     my $result = {

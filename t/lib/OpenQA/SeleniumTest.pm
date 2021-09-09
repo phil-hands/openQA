@@ -2,17 +2,19 @@ package OpenQA::SeleniumTest;
 
 use Test::Most;
 
+use Mojo::Base -signatures;
 use base 'Exporter';
 
 require OpenQA::Test::Database;
 
-our @EXPORT = qw($drivermissing check_driver_modules enable_timeout
+our @EXPORT = qw(driver_missing check_driver_modules enable_timeout
   disable_timeout start_driver
   call_driver kill_driver wait_for_ajax disable_bootstrap_animations
   wait_for_ajax_and_animations
   open_new_tab mock_js_functions element_visible element_hidden
   element_not_present javascript_console_has_no_warnings_or_errors
-  wait_until wait_until_element_gone wait_for_element);
+  wait_until wait_until_element_gone wait_for_element
+  element_prop element_prop_by_selector map_elements);
 
 use Data::Dump 'pp';
 use IPC::Run qw(start);
@@ -23,34 +25,20 @@ use Time::HiRes qw(time sleep);
 use OpenQA::WebAPI;
 use OpenQA::Log 'log_info';
 use OpenQA::Utils;
-use OpenQA::Test::Utils 'collect_coverage_of_gru_jobs';
+use OpenQA::Test::Utils;
 use POSIX '_exit';
 
 our $_driver;
 our $webapi;
-our $gru;
 our $mojoport;
-our $startingpid   = 0;
-our $drivermissing = 'Install Selenium::Remote::Driver and Selenium::Chrome to run these tests';
+our $startingpid = 0;
 
 sub _start_app {
     my ($args) = @_;
     $mojoport    = $ENV{OPENQA_BASE_PORT} = $args->{mojoport} // $ENV{MOJO_PORT} // Mojo::IOLoop::Server->generate_port;
     $startingpid = $$;
     $webapi      = OpenQA::Test::Utils::create_webapi($mojoport);
-    $gru         = _start_gru() if ($args->{with_gru});
     return $mojoport;
-}
-
-sub _start_gru {
-    start sub {
-        $0 = 'openqa-gru';
-        log_info("starting gru\n");
-        $ENV{MOJO_MODE} = 'test';
-        my $app = Mojo::Server->new->build_app('OpenQA::WebAPI');
-        collect_coverage_of_gru_jobs($app);
-        $app->start('gru', 'run', '-m', 'test');
-    };
 }
 
 sub enable_timeout {
@@ -106,7 +94,8 @@ sub start_driver {
             push(@{$opts{extra_capabilities}{$_}{args}}, qw(--headless --disable-gpu --no-sandbox))
               for @chrome_option_keys;
         }
-        $_driver           = Test::Selenium::Chrome->new(%opts);
+        my $startup_timeout = $ENV{OPENQA_SELENIUM_TEST_STARTUP_TIMEOUT} // 10;
+        $_driver           = Test::Selenium::Chrome->new(%opts, startup_timeout => $startup_timeout);
         $_driver->{is_wd3} = 0;    # ensure the Selenium::Remote::Driver instance uses JSON Wire protocol
         enable_timeout;
         # Scripts are considered stuck after this timeout
@@ -173,6 +162,8 @@ sub wait_for_ajax {
             fail("Wait for jQuery timed out$msg");    # uncoverable statement
             return undef;                             # uncoverable statement
         }
+
+        $args{with_minion}->perform_jobs_in_foreground if $args{with_minion};
 
         $timeout -= $check_interval;
         sleep $check_interval;
@@ -307,6 +298,20 @@ sub element_not_present {
     is(scalar @elements, 0, $selector . ' not present');
 }
 
+# returns an element's property
+# note: Workaround for not relying on the functions Selenium::Remote::WebElement::get_value() and is_selected()
+#       because they ceased to work in some cases with chromedriver 91.0.4472.77. (Whether the functions work or
+#       not likely depends on how the property is populated.)
+sub element_prop ($element_id, $property = 'value') {
+    return $_driver->execute_script("return document.getElementById('$element_id').$property;");
+}
+sub element_prop_by_selector ($element_selector, $property = 'value') {
+    return $_driver->execute_script("return document.querySelector('$element_selector').$property;");
+}
+sub map_elements ($selector, $mapping) {
+    return $_driver->execute_script("return Array.from(document.querySelectorAll('$selector')).map(e => [$mapping]);");
+}
+
 sub wait_until {
     my ($check_function, $check_description, $timeout, $check_interval) = @_;
     $timeout        //= 100;
@@ -361,7 +366,7 @@ sub wait_for_element {
     return $element;
 }
 
-sub kill_driver() {
+sub kill_driver {
     return unless $startingpid && $$ == $startingpid;
     if ($_driver) {
         $_driver->quit();
@@ -372,14 +377,16 @@ sub kill_driver() {
         $webapi->signal('TERM');
         $webapi->finish;
     }
-    if ($gru) {
-        $gru->signal('TERM');
-        $gru->finish;
-    }
 }
 
 sub get_mojoport {
     return $mojoport;
+}
+
+sub driver_missing {
+    diag 'Install Selenium::Remote::Driver and Selenium::Chrome to run these tests';
+    done_testing;
+    exit;
 }
 
 END {

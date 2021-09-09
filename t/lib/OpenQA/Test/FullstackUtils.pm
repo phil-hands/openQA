@@ -29,8 +29,10 @@ our @EXPORT = qw(get_connect_args client_output client_call prevent_reload
 use Mojolicious;
 use Mojo::Home;
 use Time::HiRes 'sleep';
+use Time::Seconds;
 use OpenQA::SeleniumTest;
 use OpenQA::Scheduler::Model::Jobs;
+use OpenQA::Test::TimeLimit ();
 use OpenQA::Test::Utils 'wait_for_or_bail_out';
 
 my $JOB_SETUP = {
@@ -44,8 +46,6 @@ my $JOB_SETUP = {
     QEMU_NO_TABLET    => '1',
     INTEGRATION_TESTS => '1',
     QEMU_NO_FDC_SET   => '1',
-    CDMODEL           => 'ide-cd',
-    HDDMODEL          => 'ide-drive',
     VERSION           => '1',
     TEST              => 'core',
     PUBLISH_HDD_1     => 'core-hdd.qcow2',
@@ -89,11 +89,11 @@ sub client_call {
 
 sub find_status_text { shift->find_element('#info_box .card-body')->get_text() }
 
-sub _log_result_panel_contents {
+sub _bail_with_result_panel_contents {
     my ($result_panel_contents) = @_;
     diag("full result panel contents:\n$result_panel_contents");
     javascript_console_has_no_warnings_or_errors;
-    return 0;
+    BAIL_OUT "Expected result not found";    # uncoverable statement
 }
 
 sub wait_for_result_panel {
@@ -101,31 +101,32 @@ sub wait_for_result_panel {
     my $looking_for_result = $result_panel =~ qr/Result: /;
     $check_interval //= 0.5;
 
-    for (my $count = 0; $count < (3 * 60 / $check_interval); $count++) {
+    my $timeout = OpenQA::Test::TimeLimit::scale_timeout(ONE_MINUTE * 3) / $check_interval;
+    for (my $count = 0; $count < $timeout; $count++) {
         wait_for_ajax(msg => "result panel shows '$result_panel'");
         my $status_text = find_status_text($driver);
         return 1 if $status_text =~ $result_panel;
         if ($fail_on_incomplete && $status_text =~ qr/Result: (incomplete|timeout_exceeded)/) {
             diag('test result is incomplete but shouldn\'t');
-            return _log_result_panel_contents $status_text;
+            return _bail_with_result_panel_contents $status_text;
         }
         if ($looking_for_result && $status_text =~ qr/Result: (.*) finished/) {
             diag("stopped waiting for '$result_panel', result turned out to be '$1'");
-            return _log_result_panel_contents $status_text;
+            return _bail_with_result_panel_contents $status_text;
         }
         javascript_console_has_no_warnings_or_errors;
         sleep $check_interval if $check_interval;
     }
     my $final_status_text = find_status_text($driver);
     return 1 if $final_status_text =~ $result_panel;
-    return _log_result_panel_contents $final_status_text;
+    return _bail_with_result_panel_contents $final_status_text;
 }
 
 sub wait_for_job_running {
     my ($driver, $fail_on_incomplete) = @_;
     my $success = wait_for_result_panel($driver, qr/State: running/, $fail_on_incomplete);
     return unless $success;
-    $driver->find_element_by_link_text('Live View')->click();
+    wait_for_element(selector => '#nav-item-for-live')->click();
 }
 
 # matches a regex; returns the index of the end of the match on success and otherwise -1
@@ -154,7 +155,7 @@ sub wait_for_developer_console_like {
     my $previous_log           = '';
     # poll less frequently when waiting for paused (might take a minute for the first test module to pass)
     my $check_interval = $diag_info eq 'paused' ? 5 : 1;
-    my $timeout        = 60 * 5 * $check_interval;
+    my $timeout        = OpenQA::Test::TimeLimit::scale_timeout(ONE_MINUTE * 5) * $check_interval;
 
     my $match_index;
     while (($match_index = _match_regex_returning_index($message_regex, $log, $position_of_last_match)) < 0) {

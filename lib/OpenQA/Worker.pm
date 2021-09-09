@@ -293,8 +293,9 @@ sub init {
             $return_code = 1;
 
             # try to stop gracefully
+            my $fatal_error = 'Another error occurred when trying to stop gracefully due to an error';
             if (!$self->{_shall_terminate} || $self->{_finishing_off}) {
-                try {
+                eval {
                     # log error using print because logging utils might have caused the exception
                     # (no need to repeat $err, it is printed anyways)
                     log_error('Stopping because a critical error occurred.');
@@ -302,13 +303,14 @@ sub init {
                     # try to stop the job nicely
                     return $self->stop('exception');
                 };
+                $fatal_error = "$fatal_error: $@" if $@;
             }
 
             # kill if stopping gracefully does not work
-            log_error('Another error occurred when trying to stop gracefully due to an error. '
-                  . 'Trying to kill ourself forcefully now.');
-            $self->kill();
-            Mojo::IOLoop->stop();
+            chomp $fatal_error;
+            log_error($fatal_error);
+            log_error('Trying to kill ourself forcefully now');
+            $self->kill;
         });
 
 
@@ -381,14 +383,9 @@ sub configure_cache_client {
     $client->ua->inactivity_timeout($ENV{OPENQA_WORKER_CACHE_SERVICE_CHECK_INACTIVITY_TIMEOUT} // 10);
 }
 
-sub exec {
-    my ($self) = @_;
-
+sub exec ($self) {
     my $return_code = $self->init;
-
-    # start event loop - this will block until stop is called
-    Mojo::IOLoop->start;
-
+    Mojo::IOLoop->singleton->start;
     return $return_code;
 }
 
@@ -500,7 +497,7 @@ sub _accept_or_skip_next_job_in_queue {
                 log_info("Skipping job $job_id from queue because worker is broken ($current_error)");
             }
             else {
-                log_info("Skipping job $job_id from queue (parent faild with result $last_job_exit_status)");
+                log_info("Skipping job $job_id from queue (parent failed with result $last_job_exit_status)");
             }
             $self->_prepare_job_execution($job_to_skip, only_skipping => 1);
             return $job_to_skip->skip;
@@ -545,7 +542,7 @@ sub enqueue_jobs_and_accept_first {
     my ($self, $client, $job_info) = @_;
 
     # note: The "job queue" these functions work with is just an array containing jobs or a nested array representing
-    #       a "sub qeueue". The "sub queues" group jobs in the execution sequence which need to be skipped altogether
+    #       a "sub queue". The "sub queues" group jobs in the execution sequence which need to be skipped altogether
     #       if one job fails.
 
     $self->_assert_whether_job_acceptance_possible;
@@ -584,7 +581,7 @@ sub stop {
 
     # stop immediately if there is currently no job
     my $current_job = $self->current_job;
-    return $self->_inform_webuis_before_stopping(sub { Mojo::IOLoop->stop; }) unless defined $current_job;
+    return $self->_inform_webuis_before_stopping(sub { Mojo::IOLoop->stop }) unless defined $current_job;
     return undef if $self->{_finishing_off};
 
     # stop job directly during setup because the IO loop is blocked by isotovideo.pm during setup
@@ -690,8 +687,7 @@ sub _handle_client_status_changed {
         }
         if (!defined $self->current_job) {
             log_error('Stopping because registration with all configured web UI hosts failed');
-            Mojo::IOLoop->stop;
-            return undef;
+            return Mojo::IOLoop->stop;
         }
 
         # continue executing the current job even though the registration is not possible anymore; it

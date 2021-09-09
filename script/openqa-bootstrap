@@ -1,23 +1,32 @@
-#!/bin/sh -e
+#!/bin/bash -e
 [ "$1" = "-h" ] || [ "$1" = "--help" ] && echo "Setup a working openQA installation, automating the steps mentioned in the 'custom installation' documentation section. Supports to immediately clone an existing job simply by supplying 'openqa-clone-job' parameters directly for a quickstart" && exit
 
-set -x
+set -xeuo pipefail
 
 dbname="${dbname:="openqa"}"
 dbuser="${dbuser:="geekotest"}"
+BYPASS_SYSTEMD_CHECK="${BYPASS_SYSTEMD_CHECK:=""}"
+
+# ensure that systemd is available (which is not the case in some containers)
+if [ -z "$BYPASS_SYSTEMD_CHECK" ] && ! systemctl > /dev/null ; then
+	echo "$0 requires systemd to be installed and running as the init daemon with PID=1"
+	exit 1
+fi
 
 # add extra repos for leap
 # shellcheck disable=SC1091
 . /etc/os-release
 if [ "$NAME" = "openSUSE Leap" ]; then
-    zypper -n addrepo -p 90 obs://devel:openQA devel:openQA
-    zypper -n addrepo -p 91 "obs://devel:openQA:Leap:${VERSION}" "devel:openQA:Leap:${VERSION}"
+    # avoid using `obs://…` URL to workaround https://bugzilla.opensuse.org/show_bug.cgi?id=1187425
+    repobase=https://download.opensuse.org/repositories/devel:/openQA
+    zypper -n addrepo -p 90 "$repobase/openSUSE_Leap_${VERSION}" 'devel:openQA'
+    zypper -n addrepo -p 91 "$repobase:/Leap:/${VERSION}/openSUSE_Leap_${VERSION}" "devel:openQA:Leap:${VERSION}"
     zypper -n  --gpg-auto-import-keys refresh
 fi
 
 
 # install packages
-zypper -n install --no-recommends openQA-single-instance qemu-arm qemu-ppc qemu-x86 qemu-tools sudo os-autoinst-distri-opensuse-deps
+zypper -n install --no-recommends openQA-single-instance qemu-arm qemu-ppc qemu-x86 qemu-tools sudo iputils os-autoinst-distri-opensuse-deps
 
 if [ "$(uname -m)" = "aarch64" ]; then
     zypper -n install --no-recommends qemu-uefi-aarch64
@@ -44,7 +53,12 @@ if ping -c1 download.suse.de. && (! rpm -q ca-certificates-suse) ; then
     if ! zypper info ca-certificates-suse | grep -q ':' ; then
         # add suse ca repo if needed
         # use this way of adding the repo to be distro agnostic
-        zypper -n addrepo obs://SUSE:CA SUSE:CA
+        if [ "$NAME" = "openSUSE Leap" ]; then
+            # avoid using `obs://…` URL to workaround https://bugzilla.opensuse.org/show_bug.cgi?id=1187425
+            zypper -n addrepo "http://download.suse.de/ibs/SUSE:/CA/openSUSE_Leap_${VERSION}" 'SUSE:CA'
+        else
+            zypper -n addrepo obs://SUSE:CA SUSE:CA
+        fi
         sed -i -e 's#download.opensuse.org/repositories#download.suse.de/ibs#' /etc/zypp/repos.d/SUSE:CA.repo
         sed -i -e 's/https/http/' /etc/zypp/repos.d/SUSE:CA.repo
         zypper -n --gpg-auto-import-keys refresh
@@ -68,8 +82,8 @@ if ping -c1 gitlab.suse.de. ; then
     # clone SLE needles if run from within SUSE network
     if [ ! -d $sles_needles_directory ]; then
         echo "cloning $sles_needles_giturl shallow. Call 'git fetch --unshallow' for full history"
-                git clone --depth 1 "$sles_needles_giturl" "$sles_needles_directory"
-        fi
+        git clone --depth 1 "$sles_needles_giturl" "$sles_needles_directory"
+    fi
     chown -R $dbuser: /var/lib/openqa/tests/opensuse/products/sle/needles
 fi
 

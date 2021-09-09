@@ -115,10 +115,12 @@
   /usr/lib/git/git rix,
   /usr/lib/git/git-remote-http rix,
   /usr/lib/os-autoinst/videoencoder rix,
+  /usr/lib/os-autoinst/check_qemu_oom arCx,
   /usr/libexec/git/git rix,
   /usr/libexec/git/git-remote-http rix,
   /usr/bin/ffmpeg rix,
   /usr/lib/utempter/utempter rix,
+  /usr/sbin/smbd rix,
   /usr/sbin/ipmiconsole rix,
   /usr/share/openqa/lib/** r,
   /usr/share/openqa/lib/DBIx/Class/Timestamps.pm r,
@@ -160,6 +162,14 @@
     /usr/bin/xkbcomp rix,
     /var/lib/openqa/pool/*/autoinst-log.txt w,
 
+  }
+
+  profile /usr/lib/os-autoinst/check_qemu_oom {
+    #include <abstractions/base>
+    #include <abstractions/perl>
+    /usr/bin/dmesg rix,
+    /dev/kmsg r,
+    /var/lib/openqa/pool/*/autoinst-log.txt w,
   }
 
   profile /usr/bin/lscpu {

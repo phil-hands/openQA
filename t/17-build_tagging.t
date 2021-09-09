@@ -1,4 +1,4 @@
-# Copyright (C) 2016-2020 SUSE LLC
+# Copyright (C) 2016-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,6 +14,8 @@
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
 use Test::Most;
+use Date::Format qw(time2str);
+use Time::Seconds;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
@@ -21,10 +23,9 @@ use Test::Mojo;
 use Test::Warnings ':report_warnings';
 use OpenQA::Test::Case;
 use OpenQA::Test::TimeLimit '18';
-use OpenQA::Test::Utils 'collect_coverage_of_gru_jobs';
+use OpenQA::Test::Utils 'perform_minion_jobs';
 use OpenQA::JobGroupDefaults;
 use OpenQA::Schema::Result::JobGroupParents;
-use Date::Format qw(time2str);
 use OpenQA::Jobs::Constants;
 
 =head2 acceptance criteria
@@ -35,8 +36,7 @@ use OpenQA::Jobs::Constants;
 
 my $test_case = OpenQA::Test::Case->new;
 $test_case->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 04-products.pl');
-my $t = Test::Mojo->new('OpenQA::WebAPI');
-collect_coverage_of_gru_jobs($t->app);
+my $t    = Test::Mojo->new('OpenQA::WebAPI');
 my $auth = {'X-CSRF-Token' => $t->ua->get('/tests')->res->dom->at('meta[name=csrf-token]')->attr('content')};
 $test_case->login($t, 'percival');
 
@@ -129,7 +129,7 @@ subtest 'tag on non-existent build does not show up' => sub {
     is(scalar @tags, 1, 'only first build tagged');
 };
 
-subtest 'builds first tagged important, then unimportant dissappear (poo#12028)' => sub {
+subtest 'builds first tagged important, then unimportant disappear (poo#12028)' => sub {
     post_comment_1001 'tag:0091:important';
     post_comment_1001 'tag:0091:-important';
     $t->get_ok('/group_overview/1001?limit_builds=1')->status_is(200);
@@ -284,7 +284,7 @@ subtest 'expired jobs' => sub {
         is_deeply($jg->$m, [], 'no jobs with expired ' . $file_type);
 
         $t->app->schema->resultset('Jobs')->find(99938)
-          ->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 3600 * 24 * 12, 'UTC')});
+          ->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - ONE_DAY * 12, 'UTC')});
         is_deeply($jg->$m, [], 'still no jobs with expired ' . $file_type);
         $jg->update({"keep_${file_type}_in_days" => 5});
         # now the unimportant jobs are expired
@@ -310,11 +310,10 @@ And job OR job_group OR asset linked to build which is marked as important by co
 Then "important builds" are skipped from cleanup
 =cut
 subtest 'no cleanup of important builds' => sub {
-
     # build 0048 has already been tagged as important before
     my $job      = $jobs->search({id => 99938, state => 'done', group_id => 1001, BUILD => '0048'})->first;
     my $filename = $job->result_dir . '/autoinst-log.txt';
-    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 3600 * 24 * 12, 'UTC')});
+    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - ONE_DAY * 12, 'UTC')});
     $job->group->update(
         {
             keep_logs_in_days              => 10,
@@ -327,7 +326,7 @@ subtest 'no cleanup of important builds' => sub {
     close $fh;
 
     $t->app->gru->enqueue('limit_results_and_logs');
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     ok(-e $filename, 'file still exists');
 };
 
@@ -356,6 +355,16 @@ subtest 'version tagging' => sub {
     $t->get_ok('/group_overview/1001')->status_is(200);
     $t->text_is('#tag-1001-1_2_2-5000 i', 'second', 'version 1.2-2 has version-specific tag');
     $t->text_is('#tag-1001-1_2_1-5000 i', 'first',  'version 1.2-1 has version-specific tag');
+};
+
+subtest 'content negotiation' => sub {
+    $t->get_ok('/group_overview/1001')->status_is(200)->content_type_is('text/html;charset=UTF-8');
+    $t->get_ok('/group_overview/1001.html')->status_is(200)->content_type_is('text/html;charset=UTF-8');
+    $t->get_ok('/group_overview/1001' => {Accept => 'text/html'})->status_is(200)
+      ->content_type_is('text/html;charset=UTF-8');
+    $t->get_ok('/group_overview/1001.json')->status_is(200)->content_type_is('application/json;charset=UTF-8');
+    $t->get_ok('/group_overview/1001' => {Accept => 'application/json'})->status_is(200)
+      ->content_type_is('application/json;charset=UTF-8');
 };
 
 done_testing;

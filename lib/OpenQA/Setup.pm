@@ -141,6 +141,9 @@ sub read_config {
             screenshot_cleanup_batches_per_minion_job => OpenQA::Task::Job::Limit::DEFAULT_BATCHES_PER_MINION_JOB,
             results_min_free_disk_space_percentage    => undef,
         },
+        archiving => {
+            archive_preserved_important_jobs => 0,
+        },
         job_settings_ui => {
             keys_to_render_as_links => '',
             default_data_dir        => 'data',
@@ -200,8 +203,8 @@ sub read_config {
         }
         for my $k (@known_keys) {
             my $v = $cfg && $cfg->val($section, $k);
-            $v //=
-              exists $mode_defaults{$app->mode}{$section}->{$k}
+            $v
+              //= exists $mode_defaults{$app->mode}{$section}->{$k}
               ? $mode_defaults{$app->mode}{$section}->{$k}
               : $defaults{$section}->{$k};
             $config->{$section}->{$k} = trim $v if defined $v;
@@ -233,7 +236,7 @@ sub _validate_worker_timeout {
     if (!looks_like_number($configured_worker_timeout) || $configured_worker_timeout < MAX_TIMER) {
         $global_config->{worker_timeout} = DEFAULT_WORKER_TIMEOUT;
         $app->log->warn(
-            'The specified worker_timeout is invalid and will be ignored. The timeout must be an integer greather than '
+            'The specified worker_timeout is invalid and will be ignored. The timeout must be an integer greater than '
               . MAX_TIMER
               . '.');
     }

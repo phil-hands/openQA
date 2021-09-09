@@ -1,0 +1,30 @@
+% use OpenQA::Constants 'VIDEO_FILE_NAME_START';
+% use Mojo::File 'path';
+<ul class="resultfile-list">
+% for my $resultfile (@$resultfiles) {
+    <li>
+        % if (rindex($resultfile, VIDEO_FILE_NAME_START, 0) == 0) {
+            <i title="Video of this testrun" class="fa fa-file-video-o"></i>
+            %= link_to url_for('video', testid => $testid)->query(filename => $resultfile) => begin
+                Video
+            %= end
+        % }
+        % elsif (path($resultfile)->extname eq 'txt') {
+            <i title="Logfile produced by this testrun" class="fa fa-terminal"></i>
+            %= link_to url_for('logfile', testid => $testid)->query(filename => $resultfile) => begin
+                <%= $resultfile %>
+            %= end
+        % }
+        % else {
+            <i class="fa fa-file-o"></i>
+            <a href="<%= url_for('test_file', testid => $testid, filename => $resultfile) %>">
+                <%= $resultfile %>
+            </a>
+            % next;
+        % }
+        <a href="<%= url_for('test_file', testid => $testid, filename => $resultfile) %>" target="blank" title="Raw/download">
+            <i class="fa fa-download"></i>
+        </a>
+    </li>
+% }
+</ul>

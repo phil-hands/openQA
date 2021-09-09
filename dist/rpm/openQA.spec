@@ -49,14 +49,14 @@
 # The following line is generated from dependencies.yaml
 %define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious::Plugin::AssetPack) >= 1.36
 # The following line is generated from dependencies.yaml
-%define common_requires perl >= 5.20.0 perl(Archive::Extract) > 0.7 perl(Config::IniFiles) perl(Cpanel::JSON::XS) perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Getopt::Long) perl(Minion) >= 10.12 perl(Mojolicious) >= 8.55 perl(Regexp::Common) perl(Storable) perl(Try::Tiny)
+%define common_requires perl >= 5.20.0 perl(Archive::Extract) > 0.7 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.22 perl(Mojolicious) >= 9.11 perl(Regexp::Common) perl(Storable) perl(Try::Tiny)
 # runtime requirements for the main package that are not required by other sub-packages
 # The following line is generated from dependencies.yaml
-%define main_requires %assetpack_requires git-core perl(BSD::Resource) perl(Carp) perl(Carp::Always) perl(CommonMark) perl(Config::Tiny) perl(DBD::Pg) >= 3.7.4 perl(DBI) >= 1.632 perl(DBIx::Class) >= 0.082801 perl(DBIx::Class::DeploymentHandler) perl(DBIx::Class::DynamicDefault) perl(DBIx::Class::OptimisticLocking) perl(DBIx::Class::ResultClass::HashRefInflator) perl(DBIx::Class::Schema::Config) perl(DBIx::Class::Storage::Statistics) perl(Date::Format) perl(DateTime) perl(DateTime::Duration) perl(DateTime::Format::Pg) perl(Exporter) perl(Fcntl) perl(File::Basename) perl(File::Copy) perl(File::Copy::Recursive) perl(File::Path) perl(File::Spec) perl(Filesys::Df) perl(FindBin) perl(Getopt::Long::Descriptive) perl(IO::Handle) perl(IPC::Run) perl(JSON::Validator) perl(LWP::UserAgent) perl(Module::Load::Conditional) perl(Module::Pluggable) perl(Mojo::Base) perl(Mojo::ByteStream) perl(Mojo::IOLoop) perl(Mojo::JSON) perl(Mojo::Pg) perl(Mojo::RabbitMQ::Client) >= 0.2 perl(Mojo::URL) perl(Mojo::Util) perl(Mojolicious::Commands) perl(Mojolicious::Plugin) perl(Mojolicious::Static) perl(Net::OpenID::Consumer) perl(POSIX) perl(Pod::POM) perl(SQL::Translator) perl(Scalar::Util) perl(Sort::Versions) perl(Text::Diff) perl(Time::HiRes) perl(Time::ParseDate) perl(Time::Piece) perl(Time::Seconds) perl(URI::Escape) perl(YAML::PP) >= 0.026 perl(YAML::XS) perl(aliased) perl(base) perl(constant) perl(diagnostics) perl(strict) perl(warnings)
+%define main_requires %assetpack_requires git-core hostname perl(BSD::Resource) perl(Carp) perl(CommonMark) perl(Config::Tiny) perl(DBD::Pg) >= 3.7.4 perl(DBI) >= 1.632 perl(DBIx::Class) >= 0.082801 perl(DBIx::Class::DeploymentHandler) perl(DBIx::Class::DynamicDefault) perl(DBIx::Class::OptimisticLocking) perl(DBIx::Class::ResultClass::HashRefInflator) perl(DBIx::Class::Schema::Config) perl(DBIx::Class::Storage::Statistics) perl(Date::Format) perl(DateTime) perl(DateTime::Duration) perl(DateTime::Format::Pg) perl(Exporter) perl(Fcntl) perl(File::Basename) perl(File::Copy) perl(File::Copy::Recursive) perl(File::Path) perl(File::Spec) perl(FindBin) perl(Getopt::Long::Descriptive) perl(IO::Handle) perl(IPC::Run) perl(JSON::Validator) perl(LWP::UserAgent) perl(Module::Load::Conditional) perl(Module::Pluggable) perl(Mojo::Base) perl(Mojo::ByteStream) perl(Mojo::IOLoop) perl(Mojo::JSON) perl(Mojo::Pg) perl(Mojo::RabbitMQ::Client) >= 0.2 perl(Mojo::URL) perl(Mojo::Util) perl(Mojolicious::Commands) perl(Mojolicious::Plugin) perl(Mojolicious::Static) perl(Net::OpenID::Consumer) perl(POSIX) perl(Pod::POM) perl(SQL::Translator) perl(Scalar::Util) perl(Sort::Versions) perl(Text::Diff) perl(Time::HiRes) perl(Time::ParseDate) perl(Time::Piece) perl(Time::Seconds) perl(URI::Escape) perl(YAML::PP) >= 0.026 perl(YAML::XS) perl(aliased) perl(base) perl(constant) perl(diagnostics) perl(strict) perl(warnings)
 # The following line is generated from dependencies.yaml
 %define client_requires curl git-core jq perl(Getopt::Long::Descriptive) perl(IO::Socket::SSL) >= 2.009 perl(IPC::Run) perl(JSON::Validator) perl(LWP::Protocol::https) perl(LWP::UserAgent) perl(Test::More) perl(YAML::PP) >= 0.020 perl(YAML::XS)
 # The following line is generated from dependencies.yaml
-%define worker_requires openQA-client optipng os-autoinst < 5 perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.1 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
+%define worker_requires openQA-client optipng os-autoinst < 5 perl(Capture::Tiny) perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.1 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
 # The following line is generated from dependencies.yaml
 %define build_requires %assetpack_requires rubygem(sass)
 
@@ -64,7 +64,7 @@
 # Do not require on this in individual sub-packages except for the devel
 # package.
 # The following line is generated from dependencies.yaml
-%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires ShellCheck curl jq os-autoinst-devel perl(App::cpanminus) perl(Mojolicious::Plugin::OAuth2) perl(Perl::Critic) perl(Perl::Critic::Freenode) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-jsbeautifier python3-setuptools python3-yamllint
+%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires ShellCheck curl jq os-autoinst-devel perl(App::cpanminus) perl(Mojolicious::Plugin::OAuth2) perl(Perl::Critic) perl(Perl::Critic::Freenode) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-setuptools python3-yamllint
 %ifarch x86_64
 %define qemu qemu qemu-kvm
 %else
@@ -89,9 +89,11 @@ Source1:        cache.txz
 Source100:      openQA-rpmlintrc
 Source101:      update-cache.sh
 BuildRequires:  fdupes
-%if 0%{?is_opensuse}
 # for install-opensuse in Makefile
+%if 0%{?is_opensuse}
 BuildRequires:  openSUSE-release
+%else
+BuildRequires:  sles-release
 %endif
 BuildRequires:  %{build_requires}
 Requires:       perl(Minion) >= 10.0
@@ -109,6 +111,8 @@ Recommends:     apparmor-utils
 Recommends:     logrotate
 # the plugin is needed if the auth method is set to "oauth2"
 Recommends:     perl(Mojolicious::Plugin::OAuth2)
+# required to decompress .tar.xz compressed disk images/isos
+Recommends:     perl(IO::Uncompress::UnXz)
 # server needs to run an rsync server if worker caching is used
 Recommends:     rsync
 BuildArch:      noarch
@@ -119,6 +123,10 @@ BuildRequires:  %{test_requires}
 %endif
 %if 0%{?suse_version} >= 1330
 Requires(pre):  group(nogroup)
+%endif
+%if 0%{?suse_version} > 1500
+BuildRequires:  sysuser-tools
+%sysusers_requires
 %endif
 
 %description
@@ -152,6 +160,10 @@ Development package pulling in all build+test dependencies except chromedriver f
 Summary:        Development package pulling in all build+test dependencies
 Group:          Development/Tools/Other
 Requires:       %{devel_requires}
+%ifarch ppc ppc64 ppc64le s390x
+# missing chromedriver dependency
+ExclusiveArch:  do_not_build
+%endif
 
 %description devel
 Development package pulling in all build+test dependencies.
@@ -242,7 +254,6 @@ Group:          Development/Tools/Other
 Documentation material covering installation, configuration, basic test writing, etc.
 Covering both openQA and also os-autoinst test engine.
 
-%if 0%{?is_opensuse}
 %package auto-update
 Summary:        Automatically upgrade and reboot the system when required
 Group:          Development/Tools/Other
@@ -252,14 +263,17 @@ Requires:       rebootmgr
 %description auto-update
 Use this package to install and enable a systemd service for nightly upgrading
 and rebooting the system if devel:openQA packages are stable.
-%endif
 
 %prep
 %setup -q -a1
 sed -e 's,/bin/env python,/bin/python,' -i script/openqa-label-all
 
 %build
-make %{?_smp_mflags}
+%make_build
+%if 0%{?suse_version} > 1500
+%sysusers_generate_pre usr/lib/sysusers.d/%{name}-worker.conf %{name}-worker %{name}-worker.conf
+%sysusers_generate_pre usr/lib/sysusers.d/geekotest.conf %{name} geekotest.conf
+%endif
 
 %check
 #for double checking
@@ -279,11 +293,13 @@ export LC_ALL=en_US.UTF-8
 # 01-test-utilities.t: https://progress.opensuse.org/issues/73162
 # 17-labels_carry_over.t: https://progress.opensuse.org/issues/60209
 # api/14-plugin_obs_rsync_async.t: https://progress.opensuse.org/issues/68836
+# t/43-scheduling-and-worker-scalability.t: https://progress.opensuse.org/issues/96545
 rm \
     t/01-test-utilities.t \
     t/17-labels_carry_over.t \
     t/25-cache-service.t \
     t/api/14-plugin_obs_rsync_async.t \
+    t/43-scheduling-and-worker-scalability.t \
     t/ui/*.t
 
 # "CI" set with longer timeouts as needed for higher performance variations
@@ -306,6 +322,11 @@ export LC_ALL=en_US.UTF-8
 export LANG=en_US.UTF-8
 %make_install
 
+%if 0%{?suse_version} <= 1500
+# we only use sysusers on Tumbleweed
+rm -rf %{buildroot}/%{_sysusersdir}
+%endif
+
 mkdir -p %{buildroot}%{_datadir}/openqa%{_sysconfdir}/openqa
 ln -s %{_sysconfdir}/openqa/openqa.ini %{buildroot}%{_datadir}/openqa%{_sysconfdir}/openqa/openqa.ini
 ln -s %{_sysconfdir}/openqa/database.ini %{buildroot}%{_datadir}/openqa%{_sysconfdir}/openqa/database.ini
@@ -320,10 +341,6 @@ ln -s %{_datadir}/openqa/script/openqa-validate-yaml %{buildroot}%{_bindir}/open
 ln -s %{_datadir}/openqa/script/setup-db %{buildroot}%{_bindir}/openqa-setup-db
 %if %{with python_scripts}
 ln -s %{_datadir}/openqa/script/openqa-label-all %{buildroot}%{_bindir}/openqa-label-all
-%endif
-%if !0%{is_opensuse}
-# Drop auto-update part if not openSUSE
-rm %{buildroot}%{_datadir}/openqa/script/openqa-auto-update
 %endif
 
 cd %{buildroot}
@@ -345,11 +362,15 @@ mkdir %{buildroot}%{_localstatedir}/lib/openqa/webui/cache
 #
 %fdupes %{buildroot}/%{_prefix}
 
+%if 0%{?suse_version} > 1500
+%pre -f %{name}.pre
+%else
 %pre
 if ! getent passwd geekotest > /dev/null; then
     %{_sbindir}/useradd -r -g nogroup -c "openQA user" \
         -d %{_localstatedir}/lib/openqa geekotest 2>/dev/null || :
 fi
+%endif
 
 %service_add_pre %{openqa_services}
 
@@ -367,6 +388,9 @@ if [ "$1" = 1 ]; then
   fi
 fi
 
+%if 0%{?suse_version} > 1500
+%pre worker -f openQA-worker.pre
+%else
 %pre worker
 if ! getent passwd _openqa-worker > /dev/null; then
   %{_sbindir}/useradd -r -g nogroup -c "openQA worker" \
@@ -374,13 +398,12 @@ if ! getent passwd _openqa-worker > /dev/null; then
   # might fail for non-kvm workers (qemu package owns the group)
   %{_sbindir}/usermod _openqa-worker -a -G kvm || :
 fi
+%endif
 
 %service_add_pre %{openqa_worker_services}
 
-%if 0%{?is_opensuse}
 %pre auto-update
 %service_add_pre openqa-auto-update.timer
-%endif
 
 %post
 %tmpfiles_create %{_tmpfilesdir}/openqa-webui.conf
@@ -412,10 +435,8 @@ fi
 %tmpfiles_create %{_tmpfilesdir}/openqa.conf
 %service_add_post %{openqa_worker_services}
 
-%if 0%{?is_opensuse}
 %post auto-update
 %service_add_post openqa-auto-update.timer
-%endif
 
 %preun
 %service_del_preun %{openqa_services}
@@ -423,11 +444,9 @@ fi
 %preun worker
 %service_del_preun %{openqa_worker_services}
 
-%if 0%{?is_opensuse}
 %preun auto-update
 # not changing the service which might have triggered this update itself
 %service_del_preun openqa-auto-update.timer
-%endif
 
 %postun
 %service_del_postun %{openqa_services}
@@ -444,10 +463,8 @@ if [ -x /usr/bin/systemctl ] && [ $1 -ge 1 ]; then
     /usr/bin/systemctl reload 'openqa-worker-auto-restart@*.service' || :
 fi
 
-%if 0%{?is_opensuse}
 %postun auto-update
 %service_del_postun openqa-auto-update.timer
-%endif
 
 %post local-db
 %service_add_post openqa-setup-db.service
@@ -551,6 +568,9 @@ fi
 %dir %{_localstatedir}/lib/openqa/share/factory/repo
 %dir %{_localstatedir}/lib/openqa/share/factory/other
 %ghost %{_localstatedir}/log/openqa
+%if 0%{?suse_version} > 1500
+%{_sysusersdir}/geekotest.conf
+%endif
 
 %files devel
 
@@ -615,6 +635,9 @@ fi
 %dir %{_localstatedir}/lib/openqa/cache
 # own one pool - to create the others is task of the admin
 %dir %{_localstatedir}/lib/openqa/pool/1
+%if 0%{?suse_version} > 1500
+%{_sysusersdir}/%{name}-worker.conf
+%endif
 
 %files client
 %dir %{_datadir}/openqa
@@ -659,11 +682,9 @@ fi
 %{_datadir}/openqa/script/openqa-bootstrap
 %{_datadir}/openqa/script/openqa-bootstrap-container
 
-%if 0%{?is_opensuse}
 %files auto-update
 %dir %{_unitdir}
 %{_unitdir}/openqa-auto-update.*
 %{_datadir}/openqa/script/openqa-auto-update
-%endif
 
 %changelog

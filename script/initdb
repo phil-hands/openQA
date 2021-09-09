@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2014-2020 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -48,7 +48,7 @@ sub usage {
     print "Usage: $0 [flags]\n\n";
     print "  --prepare_init   : Create the deployment files used to initialize the database.\n";
     print "                     Don't forget to increase the version before using this\n";
-    print "                     and note those files should be commited to the source repo.\n";
+    print "                     and note those files should be committed to the source repo.\n";
     print "  --init_database  : Use the generated deployment files created with --prepare_init\n";
     print "                     to actually initialize a database (or upgrade an outdated one).\n";
     print "                     Exit code 4 indicates database already exists and is updated and\n";
@@ -74,7 +74,7 @@ if ($user) {
 }
 
 my @databases = qw( PostgreSQL );
-my $schema    = OpenQA::Schema::connect_db(check => 0);
+my $schema    = OpenQA::Schema::connect_db(deploy => 0);
 
 if ($prepare_init) {
     my $dh = DBIx::Class::DeploymentHandler->new(

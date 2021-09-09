@@ -1,4 +1,4 @@
-# Copyright (C) 2019-2020 SUSE LLC
+# Copyright (C) 2019-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -150,7 +150,7 @@ sub to_hash {
 
 Schedule jobs for a given ISO. Starts by downloading needed assets and cancelling obsolete jobs
 (unless _NO_OBSOLOLETE was set), and then attempts to start the jobs from the job settings received
-from B<_generate_jobs()>. Returns a list of job ids from the jobs that were succesfully scheduled
+from B<_generate_jobs()>. Returns a list of job ids from the jobs that were successfully scheduled
 and a list of failure reason for the jobs that could not be scheduled. Internal function, not
 exported - but called by B<create()>.
 
@@ -217,7 +217,7 @@ sub _schedule_iso {
     for my $asset (values %{parse_assets_from_settings($args)}) {
         my ($name, $type) = ($asset->{name}, $asset->{type});
         return {error => 'Asset type and name must not be empty.'} unless $name && $type;
-        return {error => "Failed to register asset $name."}        unless $assets->register($type, $name, 1);
+        return {error => "Failed to register asset $name."} unless $assets->register($type, $name, {missing_ok => 1});
     }
 
     # read arguments for deprioritization and obsoleten
@@ -226,6 +226,13 @@ sub _schedule_iso {
     my $obsolete           = delete $args->{_OBSOLETE}                 // 0;
     my $onlysame           = delete $args->{_ONLY_OBSOLETE_SAME_BUILD} // 0;
     my $skip_chained_deps  = delete $args->{_SKIP_CHAINED_DEPS}        // 0;
+    my $force              = delete $args->{_FORCE_DEPRIORITIZEBUILD};
+    $force = delete $args->{_FORCE_OBSOLETE} || $force;
+    if (($deprioritize || $obsolete) && $args->{TEST} && !$force) {
+        return {error => 'One must not specify TEST and _DEPRIORITIZEBUILD=1/_OBSOLETE=1 at the same time as it is'
+              . 'likely not intended to deprioritize the whole build when scheduling a single scenario.'
+        };
+    }
 
     my $result = $self->_generate_jobs($args, \@notes, $skip_chained_deps);
     return {error => $result->{error_message}, error_code => $result->{error_code} // 400}
@@ -244,7 +251,7 @@ sub _schedule_iso {
             next unless $jobs->[0]->{$k};
             $cond{$k} = $jobs->[0]->{$k};
         }
-        if (%cond) {
+        if (keys %cond) {
             # Prefer new build jobs over old ones either by cancelling old
             # ones or deprioritizing them (up to a limit)
             try {
@@ -288,7 +295,7 @@ sub _schedule_iso {
                 $job_ids_by_test_machine{_settings_key($settings)} //= [];
                 push @{$job_ids_by_test_machine{_settings_key($settings)}}, $j_id;
 
-                # set prio if defined explicitely (otherwise default prio is used)
+                # set prio if defined explicitly (otherwise default prio is used)
                 $job->update({priority => $prio}) if (defined($prio));
 
                 $self->_create_download_lists(\%tmp_downloads, $download_list, $j_id);

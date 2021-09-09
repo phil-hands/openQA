@@ -1,4 +1,4 @@
-# Copyright (C) 2017-2020 SUSE LLC
+# Copyright (C) 2017-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -14,16 +14,18 @@
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
 package OpenQA::CacheService::Model::Cache;
-use Mojo::Base -base;
+use Mojo::Base -base, -signatures;
 
 use Carp 'croak';
+use Capture::Tiny 'capture_merged';
 use Mojo::URL;
-use OpenQA::Utils qw(base_host human_readable_size);
+use OpenQA::Log qw(log_error);
+use OpenQA::Utils qw(base_host human_readable_size check_df);
 use OpenQA::Downloader;
 use Mojo::File 'path';
 
 has downloader => sub { OpenQA::Downloader->new };
-has [qw(location log sqlite)];
+has [qw(location log sqlite min_free_percentage)];
 has limit => 50 * (1024**3);
 
 sub _perform_integrity_check {
@@ -230,7 +232,14 @@ sub _cache_sync {
 
     $self->{cache_real_size} = 0;
     my $location = $self->_realpath;
-    my $assets   = $location->list_tree({max_depth => 2})->map('to_string')->grep(qr/\.(?:img|qcow2|iso|vhd|vhdx)$/);
+    my $tree;
+    # use capture_merged to avoid logging back-traces for certain errors
+    # like `Can't opendir(/var/lib/openqa/cache/lost+found): Permission denied" at …/Mojo/File.pm line 74.`
+    my $problems = capture_merged { $tree = $location->list_tree({max_depth => 2}) };
+    $problems =~ s/.*(lost\+found|at.*line).*\n*//g;
+    chomp $problems;
+    log_error "Unable to fully sync cache directory:\n$problems" if $problems;
+    my $assets = $tree->map('to_string')->grep(qr/\.(?:img|qcow2|iso|vhd|vhdx)$/);
     foreach my $file ($assets->each) {
         $self->_increase(-s $file) if $self->asset_lookup($file);
     }
@@ -258,7 +267,17 @@ sub _decrease {
 
 sub _increase { $_[0]{cache_real_size} += $_[1] }
 
-sub _exceeds_limit { $_[0]->{cache_real_size} + $_[1] > $_[0]->limit }
+sub _exceeds_limit ($self, $needed) {
+    if (my $limit = $self->limit) {
+        return 1 if $self->{cache_real_size} + $needed > $limit;
+    }
+    if (my $min_free_percentage = $self->min_free_percentage) {
+        my ($available_bytes, $total_bytes) = eval { check_df $self->location };
+        if (my $error = $@) { chomp $error; $self->log->error($error); return 0 }
+        return 1 if ($available_bytes + $needed) / $total_bytes * 100 > $min_free_percentage;
+    }
+    return 0;
+}
 
 sub _check_limits {
     my ($self, $needed, $to_preserve) = @_;

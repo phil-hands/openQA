@@ -23,7 +23,7 @@ use Test::Warnings ':report_warnings';
 use OpenQA::Constants 'DEFAULT_WORKER_TIMEOUT';
 use OpenQA::Test::TimeLimit '18';
 use OpenQA::Test::Case;
-use OpenQA::Test::Utils 'embed_server_for_testing';
+use OpenQA::Test::Utils qw(assume_all_assets_exist embed_server_for_testing);
 use Date::Format 'time2str';
 use OpenQA::WebSockets::Client;
 use OpenQA::SeleniumTest;
@@ -36,6 +36,7 @@ my $test_case   = OpenQA::Test::Case->new;
 my $schema_name = OpenQA::Test::Database->generate_schema_name;
 my $schema
   = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
+assume_all_assets_exist;
 
 embed_server_for_testing(
     server_name => 'OpenQA::WebSockets',
@@ -61,7 +62,7 @@ my $offline_timestamp = time2str('%Y-%m-%d %H:%M:%S', time - DEFAULT_WORKER_TIME
 $workers->create({id => $online_worker_id,  host => 'online_test',  instance => 1, t_seen => $online_timestamp});
 $workers->create({id => $offline_worker_id, host => 'offline_test', instance => 1, t_seen => $offline_timestamp});
 
-plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
+driver_missing unless my $driver = call_driver;
 
 $driver->title_is("openQA", "on main page");
 

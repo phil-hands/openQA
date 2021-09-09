@@ -226,7 +226,9 @@ order for variables is as follows (from lowest to highest):
 * API POST query parameters
 
 That is, variable values set as part of the API request that triggers the jobs will
-'win' over values set at any of the other locations.
+'win' over values set at any of the other locations. In the special case of the 
+`BACKEND` variable, if there is a `MACHINE` specified, the `BACKEND` value for this
+machine defined in openQA has highest priority.
 
 If you need to override this precedence - for example, you want the value set in
 one particular test suite to take precedence over a setting of the same value from
@@ -283,8 +285,8 @@ see <<overview_multiple_groups,the following example>>.
 .The openQA test overview page showing multiple groups at once. The URL query parameters specify the groupid parameter two times to resolve both the "opensuse" and "opensuse test" group.
 image::images/tests-overview_multiple_groups.png[test overview page showing multiple groups]
 
-Specifying multiple groups with no build will yield the latest build of the
-first group. This can be useful to have a static URL for bookmarking.
+Specifying multiple groups with no build will yield the result for the latest
+build of each group. This can be useful to have a static URL for bookmarking.
 
 
 === Review badges ===
@@ -298,9 +300,10 @@ image::images/review_badges.png[Review badges]
 
 ==== Meaning of the different colors ====
 
-* The green icons shows up when there is no work to be done.
 * No icon is shown if at least one failure still need to be reviewed.
-* The black icon is shown if all review work has been done.
+* The green tick icon shows up when there is no work to be done.
+* The black certificate icon is shown if all review work has been done.
+* The grey comment icon is shown if all failures have at least one comment.
 
 (To simplify, checking for false-negatives is not considered here.)
 
@@ -364,7 +367,7 @@ the group_overview page. The index page does not show tags by default to prevent
 a potential performance regression. Tags can be enabled on the index page using the
 corresponding option in the filter form at the bottom of the page.
 
-image::images/build_tagging.png[Example of a tag coment and corresponding tagged build]
+image::images/build_tagging.png[Example of a tag comment and corresponding tagged build]
 
 ==== Keeping important builds ====
 
@@ -756,7 +759,7 @@ scenarios:
 
 Also link:https://yaml.org/type/merge.html[YAML Merge Keys] are supported.
 This way you can reuse previously defined anchors and add other values to it.
-Values in the merged alias will be overriden.
+Values in the merged alias will be overridden.
 
 You can even merge more than one alias.
 
@@ -865,13 +868,63 @@ settings), you have to quote it.
 == Use of the REST API
 
 openQA includes a _client_ script which - depending on the distribution - is
-packaged independantly if you just want to interface with an existing openQA
-instance without needing to install the full package. Call `openqa-cli --help`
-for help.
+packaged independently to allow interfacing with an existing openQA instance
+without needing to install openQA itself. Call `openqa-cli --help` for help.
+The sub-commands provide further help, e.g. `openqa-cli api --help` contains
+a lot of examples.
 
-Basics are described in the
-<<GettingStarted.asciidoc#gettingstarted,Getting Started>> guide.
+This section focuses on particular API use-cases. Checkout the
+<<Client.asciidoc#client,openQA client>> section for further information about
+the client itself, how authentication works and how plain `curl` can be used.
 
+=== Finding tests
+
+The following example lists all jobs within the job group with the ID `1`
+and the setting `BUILD=20210707` on `openqa.opensuse.org`:
+
+[source,sh]
+----
+curl -s "https://openqa.opensuse.org/api/v1/jobs?groupid=1&build=20210707" | jq
+----
+
+The tool `jq` is used for pretty-printing in this example but it is also useful
+for additional filtering (see js's
+https://stedolan.github.io/jq/tutorial[tutorial]).
+
+However, openQA's API provides many more filters on its own. These can be used
+by adding additional query parameters, e.g.:
+
+* `ids`/`state`/`result`: Return only jobs with matching ID/state/result.
+  Multiple IDs/states/results can be specified by repeating the parameter or
+  by passing comma-separated values.
+* `distri`/`version`/`build`/`test`/`arch`/`machine`
+  /`worker_class`/`iso`/`hdd_1`: Return only jobs where the job settings match
+  the specified values like in the example above. Note that it is not possible
+  to filter by arbitrary job settings although this list might not be complete.
+* `groupid`/`group`: Return only jobs within the job group with the
+  specified ID/name like in the example above. These parameters are mutually
+  exclusive, `groupid` has precedence.
+* `latest=1`: De-duplicates, so that for the same `DISTRI`, `VERSION`, `BUILD`,
+  `TEST`, `FLAVOR`, `ARCH` and `MACHINE` only the latest job is returned.
+* `limit`/`page`: Limit the number of returned jobs and allow pagination, e.g.
+  `page=2&limit=10` would only show results 11-20.
+* `modules`/`modules_result`: Return only jobs which have a test module with the
+  specified name/result.
+* `before`/`after`: Return only jobs with a job ID less/greater than the
+  specified job ID.
+* `scope=current`: Returns only jobs which have not been cloned yet.
+* `scope=relevant`: Returns only jobs which have not been obsoleted yet and
+  which have not been cloned yet. Clones which are still pending do *not* count.
+
+==== Remarks
+
+* All parameters can be combined with each other unless stated otherwise.
+* When specifying the same parameter multiple times, only the last occurrence
+  is taken into account.
+* All values are matched exactly, so e.g. `group=openSUSE+Leap+15` returns only
+  jobs within the group `openSUSE Leap 15` but not jobs from the group
+  `openSUSE Leap 15 ARM`. This applies to parameters for filtering job settings
+  as well.
 
 === Triggering tests
 
@@ -882,10 +935,10 @@ over the web UI.
 
 ==== Cloning existing jobs - openqa-clone-job ====
 
-If one wants to recreate an existing job from any publically available openQA
+If one wants to recreate an existing job from any publicly available openQA
 instance the script `openqa-clone-job` can be used to copy the necessary
 settings and assets to another instance and schedule the test. For the test to
-be executed it has to be ensured that matching ressources can be found, for
+be executed it has to be ensured that matching resources can be found, for
 example a worker with matching `WORKER_CLASS` must be registered. More details
 on `openqa-clone-job` can be found in
 <<WritingTests.asciidoc#writingtests,Writing Tests>>.
@@ -949,6 +1002,12 @@ openqa-cli api -X POST isos ISO=my_iso.iso DISTRI=my_distri FLAVOR=sweet \
          _DEPRIORITIZEBUILD=1 _DEPRIORITIZE_LIMIT=120 \
 --------------------------------------------------------------------------------
 
+==== Remarks ====
+
+When scheduling a single test (variable `TEST` is specified) attempts to
+obsolete/deprioritize are prevented by default because this is likely not wanted.
+Use `_FORCE_OBSOLETE` or `_FORCE_DEPRIORITIZEBUILD` to nevertheless
+obsolete/deprioritize *all* jobs with matching `DISTRI`, `VERSION`, `FLAVOR` and `ARCH`.
 
 === Job template YAML ===
 
@@ -1063,14 +1122,16 @@ described in the <<GettingStarted.asciidoc,Getting Started>> guide.
 
 === Asset cleanup ===
 
-For more information on assets, see 'Asset handling' below.
+For more information on assets, see <<UsersGuide.asciidoc#_asset_handling,Asset handling>>
+below.
 
 Assets like ISO files consume a huge amount of disk space. Therefore openQA
 removes assets automatically according to configurable limits.
 
 This section provides an overall description of the cleanup strategy and
 how to configure the limits. Cleanup-related parameter for the REST API can
-be found in the 'Asset handling' section under 'Use of the REST API'.
+be found in the <<UsersGuide.asciidoc#_asset_handling,Asset handling>> section under
+<<UsersGuide.asciidoc#_use_of_the_rest_api,Use of the REST API>>.
 
 ==== Cleanup strategy ====
 

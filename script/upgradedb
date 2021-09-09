@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2014-2020 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -48,7 +48,7 @@ sub usage {
     print "Usage: $0 [flags]\n\n";
     print "  --prepare_upgrades : Create the deployment files used to upgrade the database.\n";
     print "                       Don't forget to increase the version before using this\n";
-    print "                       and note those files should be commited to the source repo.\n";
+    print "                       and note those files should be committed to the source repo.\n";
     print "  --upgrade_database : Use the generated deployment files created with --prepare_upgrades\n";
     print "                       to actually upgrade a database.\n";
     print "  --force            : Force overwriting existing data.\n";
@@ -71,7 +71,7 @@ if ($user) {
     setuid($uid) || die "can't suid to $user";
 }
 
-my $schema = OpenQA::Schema::connect_db(check => 0);
+my $schema = OpenQA::Schema::connect_db(deploy => 0);
 
 my @databases = qw( PostgreSQL );
 

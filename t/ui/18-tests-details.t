@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2014-2020 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -24,8 +24,9 @@ use Test::Warnings qw(:all :report_warnings);
 use Mojo::JSON qw(decode_json encode_json);
 use Mojo::File qw(path);
 use Mojo::IOLoop;
-use OpenQA::Test::TimeLimit '20';
+use OpenQA::Test::TimeLimit '30';
 use OpenQA::Test::Case;
+use OpenQA::Test::Utils qw(prepare_clean_needles_dir prepare_default_needle);
 use OpenQA::Client;
 use OpenQA::Jobs::Constants;
 use OpenQA::SeleniumTest;
@@ -38,16 +39,14 @@ my $schema      = $test_case->init_data(
     fixtures_glob =>
       '01-jobs.pl 02-workers.pl 03-users.pl 04-products.pl ui-18-tests-details/01-job_modules.pl 07-needles.pl'
 );
+my $jobs = $schema->resultset('Jobs');
 
 # prepare needles dir
 my $needle_dir_fixture = $schema->resultset('NeedleDirs')->find(1);
-my $needle_dir         = path($needle_dir_fixture->path);
-$needle_dir->remove_tree({keep_root => 1});
-$needle_dir->child('inst-timezone-text.json')->spurt('{"area":[],"tags":["ENV-VIDEOMODE-text","inst-timezone"]}');
+my $needle_dir         = prepare_clean_needles_dir;
+prepare_default_needle($needle_dir);
 
 sub prepare_database {
-    my $jobs = $schema->resultset('Jobs');
-
     # set assigned_worker_id to test whether worker still displayed when job set to done
     # manually for Selenium test
     $jobs->find(99963)->update({assigned_worker_id => 1});
@@ -74,7 +73,7 @@ sub prepare_database {
 
 prepare_database;
 
-plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
+driver_missing unless my $driver = call_driver;
 my $baseurl = $driver->get_current_url;
 sub current_tab { $driver->find_element('.nav.nav-tabs .active')->get_text }
 
@@ -88,7 +87,7 @@ sub find_candidate_needles {
     disable_timeout;
     $candidates_menus[0]->click();
 
-    # read the tags/needles from the HTML strucutre
+    # read the tags/needles from the HTML structure
     my @section_elements = $driver->find_elements('#needlediff_selector ul table');
     my %needles_by_tag   = map {
         # find tag name
@@ -411,12 +410,12 @@ subtest 'render video link if frametime is available' => sub {
     $driver->find_element_by_link_text('Details')->click();
     $driver->find_element('[href="#step/bootloader/1"]')->click();
     wait_for_ajax(msg => 'first step of bootloader test module loaded');
-    my @links = $driver->find_elements('.step_actions .fa-file-video');
+    my @links = $driver->find_elements('.step_actions .fa-file-video-o');
     is($#links, -1, 'no link without frametime');
 
     $driver->find_element('[href="#step/bootloader/2"]')->click();
     wait_for_ajax(msg => 'second step of bootloader test module loaded');
-    my @video_link_elems = $driver->find_elements('.step_actions .fa-file-video');
+    my @video_link_elems = $driver->find_elements('.step_actions .fa-file-video-o');
     is($video_link_elems[0]->get_attribute('title'), 'Jump to video', 'video link exists');
     like(
         $video_link_elems[0]->get_attribute('href'),
@@ -431,7 +430,7 @@ subtest 'render video link if frametime is available' => sub {
     );
 };
 
-subtest 'misc details: title, favicon, go back, go to source view' => sub {
+subtest 'misc details: title, favicon, go back, go to source view, go to log view' => sub {
     $driver->go_back();    # to 99946
     $driver->title_is('openQA: opensuse-13.1-DVD-i586-Build0091-textmode@32bit test results', 'tests/99946 followed');
     like($driver->find_element('link[rel=icon]')->get_attribute('href'),
@@ -447,6 +446,13 @@ subtest 'misc details: title, favicon, go back, go to source view' => sub {
         'on src page for installer_timezone test'
     );
     is($driver->find_element('.cm-comment')->get_text(), '#!/usr/bin/env perl', 'we have a perl comment');
+
+    # load "Logs & Assets" tab contents directly because accessing the tab within the whole page in a straight forward
+    # way lead to unstability (see poo#94060)
+    $driver->get('/tests/99946/downloads_ajax');
+    $driver->find_element_by_link_text('autoinst-log.txt')->click;
+    wait_for_ajax msg => 'log contents';
+    like $driver->find_element('.embedded-logfile .ansi-blue-fg')->get_text, qr/send(autotype|key)/, 'log is colorful';
 };
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
@@ -475,9 +481,9 @@ subtest 'route to latest' => sub {
     my $job_groups_links = $dom->find('.navbar .dropdown a + ul.dropdown-menu a');
     my ($job_group_text, $build_text) = $job_groups_links->map('text')->each;
     my ($job_group_href, $build_href) = $job_groups_links->map('attr', 'href')->each;
-    is($job_group_text, 'opensuse (current)',        'link to current job group overview');
-    is($build_text,     ' Build 0091',               'link to test overview');
-    is($job_group_href, '/group_overview/1001.html', 'href to current job group overview');
+    is($job_group_text, 'opensuse (current)',   'link to current job group overview');
+    is($build_text,     ' Build 0091',          'link to test overview');
+    is($job_group_href, '/group_overview/1001', 'href to current job group overview');
     like($build_href, qr/distri=opensuse/, 'href to test overview');
     like($build_href, qr/groupid=1001/,    'href to test overview');
     like($build_href, qr/version=13.1/,    'href to test overview');
@@ -608,7 +614,7 @@ subtest 'test module flags are displayed correctly' => sub {
         'Description of Ignore failure flag is correct'
     );
 
-    $flag = $driver->find_element("//div[\@class='flags']/i[\@class='flag fa fa-redo']", 'xpath');
+    $flag = $driver->find_element("//div[\@class='flags']/i[\@class='flag fa fa-undo']", 'xpath');
     ok($flag, 'Always rollback flag is displayed correctly');
     is(
         $flag->get_attribute('title'),
@@ -640,6 +646,31 @@ subtest 'additional investigation notes provided on new failed' => sub {
     $driver->find_element_by_link_text('Investigation')->click;
     ok($driver->find_element('table#investigation_status_entry')->text_like(qr/No result dir/),
         'investigation status content shown as table');
+};
+
+subtest 'alert box shown if not already on first bad' => sub {
+    $driver->get('/tests/99940');
+    wait_for_ajax(msg => 'details tab for job 99940 loaded to test investigation');
+    $driver->find_element_by_link_text('Investigation')->click;
+    $driver->find_element("//div[\@class='alert alert-info']", 'xpath')
+      ->text_like(qr/Investigate the first bad test directly: 99938/);
+
+    $driver->find_element_by_xpath("//div[\@class='alert alert-info']/a[\@class='alert-link']")->click;
+    wait_for_ajax(msg => 'details tab for job 99938 loaded to test investigation');
+    ok(
+        $driver->find_element('table#investigation_status_entry')
+          ->text_like(qr/error\nNo previous job in this scenario, cannot provide hints/),
+        'linked to investigation tab directly'
+    );
+    $driver->find_element_by_xpath("//div[\@class='tab-content']")->text_unlike(qr/Investigate the first bad test/);
+};
+
+subtest 'archived icon' => sub {
+    $t->get_ok('/tests/99947/infopanel_ajax')->status_is(200);
+    is $t->tx->res->dom->find('#job-archived-badge')->size, 0, 'archived icon not shown by default';
+    $jobs->find(99947)->update({archived => 1});
+    $t->get_ok('/tests/99947/infopanel_ajax')->status_is(200);
+    is $t->tx->res->dom->find('#job-archived-badge')->size, 1, 'archived icon shown if job is archived';
 };
 
 kill_driver();

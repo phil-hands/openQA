@@ -1,4 +1,4 @@
-# Copyright (C) 2016-2020 SUSE LLC
+# Copyright (C) 2016-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -19,11 +19,13 @@ use Test::Most;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
+use Mojo::Base -signatures;
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
 use OpenQA::Test::Case;
 use OpenQA::Test::TimeLimit '10';
 use OpenQA::Jobs::Constants;
+use Mojo::File qw(tempfile);
 
 # init test case
 my $test_case = OpenQA::Test::Case->new;
@@ -49,6 +51,38 @@ is_deeply(\@h2, ['opensuse', 'opensuse test'], 'two groups shown (from fixtures)
 # create (initially) empty parent group
 my $test_parent = $parent_groups->create({name => 'Test parent', sort_order => 2});
 
+subtest 'Validation errors' => sub {
+    $t->get_ok('/group_overview/1002?limit_builds=a')->status_is(400)
+      ->content_like(qr/Erroneous parameters.*limit_builds/);
+    $t->get_ok('/group_overview/1002.json?limit_builds=a')->status_is(400)
+      ->json_like('/error', qr/Erroneous parameters.*limit_builds/);
+    $t->get_ok('/group_overview/1002?comments_page=a')->status_is(400)
+      ->content_like(qr/Erroneous parameters.*comments_page/);
+    $t->get_ok('/group_overview/1002?comments_limit=a')->status_is(400)
+      ->content_like(qr/Erroneous parameters.*comments_limit/);
+
+    my $id = $test_parent->id;
+    $t->get_ok("/parent_group_overview/$id?limit_builds=a")->status_is(400)
+      ->content_like(qr/Erroneous parameters.*limit_builds/);
+    $t->get_ok("/parent_group_overview/$id.json?limit_builds=a")->status_is(400)
+      ->json_like('/error', qr/Erroneous parameters.*limit_builds/);
+    $t->get_ok("/parent_group_overview/$id?comments_page=a")->status_is(400)
+      ->content_like(qr/Erroneous parameters.*comments_page/);
+    $t->get_ok("/parent_group_overview/$id?comments_limit=a")->status_is(400)
+      ->content_like(qr/Erroneous parameters.*comments_limit/);
+};
+
+subtest 'Changelog' => sub {
+    my $global_cfg = $t->app->config->{global};
+    $global_cfg->{changelog_file} = 'does not exist';
+    $t->get_ok('/changelog')->status_is(200)->content_like(qr/No changelog available/)
+      ->content_unlike(qr/Custom changelog works/);
+    my $changelog = tempfile;
+    $changelog->spurt('Custom changelog works!');
+    $global_cfg->{changelog_file} = $changelog->to_string;
+    $t->get_ok('/changelog')->status_is(200)->content_like(qr/Custom changelog works/);
+};
+
 $t->get_ok('/dashboard_build_results')->status_is(200);
 @h2 = $t->tx->res->dom->find('h2 a')->map('text')->each;
 is_deeply(\@h2, ['opensuse', 'opensuse test'], 'empty parent group not shown');
@@ -66,8 +100,19 @@ like(
 );
 
 $t->get_ok('/dashboard_build_results')->status_is(200);
-@h2 = $t->tx->res->dom->find('h2 a')->map('text')->each;
-is_deeply(\@h2, ['opensuse test', 'Test parent'], 'parent group shown and opensuse is no more on top-level');
+@h2 = $t->tx->res->dom->find('h2 a')->map(sub ($e) { $e->text . ($e->attr('title') // '') })->each;
+my $test_overview_tooltip = 'Shows the latest test results for all job groups within this parent job group';
+is_deeply(
+    \@h2,
+    ['opensuse test', 'Test parent', $test_overview_tooltip],
+    'parent group shown and opensuse is no more on top-level'
+);
+my $tests_overview_dashboard = $t->tx->res->dom->find("#test_result_overview_link_1")->first;
+is(
+    $tests_overview_dashboard->attr('href'),
+    '/tests/overview?groupid=1001',
+    'The "test result overview" anchor href points to /test/overview and includes all the groupids for group 1'
+);
 
 my @h4 = $t->tx->res->dom->find('div.children-collapsed .h4 a')->map('text')->each;
 is_deeply(\@h4, [qw(Build87.5011 Build0048@0815 Build0048)], 'builds on parent-level shown, sorted first by version');
@@ -89,8 +134,12 @@ $opensuse_test_group->update({parent_id => $test_parent->id});
 $opensuse_group->jobs->find({BUILD => '0048@0815'})->comments->create({text => 'poo#1234', user_id => 99901});
 
 $t->get_ok('/dashboard_build_results?limit_builds=20&show_tags=1')->status_is(200);
-@h2 = $t->tx->res->dom->find('h2 a')->map('text')->each;
-is_deeply(\@h2, ['Test parent'], 'only parent shown, no more top-level job groups');
+@h2 = $t->tx->res->dom->find('h2 a')->map(sub ($e) { $e->text . ($e->attr('title') // '') })->each;
+is_deeply(
+    \@h2,
+    ['Test parent', $test_overview_tooltip],
+    'only link to parent (and related overview) shown, no more top-level job groups'
+);
 
 sub check_test_parent {
     my ($default_expanded) = @_;
@@ -139,8 +188,8 @@ sub check_test_parent {
     is_deeply(
         \@urls,
         [
-            '/tests/overview.html?distri=opensuse&version=13.1&build=0091&groupid=1001',
-            '/tests/overview.html?distri=opensuse&version=13.1&build=0091&groupid=1002'
+            '/tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1001',
+            '/tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1002'
         ],
         'link URLs'
     );
@@ -160,6 +209,12 @@ for my $url (@urls) {
 # parent group overview
 $t->get_ok('/parent_group_overview/' . $test_parent->id)->status_is(200);
 check_test_parent('expanded');
+my $tests_overview = $t->tx->res->dom->find("#test_result_overview_link_1")->first;
+is(
+    $tests_overview->attr("href"),
+    "/tests/overview?groupid=1001&groupid=1002",
+    "The 'test result overview' anchor href points to /test/overview and includes all the groupids"
+);
 
 # add tags (99901 is user ID of arthur)
 my $tag_for_0092_comment = $opensuse_group->comments->create({text => 'tag:0092:important:some_tag', user_id => 99901});
@@ -255,12 +310,14 @@ $t->get_ok('/dashboard_build_results?limit_builds=20')->status_is(200);
 check_auto_badge(1);
 $jobs->find({id => 99947})->update({result => OpenQA::Jobs::Constants::PASSED});
 
-sub check_badge {
-    my ($reviewed_count, $msg, $build) = @_;
+sub check_badge ($reviewed_count, $msg, $build = undef, $commented_count = 0) {
     $build //= 'Factory-0048';
     $t->get_ok('/dashboard_build_results?limit_builds=20')->status_is(200);
-    $t->element_count_is('#review-' . $test_parent->id . '-' . $build,       $reviewed_count, $msg . ' (parent-level)');
-    $t->element_count_is('#child-review-' . $test_parent->id . '-' . $build, $reviewed_count, $msg . ' (child-level)');
+    my $id = $test_parent->id;
+    $t->element_count_is("#review-$id-$build",          $reviewed_count,  "$msg (review badges, parent-level)");
+    $t->element_count_is("#child-review-$id-$build",    $reviewed_count,  "$msg (review badges, child-level)");
+    $t->element_count_is("#badge-commented-$id-$build", $commented_count, "$msg (commented badges, parent-level)");
+    $t->element_count_is("#child-badge-commented-$id-$build", $commented_count, "$msg (commented badges, child-level)");
 }
 
 # make one of the softfailed jobs a failed because of failed not-important modules
@@ -290,6 +347,14 @@ my $failed_not_important_module_issueref
 # failed:                             not reviewed
 # softfailed:                         reviewed
 check_badge(0, 'no badge as long as not all failed reviewed');
+
+# add arbitrary comment for job 99938
+my $failed_comment
+  = $opensuse_group->jobs->find({id => 99938})->comments->create({text => 'arbitrary comment', user_id => 99901});
+
+# failed:                             not reviewed, only arbitrary comment
+# softfailed:                         reviewed
+check_badge(0, 'only commented badge', undef, 1);
 
 # add review for job 99938 (so now the other failed jobs are reviewed but one is missing)
 my $failed_issueref
@@ -339,12 +404,12 @@ $t->get_ok('/dashboard_build_results?limit_builds=20&show_tags=0')->status_is(20
 is(scalar @urls, 12, 'now builds belong to different versions and are split');
 is(
     $urls[1]->attr('href'),
-    '/tests/overview.html?distri=suse&version=14.2&build=87.5011&groupid=1001',
+    '/tests/overview?distri=suse&version=14.2&build=87.5011&groupid=1001',
     'most recent version/build'
 );
 is(
     $urls[-1]->attr('href'),
-    '/tests/overview.html?distri=opensuse&version=13.1&build=0091&groupid=1002',
+    '/tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1002',
     'oldest version/build still shown'
 );
 
@@ -365,7 +430,7 @@ subtest 'build which has jobs with different DISTRIs links to overview with all 
     my $first_url = $urls[1]->attr('href');
     is(
         $first_url,
-        '/tests/overview.html?distri=opensuse&distri=suse&version=14.2&build=87.5011&groupid=1001',
+        '/tests/overview?distri=opensuse&distri=suse&version=14.2&build=87.5011&groupid=1001',
         'both distris present in overview link'
     );
     $job_with_different_distri->delete;
@@ -453,7 +518,7 @@ subtest 'job parent groups with multiple version and builds' => sub {
     my $first_entire_build_url = $entire_build_url_list[0]->attr('href');
     is(
         $first_entire_build_url,
-        '/tests/overview.html?distri=suse&version=14.2&build=87.5011&groupid=1001&groupid=1002',
+        '/tests/overview?distri=suse&version=14.2&build=87.5011&groupid=1001&groupid=1002',
         'entire build url contains all the child group ids'
     );
 

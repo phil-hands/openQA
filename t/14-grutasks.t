@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (c) 2016-2020 SUSE LLC
+# Copyright (c) 2016-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -15,6 +15,7 @@
 # with this program; if not, see <http://www.gnu.org/licenses/>.
 
 use Test::Most;
+use Mojo::Base -signatures;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
@@ -24,11 +25,11 @@ use OpenQA::JobDependencies::Constants;
 use OpenQA::Schema::Result::Jobs;
 use File::Copy;
 use OpenQA::Test::Database;
-use OpenQA::Test::Utils qw(collect_coverage_of_gru_jobs run_gru_job);
+use OpenQA::Test::Utils qw(run_gru_job perform_minion_jobs);
 use OpenQA::Test::TimeLimit '160';
 use Test::MockModule;
 use Test::Mojo;
-use Test::Warnings ':report_warnings';
+use Test::Warnings qw(:report_warnings warning);
 use Test::Output 'combined_like';
 use OpenQA::Test::Case;
 use File::Which 'which';
@@ -42,6 +43,7 @@ use Storable qw(store retrieve);
 use Mojo::IOLoop;
 use Cwd qw(getcwd);
 use utf8;
+use Time::Seconds;
 
 plan skip_all => 'set HEAVY=1 to execute (takes longer)' unless $ENV{HEAVY};
 
@@ -53,6 +55,7 @@ my $deleted = $tempdir->child('deleted');
 my $removed = $tempdir->child('removed');
 sub mock_deleted { -e $deleted ? retrieve($deleted) : [] }
 sub mock_removed { -e $removed ? retrieve($removed) : [] }
+# uncoverable statement count:2
 sub reset_mocked_asset_deletions { unlink $tempdir->child($_) for qw(removed deleted) }
 my $assets_result_mock = Test::MockModule->new('OpenQA::Schema::Result::Assets');
 $assets_result_mock->redefine(
@@ -104,39 +107,42 @@ my $webapi    = OpenQA::Test::Utils::create_webapi($mojo_port, sub { });
 
 # define a fix asset_size_limit configuration for this test to be independent of the default value
 # we possibly want to adjust without going into the details of this test
-$t->app->config->{default_group_limits}->{asset_size_limit} = 100;
-
-collect_coverage_of_gru_jobs($t->app);
+my $app = $t->app;
+$app->config->{default_group_limits}->{asset_size_limit} = 100;
 
 # Non-Gru task
+# uncoverable statement
 $t->app->minion->add_task(
-    some_random_task => sub {
-        my ($job, @args) = @_;
-        $job->finish({pid => $$, args => \@args});
-    });
+    # uncoverable statement count:2
+    # uncoverable statement count:3
+    # uncoverable statement count:4
+    # uncoverable statement count:5
+    some_random_task => sub ($job, @args) { $job->finish({pid => $$, args => \@args}) });
 
 # Gru retry task
+# uncoverable statement
 $t->app->minion->add_task(
-    gru_retry_task => sub {
-        my ($job, @args) = @_;
+    # uncoverable statement
+    # uncoverable statement count:2
+    # uncoverable statement count:3
+    gru_retry_task => sub ($job, @args) {
+        # uncoverable statement
         return $job->retry({delay => 30})
-          unless my $guard = $job->minion->guard('limit_gru_retry_task', 3600);
+          unless my $guard = $job->minion->guard('limit_gru_retry_task', ONE_HOUR);
     });
 
 # Gru task that reached failed/finished manually
+# uncoverable statement
 $t->app->minion->add_task(
-    gru_manual_task => sub {
-        my ($job, $todo) = @_;
-        if ($todo eq 'fail') {
-            $job->fail('Manual fail');
-        }
-        elsif ($todo eq 'finish') {
-            $job->finish('Manual finish');
-        }
-        elsif ($todo eq 'die') {
-            warn 'About to throw';
-            die 'Thrown fail';
-        }
+    # uncoverable statement
+    # uncoverable statement count:2
+    # uncoverable statement count:3
+    gru_manual_task => sub ($job, $todo) {
+        return $job->fail('Manual fail') if $todo eq 'fail';      # uncoverable statement
+        $job->finish('Manual finish')    if $todo eq 'finish';    # uncoverable statement
+        return undef unless $todo eq 'die';                       # uncoverable statement
+        warn 'About to throw';                                    # uncoverable statement
+        die 'Thrown fail';                                        # uncoverable statement
     });
 
 # list initially existing assets
@@ -392,7 +398,7 @@ sub create_temp_job_log_file {
 
 subtest 'limit_results_and_logs gru task cleans up logs' => sub {
     my $job = $t->app->schema->resultset('Jobs')->find(99937);
-    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 3600 * 24 * 12, 'UTC')});
+    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - ONE_DAY * 12, 'UTC')});
     $job->group->update({"keep_logs_in_days" => 5});
     my $filename = create_temp_job_log_file($job->result_dir);
     run_gru_job($t->app, 'limit_results_and_logs');
@@ -421,39 +427,63 @@ subtest 'human readable size' => sub {
 };
 
 subtest 'labeled jobs considered important' => sub {
-    my $job = $t->app->schema->resultset('Jobs')->find(99938);
-    # but gets cleaned after important limit - change finished to 12 days ago
-    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 3600 * 24 * 12, 'UTC')});
-    $job->group->update({"keep_logs_in_days"           => 5});
-    $job->group->update({"keep_important_logs_in_days" => 20});
+    my $minion = $app->minion;
+    is $minion->jobs({tasks => ['archive_job_results']})->total, 0, 'no archiving jobs enqueued so far';
+
+    # create important job which was finished 12 days ago
+    my $job = $app->schema->resultset('Jobs')->find(99938);
+    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - ONE_DAY * 12, 'UTC')});
+    $job->group->update({keep_logs_in_days => 5, keep_important_logs_in_days => 20});
     my $filename = create_temp_job_log_file($job->result_dir);
-    my $user     = $t->app->schema->resultset('Users')->find({username => 'system'});
+    my $user     = $app->schema->resultset('Users')->find({username => 'system'});
     $job->comments->create({text => 'label:linked from test.domain', user_id => $user->id});
-    run_gru_job($t->app, 'limit_results_and_logs');
-    ok(-e $filename, 'file did not get cleaned');
-    # but gets cleaned after important limit - change finished to 22 days ago
-    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - 3600 * 24 * 22, 'UTC')});
-    run_gru_job($t->app, 'limit_results_and_logs');
-    ok(!-e $filename, 'file got cleaned');
+
+    run_gru_job($app, 'limit_results_and_logs');
+    ok -e $filename, 'results of important job preserved if only exceeding normal retention period';
+    $job->discard_changes;
+    is $job->archived, 0, 'job not archived yet';
+
+    # assume archiving is enabled
+    $app->config->{archiving}->{archive_preserved_important_jobs} = 1;
+    run_gru_job($app, 'limit_results_and_logs');
+    perform_minion_jobs($t->app->minion);
+    my $minion_jobs = $minion->jobs({tasks => ['archive_job_results']});
+    if (is $minion_jobs->total, 1, 'archiving job enqueued') {
+        my $archiving_job = $minion_jobs->next;
+        my $expected_archive_path
+          = 't/data/openqa/archive/testresults/00099/00099938-opensuse-Factory-DVD-x86_64-Build0048-doc';
+        is_deeply $archiving_job->{args}, [99938], 'archiving job is for right openQA job'
+          or diag explain $archiving_job->{args};
+        is $archiving_job->{state}, 'finished', 'archiving job succeeded';
+        is $archiving_job->{notes}->{archived_path}, $expected_archive_path, 'archive path noted';
+        $job->discard_changes;
+        is $job->archived, 1, 'job flagged as archived';
+        my $new_result_dir = $job->result_dir;
+        is $new_result_dir, $expected_archive_path, 'archive path considered new result dir';
+        $filename = path($new_result_dir, path($filename)->basename);
+        ok -e $filename, 'results exist under archive path';
+    }
+
+    # assume job was finished 22 days ago
+    $job->update({t_finished => time2str('%Y-%m-%d %H:%M:%S', time - ONE_DAY * 22, 'UTC')});
+    run_gru_job($app, 'limit_results_and_logs');
+    ok !-e $filename, 'results of important job cleaned up if exceeding retention period for important jobs';
 };
 
 subtest 'Non-Gru task' => sub {
     my $id = $t->app->minion->enqueue(some_random_task => [23]);
     ok defined $id, 'Job enqueued';
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     is $t->app->minion->job($id)->info->{state}, 'finished', 'job is finished';
-    isnt $t->app->minion->job($id)->info->{result}{pid}, $$, 'job was processed in a different process';
     is_deeply $t->app->minion->job($id)->info->{result}{args}, [23], 'arguments have been passed along';
 
     my $id2 = $t->app->minion->enqueue(some_random_task => [24, 25]);
     my $id3 = $t->app->minion->enqueue(some_random_task => [26]);
     ok defined $id2, 'Job enqueued';
     ok defined $id3, 'Job enqueued';
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     is $t->app->minion->job($id2)->info->{state}, 'finished', 'job is finished';
     is $t->app->minion->job($id3)->info->{state}, 'finished', 'job is finished';
-    isnt $t->app->minion->job($id2)->info->{result}{pid},       $$, 'job was processed in a different process';
-    isnt $t->app->minion->job($id3)->info->{result}{pid},       $$, 'job was processed in a different process';
     is_deeply $t->app->minion->job($id2)->info->{result}{args}, [24, 25], 'arguments have been passed along';
     is_deeply $t->app->minion->job($id3)->info->{result}{args}, [26], 'arguments have been passed along';
 };
@@ -470,30 +500,30 @@ subtest 'Gru tasks limit' => sub {
 
     is $t->app->minion->backend->list_jobs(0, undef, {tasks => ['limit_assets'], states => ['inactive']})->{total}, 2;
 
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     $id = $t->app->gru->enqueue(limit_assets => [] => {priority => 10, limit => 2});
     ok defined $id, 'task is scheduled';
     $id = $t->app->gru->enqueue(limit_assets => [] => {priority => 10, limit => 2});
     ok defined $id, 'task is scheduled';
     $res = $t->app->gru->enqueue(limit_assets => [] => {priority => 10, limit => 2});
     is $res, undef, 'Other tasks is not scheduled anymore';
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
 };
 
 subtest 'Gru tasks TTL' => sub {
     $t->app->minion->reset;
     my $job_id = $t->app->gru->enqueue(limit_assets => [] => {priority => 10, ttl => 0})->{minion_id};
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     ok !$t->app->minion->job($job_id), 'job has expired';
 
     $job_id = $t->app->gru->enqueue(limit_assets => [] => {priority => 10})->{minion_id};
     ok !$t->app->minion->job($job_id)->info->{expires}, 'job will not expire at all';
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     my $result = $t->app->minion->job($job_id)->info->{result};
 
     $job_id = $t->app->gru->enqueue(limit_assets => [] => {priority => 10, ttl => 30})->{minion_id};
     ok $t->app->minion->job($job_id)->info->{expires}, 'job will expire soon';
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     $result = $t->app->minion->job($job_id)->info->{result};
 
     # Depending on logging options, gru task output can differ
@@ -502,7 +532,7 @@ subtest 'Gru tasks TTL' => sub {
 
     my @ids;
     push @ids, $t->app->gru->enqueue(limit_assets => [] => {priority => 10, ttl => 0})->{minion_id};
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     ok !$t->app->minion->job($_), 'job has expired' for @ids;
 
     $result = $t->app->gru->enqueue_limit_assets;
@@ -517,16 +547,16 @@ subtest 'Gru tasks TTL' => sub {
 
 subtest 'Gru tasks retry' => sub {
     my $ids   = $t->app->gru->enqueue('gru_retry_task');
-    my $guard = $t->app->minion->guard('limit_gru_retry_task', 3600);
+    my $guard = $t->app->minion->guard('limit_gru_retry_task', ONE_HOUR);
     ok $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'inactive', 'minion job is inactive';
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
 
     ok $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task still exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'inactive', 'minion job is still inactive';
     $t->app->minion->job($ids->{minion_id})->retry({delay => 0});
     undef $guard;
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
 
     ok !$schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task no longer exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'finished', 'minion job is finished';
@@ -539,7 +569,7 @@ subtest 'Gru manual task' => sub {
     my $ids = $t->app->gru->enqueue('gru_manual_task', ['fail']);
     ok $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'inactive', 'minion job is inactive';
-    combined_like { $t->app->minion->perform_jobs } qr/Gru job error: Manual fail/, 'manual fail';
+    combined_like { perform_minion_jobs($t->app->minion) } qr/Gru job error: Manual fail/, 'manual fail';
     ok !$schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task no longer exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state},  'failed',      'minion job is failed';
     is $t->app->minion->job($ids->{minion_id})->info->{result}, 'Manual fail', 'minion job has the right result';
@@ -547,7 +577,7 @@ subtest 'Gru manual task' => sub {
     $ids = $t->app->gru->enqueue('gru_manual_task', ['finish']);
     ok $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'inactive', 'minion job is inactive';
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     ok !$schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task no longer exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state},  'finished',      'minion job is finished';
     is $t->app->minion->job($ids->{minion_id})->info->{result}, 'Manual finish', 'minion job has the right result';
@@ -555,7 +585,7 @@ subtest 'Gru manual task' => sub {
     $ids = $t->app->gru->enqueue('gru_manual_task', ['die']);
     ok $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'inactive', 'minion job is inactive';
-    combined_like { $t->app->minion->perform_jobs } qr/About to throw/, 'minion job has the right output';
+    like warning { perform_minion_jobs($t->app->minion) }, qr/About to throw/, 'minion job has the right output';
     ok !$schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task no longer exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'failed', 'minion job is finished';
     like $t->app->minion->job($ids->{minion_id})->info->{result}, qr/Thrown fail/,
@@ -570,24 +600,25 @@ subtest 'download assets with correct permissions' => sub {
     # be sure the asset does not exist from a previous test run
     unlink($assetpath);
 
-    combined_like { run_gru_job($t->app, 'download_asset' => [$assetsource, $assetpath, 0]) }
+    my $info;
+    combined_like { $info = run_gru_job($t->app, 'download_asset' => [$assetsource, $assetpath, 0]) }
     qr/Host "$local_domain" .* is not on the passlist \(which is empty\)/, 'download refused if passlist empty';
+    is $info->{state}, 'failed', 'job failed if download refused (1)';
 
     $t->app->config->{global}->{download_domains} = 'foo';
-    combined_like { run_gru_job($t->app, 'download_asset' => [$assetsource, $assetpath, 0]) }
+    combined_like { $info = run_gru_job($t->app, 'download_asset' => [$assetsource, $assetpath, 0]) }
     qr/Host "$local_domain" .* is not on the passlist/, 'download refused if host not on passlist';
+    is $info->{state}, 'failed', 'job failed if download refused (2)';
 
     $t->app->config->{global}->{download_domains} .= " $local_domain";
     combined_like { run_gru_job($t->app, 'download_asset' => [$assetsource . '.foo', $assetpath, 0]) }
     qr/failed: 404 Not Found/, 'error code logged';
 
     my $does_not_exist = $assetsource . '.does_not_exist';
-    my $info;
     combined_like { $info = run_gru_job($t->app, 'download_asset' => [$does_not_exist, $assetpath, 0]) }
-    qr/failed: 404 Not Found.*Downloading "$does_not_exist" failed/s, 'everything logged';
-    is $info->{state}, 'failed', 'job failed';
-    like $info->{result}, qr/Downloading "$does_not_exist" failed because of too many download errors/,
-      'reason provided';
+    qr/.*Downloading "$does_not_exist".*failed: 404 Not Found/s, 'everything logged';
+    is $info->{state},    'finished', 'job still considered finished (likely user just provided wrong URL)';
+    like $info->{result}, qr/Downloading "$does_not_exist" failed with: /, 'reason provided';
 
     combined_like { run_gru_job($t->app, 'download_asset' => [$assetsource, $assetpath, 0]) }
     qr/Download of "$assetpath" successful/, 'download logged';
@@ -618,8 +649,9 @@ subtest 'download assets with correct permissions' => sub {
     };
     subtest 'symlink creation fails' => sub {
         path($destinations[$_])->remove for (0, 2);
-        combined_like { run_gru_job($t->app, 'download_asset' => [$assetsource, \@destinations, 0]) }
+        combined_like { $info = run_gru_job($t->app, 'download_asset' => [$assetsource, \@destinations, 0]) }
         qr/Cannot create symlink from $destinations[0] to .*: File exists/, 'cannot create symlink';
+        is $info->{state}, 'failed', 'job failed due to symlinking problem';
     };
     path($_)->remove for @destinations;
 };
@@ -662,7 +694,7 @@ subtest 'finalize job results' => sub {
         is($job->result,       FAILED,    'job result is failed');
         is($child_job->state,  CANCELLED, 'child job cancelled');
         is($child_job->result, SKIPPED,   'child job skipped');
-        $minion->perform_jobs;
+        perform_minion_jobs($t->app->minion);
         my $minion_jobs = $minion->jobs({tasks => ['finalize_job_results']});
         is($minion_jobs->total, 1, 'one minion job created; no minion job for skipped child job created')
           and is($minion_jobs->next->{state}, 'finished', 'the minion job succeeded');

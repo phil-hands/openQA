@@ -1,4 +1,4 @@
-# Copyright (C) 2014-2019 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -18,6 +18,7 @@ package OpenQA::Schema::ResultSet::Assets;
 use strict;
 use warnings;
 
+use Mojo::Base -strict, -signatures;
 use base 'DBIx::Class::ResultSet';
 
 use DBIx::Class::Timestamps 'now';
@@ -37,35 +38,22 @@ sub status_cache_file {
 }
 
 # called when uploading an asset or finding one in scanning
-sub register {
-    my ($self, $type, $name, $missingok) = @_;
-    $missingok //= 0;
-
-    unless ($name) {
-        log_warning "attempt to register asset with empty name";
-        return;
-    }
-    unless (grep /^$type$/, TYPES) {
-        log_warning "asset type '$type' invalid";
-        return;
-    }
-    unless (locate_asset $type, $name, mustexist => 1) {
-        return 'missing' if ($missingok);
-
+sub register ($self, $type, $name, $options = {}) {
+    unless ($name)                 { log_warning 'attempt to register asset with empty name'; return undef }
+    unless (grep /^$type$/, TYPES) { log_warning "asset type '$type' invalid";                return undef }
+    if     (!$options->{missing_ok} && !locate_asset $type, $name, mustexist => 1) {
         log_warning "no file found for asset '$name' type '$type'";
-        return;
+        return undef;
     }
-
-    return $self->result_source->schema->txn_do(
+    $self->result_source->schema->txn_do(
         sub {
-            return $self->find_or_create(
-                {
-                    type => $type,
-                    name => $name,
-                },
-                {
-                    key => 'assets_type_name',
-                });
+            my $asset = $self->find_or_create({type => $type, name => $name}, {key => 'assets_type_name'});
+            if (my $created_by = $options->{created_by}) {
+                my $scope = $options->{scope} // 'public';
+                $created_by->jobs_assets->create({asset_id => $asset->id, created_by => 1});
+                $created_by->reevaluate_children_asset_settings if $scope ne 'public';
+            }
+            return $asset;
         });
 }
 
@@ -285,10 +273,9 @@ END_SQL
 
                     # check whether the data from the 2nd select is inconsistent with what we've got from the 1st
                     # (pure pre-caution, shouldn't happen due to the transaction)
-                    if ($fail_on_inconsistent_status && $res_max_job && ($res_max_job > $init_max_job)) {
-                        die "$asset_info->{name} was scheduled during cleanup"
-                          . " (max job initially $init_max_job, now $res_max_job)";
-                    }
+                    die "$asset_info->{name} was scheduled during cleanup"
+                      . " (max job initially $init_max_job, now $res_max_job)"
+                      if $fail_on_inconsistent_status && $res_max_job && ($res_max_job > $init_max_job);
                 }
             }
         });
@@ -370,6 +357,18 @@ END_SQL
     }
 
     return {assets => \@assets, groups => \%group_info, parents => \%parent_group_info};
+}
+
+sub untie_asset_from_job_and_unregister_if_unused ($self, $type, $name, $job) {
+    $self->result_source->schema->txn_do(
+        sub {
+            my %query = (type => $type, name => $name, fixed => 0);
+            return 0 unless my $asset = $self->find(\%query, {join => 'jobs_assets'});
+            $job->jobs_assets->search({asset_id => $asset->id})->delete;
+            return 0 if defined $asset->size || $asset->jobs->count;
+            $asset->delete;
+            return 1;
+        });
 }
 
 1;

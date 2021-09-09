@@ -5,33 +5,36 @@ STABILITY_TEST ?= 0
 # KEEP_DB: Set to 1 to keep the test database process spawned for tests. This
 # can help with faster re-runs of tests but might yield inconsistent results
 KEEP_DB ?= 0
-# TESTS: Specify individual test files in a space separated lists. As the user
-# most likely wants only the mentioned tests to be executed and no other
-# checks this implicitly disables CHECKSTYLE
 # CONTAINER_TEST: Set to 0 to exclude container tests needing a container
 # runtime environment
 CONTAINER_TEST ?= 1
+# TESTS: Specify individual test files in a space separated lists. As the user
+# most likely wants only the mentioned tests to be executed and no other
+# checks this implicitly disables CHECKSTYLE
 TESTS ?=
+# EXTRA_PROVE_ARGS: Additional prove arguments to pass
+EXTRA_PROVE_ARGS ?=
 ifeq ($(TESTS),)
-PROVE_ARGS ?= --trap -r -v
+PROVE_ARGS ?= --trap -r ${EXTRA_PROVE_ARGS}
 else
 CHECKSTYLE ?= 0
-PROVE_ARGS ?= --trap -v $(TESTS)
+PROVE_ARGS ?= --trap ${EXTRA_PROVE_ARGS} $(TESTS)
 endif
 PROVE_LIB_ARGS ?= -l
 CONTAINER_IMG ?= openqa:latest
-# python-jsbeautifier does not support reading config file
-# https://github.com/beautify-web/js-beautify/issues/1074
-# Note: Keep in sync with .jsbeautifyrc
-JSBEAUTIFIER_OPTS ?= --brace-style=collapse,preserve-inline
 TEST_PG_PATH ?= /dev/shm/tpg
 # TIMEOUT_M: Timeout for one retry of tests in minutes
 TIMEOUT_M ?= 60
-TIMEOUT_RETRIES ?= $$((${TIMEOUT_M} * (${RETRY} + 1) ))m
+ifeq ($(CI),)
+SCALE_FACTOR ?= 1
+else
+SCALE_FACTOR ?= 2
+endif
+TIMEOUT_RETRIES ?= $$((${TIMEOUT_M} * ${SCALE_FACTOR} * (${RETRY} + 1) ))m
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(patsubst %/,%,$(dir $(mkfile_path)))
 docker_env_file := "$(current_dir)/docker.env"
-unstables := $(shell cat .circleci/unstable_tests.txt | tr '\n' :)
+unstables := $(shell cat tools/unstable_tests.txt | tr '\n' :)
 
 # tests need these environment variables to be unset
 OPENQA_BASEDIR =
@@ -110,7 +113,11 @@ install-generic:
 
 	cp -Ra dbicdh "$(DESTDIR)"/usr/share/openqa/dbicdh
 
-# Additional services which have a strong dependency on openSUSE and do not
+	install -d -m 755 "$(DESTDIR)"/usr/lib/sysusers.d/
+	install    -m 644 usr/lib/sysusers.d/openQA-worker.conf "$(DESTDIR)"/usr/lib/sysusers.d/
+	install    -m 644 usr/lib/sysusers.d/geekotest.conf "$(DESTDIR)"/usr/lib/sysusers.d/
+
+# Additional services which have a strong dependency on SUSE/openSUSE and do not
 # make sense for other distributions
 .PHONY: install-opensuse
 install-opensuse: install-generic
@@ -118,7 +125,8 @@ install-opensuse: install-generic
 		install -m 644 $$i "$(DESTDIR)"/usr/lib/systemd/system ;\
 	done
 
-os := $(shell grep opensuse /etc/os-release)
+# Match suse and opensuse
+os := $(shell grep suse /etc/os-release)
 .PHONY: install
 ifeq ($(os),)
 install: install-generic
@@ -136,7 +144,9 @@ else
 test: test-checkstyle-standalone test-with-database
 endif
 ifeq ($(CONTAINER_TEST),1)
+ifeq ($(TESTS),)
 test: test-containers-compose
+endif
 endif
 endif
 
@@ -159,10 +169,10 @@ test-ui:
 test-api:
 	$(MAKE) test-with-database TIMEOUT_M=20 PROVE_ARGS="$$HARNESS t/api/*.t" GLOBIGNORE="t/*tidy*:t/*compile*:$(unstables)"
 
-# put unstable tests in unstable_tests.txt and uncomment in circle CI to handle unstables with retries
+# put unstable tests in tools/unstable_tests.txt and uncomment in circle CI config to handle unstables with retries
 .PHONY: test-unstable
 test-unstable:
-	for f in $$(cat .circleci/unstable_tests.txt); do $(MAKE) test-with-database TIMEOUT_M=5 PROVE_ARGS="$$HARNESS $$f" RETRY=5 || exit; done
+	for f in $$(cat tools/unstable_tests.txt); do $(MAKE) test-with-database TIMEOUT_M=10 PROVE_ARGS="$$HARNESS $$f" RETRY=5 || exit; done
 
 .PHONY: test-fullstack
 test-fullstack:
@@ -170,7 +180,7 @@ test-fullstack:
 
 .PHONY: test-fullstack-unstable
 test-fullstack-unstable:
-	$(MAKE) test-with-database SCHEDULER_FULLSTACK=1 SCALABILITY_TEST=1 DEVELOPER_FULLSTACK=1 TIMEOUT_M=15 PROVE_ARGS="$$HARNESS t/05-scheduler-full.t t/33-developer_mode.t t/43-scheduling-and-worker-scalability.t" RETRY=3
+	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=15 PROVE_ARGS="$$HARNESS t/05-scheduler-full.t t/33-developer_mode.t" RETRY=5
 
 # we have apparently-redundant -I args in PERL5OPT here because Docker
 # only works with one and Fedora's build system only works with the other
@@ -205,6 +215,7 @@ endif
 
 .PHONY: coverage
 coverage:
+	export DEVEL_COVER_DB_FORMAT=JSON;\
 	COVERAGE=1 cover ${COVER_OPTS} -test
 
 COVER_REPORT_OPTS ?= -select_re '^(lib|script|t)/'
@@ -255,7 +266,7 @@ prepare-and-launch-docker-to-run-tests-within: docker-test-build launch-docker-t
 
 # all additional checks not called by prove
 .PHONY: test-checkstyle-standalone
-test-checkstyle-standalone: test-shellcheck test-yaml test-critic test-js-style
+test-checkstyle-standalone: test-shellcheck test-yaml test-critic
 ifeq ($(CONTAINER_TEST),1)
 test-checkstyle-standalone: test-check-containers
 endif
@@ -271,7 +282,7 @@ test-tidy-compile:
 .PHONY: test-shellcheck
 test-shellcheck:
 	@which shellcheck >/dev/null 2>&1 || (echo "Command 'shellcheck' not found, can not execute shell script checks" && false)
-	shellcheck -x $$(file --mime-type script/* t/* container/worker/*.sh | sed -n 's/^\(.*\):.*text\/x-shellscript.*$$/\1/p')
+	shellcheck -x $$(file --mime-type script/* t/* container/worker/*.sh tools/* | sed -n 's/^\(.*\):.*text\/x-shellscript.*$$/\1/p')
 
 .PHONY: test-yaml
 test-yaml:
@@ -279,27 +290,20 @@ test-yaml:
 	@# Fall back to find if there is no git, e.g. in package builds
 	yamllint --strict $$((git ls-files "*.yml" "*.yaml" 2>/dev/null || find -name '*.y*ml') | grep -v ^dbicdh)
 
-.PHONY: check-js-beautify
-check-js-beautify:
-	@which js-beautify >/dev/null 2>&1 || (echo "Command 'js-beautify' not found, can not execute JavaScript beautifier" && false)
-
-.PHONY: test-js-style
-test-js-style: check-js-beautify
-	@# Fall back to find if there is no git, e.g. in package builds
-	for i in $$(git ls-files "*.js" 2>/dev/null || find assets/javascripts/ -name '*.js'); do js-beautify ${JSBEAUTIFIER_OPTS} $$i > $$i.new; diff $$i $$i.new && rm $$i.new || exit 1; done
-
-.PHONY: tidy-js
-tidy-js: check-js-beautify
-	@# Fall back to find if there is no git, e.g. in package builds
-	for i in $$(git ls-files "*.js" 2>/dev/null || find assets/javascripts/ -name '*.js'); do js-beautify ${JSBEAUTIFIER_OPTS} $$i > $$i.new; mv $$i.new $$i; done
-
 .PHONY: test-check-containers
 test-check-containers:
 	tools/static_check_containers
 
-.PHONY: tidy
-tidy: tidy-js
+.PHONY: tidy-js
+tidy-js:
+	tools/js-tidy
+
+.PHONY: tidy-perl
+tidy-perl:
 	tools/tidy
+
+.PHONY: tidy
+tidy: tidy-js tidy-perl
 
 .PHONY: test-containers-compose
 test-containers-compose:

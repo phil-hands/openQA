@@ -19,11 +19,14 @@ use Test::Most;
 use utf8;
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
+use Mojo::Base -signatures;
 use File::Temp;
 use Test::Mojo;
 use Test::Output;
 use Test::Warnings ':report_warnings';
-use OpenQA::Test::TimeLimit '40';
+use Test::MockModule;
+use OpenQA::Test::TimeLimit '20';
+use OpenQA::Test::Utils 'mock_io_loop';
 use OpenQA::App;
 use OpenQA::Events;
 use OpenQA::File;
@@ -46,6 +49,9 @@ my $tempdir = tempdir("/tmp/$FindBin::Script-XXXX")->make_path;
 $ENV{OPENQA_BASEDIR} = $tempdir;
 note("OPENQA_BASEDIR: $tempdir");
 path($tempdir, '/openqa/testresults')->make_path;
+my $share_dir = path($tempdir, 'openqa/share')->make_path;
+symlink "$FindBin::Bin/../data/openqa/share/factory", "$share_dir/factory";
+
 # ensure job events are logged
 $ENV{OPENQA_CONFIG} = $tempdir;
 my @data = ("[audit]\n", "blocklist = job_grab\n");
@@ -53,7 +59,7 @@ $tempdir->child("openqa.ini")->spurt(@data);
 
 my $chunk_size = 10000000;
 
-OpenQA::Events->singleton->on('chunk_upload.end' => sub { Devel::Cover::report() if Devel::Cover->can('report'); });
+my $io_loop_mock = mock_io_loop(subprocess => 1);
 
 sub calculate_file_md5($) {
     my ($file) = @_;
@@ -70,10 +76,13 @@ my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
 is($t->app->config->{audit}->{blocklist}, 'job_grab', 'blocklist updated');
 
 my $schema     = $t->app->schema;
+my $assets     = $schema->resultset('Assets');
 my $jobs       = $schema->resultset('Jobs');
 my $products   = $schema->resultset('Products');
 my $testsuites = $schema->resultset('TestSuites');
 
+$jobs->find($_)->register_assets_from_settings for 99939, 99946;
+$assets->find({type => 'iso', name => 'openSUSE-Factory-staging_e-x86_64-Build87.5011-Media.iso'})->update({size => 0});
 $jobs->find(99963)->update({assigned_worker_id => 1});
 
 $t->get_ok('/api/v1/jobs')->status_is(200);
@@ -194,7 +203,7 @@ subtest 'job overview' => sub {
     );
 
     # overview for build 0048
-    $query->query(build => '0048',);
+    $query->query(build => '0048');
     $t->get_ok($query->path_query)->status_is(200);
     is_deeply(
         $t->tx->res->json,
@@ -214,6 +223,14 @@ subtest 'job overview' => sub {
         ],
         'latest build present'
     );
+
+    subtest 'limit parameter' => sub {
+        $query->query(build => '0048', limit => 1);
+        $t->get_ok($query->path_query)->status_is(200);
+        is(scalar(@{$t->tx->res->json}), 1, 'Expect only one job entry');
+        $t->json_is('/0/id' => 99939, 'Check correct order');
+    };
+
 };
 
 $schema->txn_begin;
@@ -221,12 +238,14 @@ $schema->txn_begin;
 subtest 'restart jobs, error handling' => sub {
     $t->post_ok('/api/v1/jobs/restart', form => {jobs => [99981, 99963, 99946, 99945, 99927, 99939]})->status_is(200);
     $t->json_is(
-        '/errors' => [
-            "Job 99939 misses the following mandatory assets: iso/openSUSE-Factory-DVD-x86_64-Build0048-Media.iso\n"
-              . 'Ensure to provide mandatory assets and/or force retriggering if necessary.',
-            'Specified job 99945 has already been cloned as 99946'
-        ],
-        'error for missing asset of 99939, error for 99945 being already cloned'
+        '/errors/0' =>
+          "Job 99939 misses the following mandatory assets: iso/openSUSE-Factory-DVD-x86_64-Build0048-Media.iso\n"
+          . 'Ensure to provide mandatory assets and/or force retriggering if necessary.',
+        'error for missing asset of 99939'
+    );
+    $t->json_is(
+        '/errors/1' => 'Specified job 99945 has already been cloned as 99946',
+        'error for 99945 being already cloned'
     );
 };
 
@@ -263,10 +282,9 @@ subtest 'restart jobs (forced)' => sub {
     $t->post_ok('/api/v1/jobs/restart?force=1', form => {jobs => [99981, 99963, 99946, 99945, 99927, 99939]})
       ->status_is(200);
     $t->json_is(
-        '/warnings' => [
-                "Job 99939 misses the following mandatory assets: iso/openSUSE-Factory-DVD-x86_64-Build0048-Media.iso\n"
-              . 'Ensure to provide mandatory assets and/or force retriggering if necessary.'
-        ],
+        '/warnings/0' =>
+          "Job 99939 misses the following mandatory assets: iso/openSUSE-Factory-DVD-x86_64-Build0048-Media.iso\n"
+          . 'Ensure to provide mandatory assets and/or force retriggering if necessary.',
         'warning for missing asset'
     );
 
@@ -466,7 +484,18 @@ subtest 'Failed upload, private assets' => sub {
     $t->get_ok('/api/v1/assets/hdd/00099963-hdd_image.qcow2')->status_is(404);
 };
 
-subtest 'Chunks uploaded correctly' => sub {
+sub _asset_names ($job) {
+    [sort map { $_->asset->name } $job->jobs_assets->all]
+}
+
+subtest 'Chunks uploaded correctly, private asset registered and associated with jobs' => sub {
+    # setup a child job which is expected to require the private asset
+    my $parent_job = $jobs->find(99963);
+    my $child_job  = $jobs->create({TEST => 'child', settings => [{key => 'HDD_1', value => 'hdd_image.qcow2'}]});
+    my %dependency = (child_job_id => $child_job->id, dependency => OpenQA::JobDependencies::Constants::CHAINED);
+    $parent_job->children->create(\%dependency);
+    $parent_job->jobs_assets->search({created_by => 1})->delete;    # cleanup assets from previous subtests
+
     my $pieces = OpenQA::File->new(file => Mojo::File->new($filename))->split($chunk_size);
     ok(!-d $chunkdir, 'Chunk directory empty');
     my $sum = OpenQA::File->file_digest($filename);
@@ -481,11 +510,16 @@ subtest 'Chunks uploaded correctly' => sub {
             ok(-d $chunkdir, 'Chunk directory exists') unless $_->is_last;
         });
 
-    ok(!-d $chunkdir, 'Chunk directory should not exist anymore');
-    ok(-e $rp,        'Asset exists after upload');
+    ok !-d $chunkdir, 'chunk directory should not exist anymore';
+    ok -e "$tempdir/openqa/share/factory/hdd/00099963-hdd_image.qcow2", 'private asset exists after upload';
 
+    # check whether private asset is registered and correctly associated with the parent and child job
+    my @expected_assets = (qw(00099963-hdd_image.qcow2 openSUSE-13.1-DVD-x86_64-Build0091-Media.iso));
     $t->get_ok('/api/v1/assets/hdd/00099963-hdd_image.qcow2')->status_is(200)
-      ->json_is('/name' => '00099963-hdd_image.qcow2');
+      ->json_is('/name' => '00099963-hdd_image.qcow2', 'asset is registered');
+    is_deeply _asset_names($parent_job), \@expected_assets, 'asset associated with job it has been created by';
+    pop @expected_assets;    # child only requires hdd
+    is_deeply _asset_names($child_job), \@expected_assets, 'asset associated with job supposed to use it';
 };
 
 subtest 'Tiny chunks, private assets' => sub {
@@ -596,7 +630,7 @@ subtest 'update job status' => sub {
                         bar_module => {result => 'none'},                            # supposed to be ignored
                     },
                 }});
-        $t->post_ok(@post_args)->status_is(400, 'result upload returns error code if module does not exist');
+        $t->post_ok(@post_args)->status_is(490, 'result upload returns error code if module does not exist');
         is $t->tx->res->json->{error}, 'Failed modules: bar_module', 'error specifies problematic module';
 
         $job->modules->create({name => 'bar_module', category => 'selftests', script => 'bar_module.pm'});
@@ -674,6 +708,8 @@ subtest 'json representation of group overview (actually not part of the API)' =
         $b48,
         {
             reviewed        => '',
+            commented       => '',
+            comments        => 0,
             softfailed      => 1,
             failed          => 1,
             labeled         => 0,
@@ -713,6 +749,8 @@ is_deeply(
         unfinished      => 0,
         skipped         => 0,
         reviewed        => '1',
+        commented       => '1',
+        comments        => 0,
         softfailed      => 0,
         all_passed      => 1,
         version         => '13.1',
@@ -893,8 +931,8 @@ subtest 'job details' => sub {
 
     $t->get_ok('/api/v1/jobs/99963/details')->status_is(200);
     $t->json_has('/job/testresults/0', 'Test details are there');
-    $t->json_is('/job/assets/hdd/0',           => 'hdd_image.qcow2', 'Job has hdd_image.qcow2 as asset');
-    $t->json_is('/job/testresults/0/category', => 'installation',    'Job category is "installation"');
+    $t->json_is('/job/assets/hdd/0', => '00099963-hdd_image.qcow2', 'Job has private hdd_image.qcow2 as asset');
+    $t->json_is('/job/testresults/0/category', => 'installation',   'Job category is "installation"');
 
     $t->get_ok('/api/v1/jobs/99946/details')->status_is(200);
     $t->json_has('/job/testresults/0', 'Test details are there');
@@ -1053,36 +1091,35 @@ subtest 'Parse extra tests results - LTP' => sub {
             $t->post_ok(
                 '/api/v1/jobs/99963/artefact' => form => {
                     file       => {file => $junit, filename => $fname},
-                    type       => "JUnit",
+                    type       => 'JUnit',
                     extra_test => 1,
                     script     => 'test'
-                })->status_is(200, 'request succeeded');
+                })->status_is(400, 'request considered invalid (JUnit)');
         },
         qr/Failed parsing data JUnit for job 99963: Failed parsing XML at/,
         'XML parsing error logged'
     );
-
-    ok $t->tx->res->content->body_contains('FAILED'), 'request FAILED' or return diag explain $t->tx->res->content;
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (JUnit)')
+      or diag explain $t->tx->res->content;
 
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
             file       => {file => $junit, filename => $fname},
-            type       => "foo",
+            type       => 'foo',
             extra_test => 1,
             script     => 'test'
-        })->status_is(200);
-    ok $t->tx->res->content->body_contains('FAILED'), 'request FAILED';
+        })->status_is(400, 'request considered invalid (foo)');
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)') or diag explain $t->tx->res->content;
     ok !-e path($basedir, 'details-LTP_syscalls_accept01.json'), 'detail from LTP was NOT written';
 
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
             file       => {file => $junit, filename => $fname},
-            type       => "LTP",
+            type       => 'LTP',
             extra_test => 1,
             script     => 'test'
-        })->status_is(200);
-    ok $t->tx->res->content->body_contains('OK'), 'request went fine';
-    ok !$t->tx->res->content->body_contains('FAILED'), 'request went fine, really';
+        })->status_is(200, 'request went fine');
+    $t->content_is('OK', 'ok returned');
     ok !-e path($basedir, $fname), 'file was not uploaded';
 
     is $parser->tests->size, 4, 'Tests parsed correctly' or diag explain $parser->tests->size;
@@ -1101,31 +1138,30 @@ subtest 'Parse extra tests results - xunit' => sub {
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
             file       => {file => $junit, filename => $fname},
-            type       => "LTP",
+            type       => 'LTP',
             extra_test => 1,
             script     => 'test'
-        })->status_is(200);
-    ok $t->tx->res->content->body_contains('FAILED'), 'request FAILED';
+        })->status_is(400, 'request considered invalid (LTP)');
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (LTP)') or diag explain $t->tx->res->content;
 
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
             file       => {file => $junit, filename => $fname},
-            type       => "foo",
+            type       => 'foo',
             extra_test => 1,
             script     => 'test'
-        })->status_is(200);
-    ok $t->tx->res->content->body_contains('FAILED'), 'request FAILED';
+        })->status_is(400, 'request considered invalid (foo)');
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)') or diag explain $t->tx->res->content;
     ok !-e path($basedir, 'details-unkn.json'), 'detail from junit was NOT written';
 
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
             file       => {file => $junit, filename => $fname},
-            type       => "XUnit",
+            type       => 'XUnit',
             extra_test => 1,
             script     => 'test'
-        })->status_is(200);
-    ok $t->tx->res->content->body_contains('OK'), 'request went fine';
-    ok !$t->tx->res->content->body_contains('FAILED'), 'request went fine, really';
+        })->status_is(200, 'request went fine');
+    $t->content_is('OK', 'ok returned');
     ok !-e path($basedir, $fname), 'file was not uploaded';
 
     is $parser->tests->size, 11, 'Tests parsed correctly' or diag explain $parser->tests->size;
@@ -1144,11 +1180,11 @@ subtest 'Parse extra tests results - junit' => sub {
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
             file       => {file => $junit, filename => $fname},
-            type       => "foo",
+            type       => 'foo',
             extra_test => 1,
             script     => 'test'
-        })->status_is(200);
-    ok $t->tx->res->content->body_contains('FAILED'), 'request FAILED';
+        })->status_is(400, 'request considered invalid (foo)');
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)') or diag explain $t->tx->res->content;
     ok !-e path($basedir, 'details-1_running_upstream_tests.json'), 'detail from junit was NOT written';
 
     $t->post_ok(
@@ -1157,9 +1193,8 @@ subtest 'Parse extra tests results - junit' => sub {
             type       => "JUnit",
             extra_test => 1,
             script     => 'test'
-        })->status_is(200);
-    ok $t->tx->res->content->body_contains('OK'), 'request went fine';
-    ok !$t->tx->res->content->body_contains('FAILED'), 'request went fine, really';
+        })->status_is(200, 'request went fine');
+    $t->content_is('OK', 'ok returned');
     ok !-e path($basedir, $fname), 'file was not uploaded';
 
     ok $parser->tests->size > 2, 'Tests parsed correctly';
@@ -1216,15 +1251,26 @@ subtest 'marking job as done' => sub {
         $t->post_ok('/api/v1/jobs/99961/set_done?result=incomplete&reason=test&worker_id=1');
         $t->status_is(400, 'set_done with worker_id rejected if job no longer assigned');
         $t->json_like('/error', qr/Refusing.*because.*re-scheduled/, 'error message returned');
+
         $schema->txn_begin;
         $jobs->find(99961)->update({assigned_worker_id => 1});
         $t->post_ok('/api/v1/jobs/99961/set_done?result=incomplete&reason=test&worker_id=42');
         $t->status_is(400, 'set_done with worker_id rejected if job assigned to different worker');
         $t->json_like('/error', qr/Refusing.*because.*assigned to worker 1/, 'error message returned');
-        $t->post_ok('/api/v1/jobs/99961/set_done?result=incomplete&reason=test&worker_id=1');
+        $t->post_ok('/api/v1/jobs/99961/set_done?result=failed&reason=test&worker_id=1');
         $t->status_is(200, 'set_done accepted with correct worker_id');
-        is($jobs->find(99961)->clone_id, undef, 'job not cloned when reason does not match configured regex');
+        my $job = $jobs->find(99961);
+        is $job->clone_id, undef, 'job not cloned when reason does not match configured regex';
+        is $job->result, FAILED, 'result is failure (as passed via param)';
         $schema->txn_rollback;
+
+        $schema->txn_begin;
+        $t->post_ok('/api/v1/jobs/99961/set_done');
+        $job = $jobs->find(99961);
+        is $job->result, INCOMPLETE, 'result is incomplete (no modules and no reason explicitely specified)';
+        is $job->reason, 'no test modules scheduled/uploaded', 'reason for incomplete set';
+        $schema->txn_rollback;
+
         $t->post_ok(Mojo::URL->new('/api/v1/jobs/99961/set_done')->query(\%cache_failure_params));
         $t->status_is(200, 'set_done accepted without worker_id');
         $t->get_ok('/api/v1/jobs/99961')->status_is(200);

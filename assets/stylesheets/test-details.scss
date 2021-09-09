@@ -66,8 +66,8 @@ span.status .fa {
     padding-left: 1em;
 }
 .action.fa {
-    font-size: 90%;
-    color: #ccc !important;
+    color: $default-font-color !important;
+    opacity: .7;
 }
 div.flags {
     min-height: 1em;
@@ -89,7 +89,7 @@ div.flags {
 .state_running.fa, .state_uploading.fa {
     color: $color-state-running;
 }
-.far.module_failed { color: $color-failed; }
+.fa.module_failed { color: $color-failed; }
 .fa.module_none { color: $color-module-none; }
 .fa.module_passed { color: $color-module-passed !important; }
 .fa.module_softfailed { color: $color-softfailed; }
@@ -391,4 +391,40 @@ ul.modcategory {
 
 .pt-2-and-half {
     padding-top: 0.75rem !important;
+}
+
+#job-archived-badge {
+    font-size: 110%;
+    padding: 0.5rem 0.6rem;
+    margin-top: -1rem;
+    margin-bottom: -1rem;
+    margin-left: 0.25rem;
+}
+
+.resultfile-list {
+    li > .fa {
+        width: 1.2rem;
+        margin-right: 0.3rem;
+        text-align: center;
+    }
+    .fa-download {
+        opacity: 50%;
+        margin-left: 0.25rem;
+    }
+    .fa-download:hover {
+        opacity: inherit;
+    }
+}
+
+.test-result-overview-link {
+    position: relative;
+    top: -0.1em;
+    left: 0.2em;
+    font-size: 75%;
+    i {
+        color: $link-color;
+    }
+    i:hover {
+        color: $link-hover-color;
+    }
 }
