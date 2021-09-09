@@ -91,6 +91,13 @@
   /var/tmp/* rwk,
   owner /var/lib/openqa/share/tests/** rwl,
 
+  # Debian specific access to local assets
+  /usr/share/fonts/*/fork-awesome/* r,
+  /usr/share/fonts-fork-awesome/css/* r,
+  /usr/share/javascript/** r,
+  /usr/share/sass/bootstrap/** r,
+  /usr/share/nodejs/** r,
+
 
   profile /usr/bin/ssh {
     #include <abstractions/base>
