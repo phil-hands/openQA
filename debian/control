@@ -117,6 +117,7 @@ Build-Depends: debhelper (>= 10),
                libjs-codemirror,
                libjs-jquery,
                libjs-jquery-timeago,
+               libjs-popper.js,
 Standards-Version: 4.1.1
 Homepage: http://open.qa
 Vcs-Git: https://salsa.debian.org/debian/openqa.git
@@ -151,6 +152,7 @@ Depends: ${misc:Depends}, ${perl:Depends},
          libjs-codemirror,
          libjs-jquery,
          libjs-jquery-timeago,
+         libjs-popper.js,
 Recommends: apparmor-profiles, apparmor-utils,
             apache2, logrotate,
             libdbd-pg-perl,
