@@ -38,6 +38,8 @@ override_dh_auto_build:
 	sed -i -e 's%http://timeago.yarp.com/jquery.timeago.js%_debian/libjs-jquery-timeago/jquery.timeago.js%' assets/assetpack.def
 	ln -s /usr/share/nodejs/popper.js/dist assets/_debian/libjs-popper.js
 	sed -i -e 's%https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.js%_debian/libjs-popper.js/umd/popper.js%' assets/assetpack.def
+	ln -s /usr/lib/nodejs/jquery-ujs/src assets/_debian/node-jquery-ujs
+	sed -i -e 's%https://cdnjs.cloudflare.com/ajax/libs/jquery-ujs/1.2.1/rails.js%_debian/node-jquery-ujs/rails.js%' assets/assetpack.def
 	cp -v -r debian/missing-sources/d3js_4.13.0 assets/_debian/d3js_4.13.0
 	sed -i -e 's%https://d3js.org/d3.v4.js%_debian/d3js_4.13.0/d3.v4.js%' assets/assetpack.def
 	tar -xvz --transform='s%.*dist%assets/_debian/dagre-d3_0.5.0%' -f debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz dagre-d3-0.5.0/dist/dagre-d3.js
