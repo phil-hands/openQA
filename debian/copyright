@@ -27,6 +27,11 @@ Files: debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz
 Copyright: 2013 Chris Pettitt
 License: MIT
 
+Files: debian/missing-sources/anser_2.0.1/*
+       assets/_debian/anser_2.0.1/*
+Copyright: 2012-21 Ionică Bizău <bizauionica@gmail.com> (https://ionicabizau.net)
+License: MIT
+
 Files: debian/*
 Copyright: 2016 Hideki Yamane <henrich@debian.org>
            2017-2021 Philip Hands <phil@hands.com>

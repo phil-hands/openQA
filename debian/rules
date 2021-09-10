@@ -44,6 +44,8 @@ override_dh_auto_build:
 	sed -i -e 's%https://d3js.org/d3.v4.js%_debian/d3js_4.13.0/d3.v4.js%' assets/assetpack.def
 	tar -xvz --transform='s%.*dist%assets/_debian/dagre-d3_0.5.0%' -f debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz dagre-d3-0.5.0/dist/dagre-d3.js
 	sed -i -e 's%https://raw.githubusercontent.com/dagrejs/dagre-d3/v0.5.0/dist/dagre-d3.js%_debian/dagre-d3_0.5.0/dagre-d3.js%' assets/assetpack.def
+	cp -v -r debian/missing-sources/anser_2.0.1 assets/_debian/anser_2.0.1
+	sed -i -e 's%https://raw.githubusercontent.com/IonicaBizau/\(anser\)/\(2.0.1\)/lib/\(index.js\)%_debian/\1_\2/\3%' assets/assetpack.def
 
 override_dh_auto_install:
 	dh_auto_install -- SHELL="/bin/bash"
