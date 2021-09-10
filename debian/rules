@@ -30,6 +30,8 @@ override_dh_auto_build:
 	sed -i -e 's%https://raw\.githubusercontent\.com/sorich87/bootstrap-tour/6a1028fb562f9aa68c451f0901f8cfeb43cad140/build/\(css\|js\)/bootstrap-tour\.\(css\|min\.js\)%_debian/libjs-bootstrap-tour/bootstrap-tour.\2%' assets/assetpack.def
 	cp -v -r debian/missing-sources/bootstrap-4-multi-dropdown-navbar_957865f9 assets/_debian/bootstrap-4-multi-dropdown-navbar_957865f9
 	sed -i -e 's%https://raw\.githubusercontent\.com/bootstrapthemesco/bootstrap-4-multi-dropdown-navbar/beta2\.0/\(css\|js\)/%_debian/bootstrap-4-multi-dropdown-navbar_957865f9/%' assets/assetpack.def
+	cp -v -r debian/missing-sources/d3js_4.13.0 assets/_debian/d3js_4.13.0
+	sed -i -e 's%https://d3js.org/d3.v4.js%_debian/d3js_4.13.0/d3.v4.js%' assets/assetpack.def
 
 override_dh_auto_install:
 	dh_auto_install -- SHELL="/bin/bash"
