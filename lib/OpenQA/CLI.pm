@@ -40,8 +40,8 @@ has namespaces => sub { ['OpenQA::CLI'] };
     # Show details for job from arbitrary host
     openqa-cli api --host http://openqa.example.com jobs/408
 
-    # Show details for OSD job (prettified JSON)
-    openqa-cli api --osd --pretty jobs/4160811
+    # Show details for open.debian.net job (prettified JSON)
+    openqa-cli api --odn --pretty jobs/21610
 
     # Archive job from O3
     openqa-cli archive --o3 408 /tmp/job_408
@@ -54,6 +54,7 @@ has namespaces => sub { ['OpenQA::CLI'] };
     -h, --help                  Get more information on a specific command
         --osd                   Set target host to http://openqa.suse.de
         --o3                    Set target host to https://openqa.opensuse.org
+        --odn                   Set target host to https://openqa.debian.net
 
   Configuration:
     API key and secret are read from "client.conf" if not specified via CLI

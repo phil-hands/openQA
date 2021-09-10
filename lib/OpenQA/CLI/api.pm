@@ -74,8 +74,8 @@ sub command {
     # Show details for job from arbitrary host
     openqa-cli api --host http://openqa.example.com jobs/408
 
-    # Show details for job from OSD (prettified JSON)
-    openqa-cli api --osd --pretty jobs/4160811
+    # Show details for job from open.debian.net (prettified JSON)
+    openqa-cli api --odn --pretty jobs/4160811
 
     # List all jobs (CAUTION: this might time out for a large instance)
     openqa-cli api --host openqa.example.com jobs
@@ -131,6 +131,7 @@ sub command {
     -j, --json                    Request content is JSON
         --osd                     Set target host to http://openqa.suse.de
         --o3                      Set target host to https://openqa.opensuse.org
+        --odn                     Set target host to https://openqa.debian.net
         --param-file <param=file> Load content of params from files instead of
                                   from command line arguments. Multiple params
                                   may be specified by adding the option

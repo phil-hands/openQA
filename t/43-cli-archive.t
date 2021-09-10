@@ -89,6 +89,10 @@ subtest 'Host' => sub {
     like $@, qr/Usage: openqa-cli archive/, 'usage';
     is $archive->host, 'https://openqa.opensuse.org', 'host';
 
+    eval { $archive->run('--odn') };
+    like $@, qr/Usage: openqa-cli archive/, 'usage';
+    is $archive->host, 'http://openqa.debian.net', 'host';
+
     eval { $archive->run(@host) };
     like $@, qr/Usage: openqa-cli archive/, 'usage';
     is $archive->host, $host, 'host';

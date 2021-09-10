@@ -49,8 +49,8 @@ sub command {
 
   Usage: openqa-cli archive [OPTIONS] JOB PATH
 
-    # Download assets and test results from OSD to /tmp/job_416081
-    openqa-cli archive --osd 416081 /tmp/job_416081
+    # Download assets and test results from ODN to /tmp/job_416081
+    openqa-cli archive --odn 416081 /tmp/job_416081
 
     # Download assets and test results from arbitrary host
     openqa-cli archive --host http://openqa.example.com 407 /tmp/foo
@@ -68,6 +68,7 @@ sub command {
     -l, --asset-size-limit <num>   Asset size limit in bytes
         --osd                      Set target host to http://openqa.suse.de
         --o3                       Set target host to https://openqa.opensuse.org
+        --odn                      Set target host to https://openqa.debian.net
     -t, --with-thumbnails          Download thumbnails as well
 
 =cut

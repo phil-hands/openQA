@@ -108,7 +108,8 @@ sub run {
       'apisecret=s' => sub { $self->apisecret($_[1]) },
       'host=s'      => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
       'o3'          => sub { $self->host('https://openqa.opensuse.org') },
-      'osd'         => sub { $self->host('http://openqa.suse.de') };
+      'osd'         => sub { $self->host('http://openqa.suse.de') },
+      'odn'         => sub { $self->host('https://openqa.debian.net') };
 
     return $self->command(@args);
 }
