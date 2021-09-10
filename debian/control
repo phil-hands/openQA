@@ -108,10 +108,12 @@ Build-Depends: debhelper (>= 10),
                yamllint,
                libfilesys-df-perl,
                libfile-map-perl,
+#              for avoiding assetpack downloads
                fonts-fork-awesome,
                libjs-chosen,
                libjs-jquery-datatables,
                libjs-bootstrap4,
+               libjs-bootstrap-tour,
 Standards-Version: 4.1.1
 Homepage: http://open.qa
 Vcs-Git: https://salsa.debian.org/debian/openqa.git
@@ -142,6 +144,7 @@ Depends: ${misc:Depends}, ${perl:Depends},
          libfilesys-df-perl,
          fonts-fork-awesome,
          libjs-jquery-datatables,
+         libjs-bootstrap-tour,
 Recommends: apparmor-profiles, apparmor-utils,
             apache2, logrotate,
             libdbd-pg-perl,
