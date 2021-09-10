@@ -20,7 +20,12 @@ override_dh_auto_build:
 		/usr/share/javascript/jquery-datatables/jquery.dataTables.js \
 		/usr/share/javascript/jquery-datatables/dataTables.bootstrap4.js assets/_debian/datatables
 	sed -i -e 's%https://cdn\.datatables\.net/1.10.16/\(css\|js\)/%_debian/datatables/%' assets/assetpack.def
-	cp --dereference -v -r -s /usr/share/sass/bootstrap assets/_debian
+	mkdir -p assets/_debian/libjs-bootstrap4
+	ln -s /usr/share/sass/bootstrap assets/_debian/libjs-bootstrap4/sass
+	ln -s /usr/share/javascript/bootstrap4/js assets/_debian/libjs-bootstrap4/js
+	sed -i -e 's%https://raw\.githubusercontent\.com/twbs/bootstrap/v4\.1\.1/scss/\(.*\)%_debian/libjs-bootstrap4/sass/\1%' \
+	       -e 's%https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.js%_debian/libjs-bootstrap4/js/bootstrap.js%' assets/assetpack.def
+	sed -i -e 's%cache/raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss%_debian/libjs-bootstrap4/sass%' assets/stylesheets/openqa.scss
 
 override_dh_auto_install:
 	dh_auto_install -- SHELL="/bin/bash"
