@@ -21,6 +21,9 @@ License: GPL-3+
 
 Files: debian/*
 Copyright: 2016 Hideki Yamane <henrich@debian.org>
+           2017-2021 Philip Hands <phil@hands.com>
+License: GPL-2+
+
 License: GPL-2+
  This package is free software; you can redistribute it and/or modify
  it under the terms of the GNU General Public License as published by
