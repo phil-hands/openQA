@@ -19,6 +19,11 @@ Files: docker/openqa_data/scripts/client-conf
 Copyright: 2015, Red Hat
 License: GPL-3+
 
+Files: debian/*
+Copyright: 2016 Hideki Yamane <henrich@debian.org>
+           2017-2021 Philip Hands <phil@hands.com>
+License: GPL-2+
+
 Files: debian/missing-sources/d3js_4.13.0/*
 Copyright: 2010-2018 Mike Bostock
 License: BSD-3-Clause
@@ -31,11 +36,6 @@ Files: debian/missing-sources/anser_2.0.1/*
        assets/_debian/anser_2.0.1/*
 Copyright: 2012-21 Ionică Bizău <bizauionica@gmail.com> (https://ionicabizau.net)
 License: MIT
-
-Files: debian/*
-Copyright: 2016 Hideki Yamane <henrich@debian.org>
-           2017-2021 Philip Hands <phil@hands.com>
-License: GPL-2+
 
 License: GPL-2+
  This package is free software; you can redistribute it and/or modify
