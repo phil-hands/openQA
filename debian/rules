@@ -111,4 +111,5 @@ override_dh_installman:
 		dst=$$(echo $$src | sed -e 's/_/-/;s/^\(openqa-\)\?/openqa-/') ; \
 		pod2man --errors=stderr --section=1 --name=$$dst script/$$src scratch/man/$$dst.1 ; \
 	done
+	pod2man --errors=stderr --section=1 --name=openqa-cli lib/OpenQA/CLI.pm scratch/man/openqa-cli.1
 	dh_installman
