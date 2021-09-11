@@ -1,4 +1,3 @@
-usr/share/openqa/script/client  usr/bin/openqa-client
 usr/share/openqa/script/openqa-cli usr/bin/openqa-cli
 usr/share/openqa/script/openqa-clone-job usr/bin/openqa-clone-job
 usr/share/openqa/script/dump-templates usr/bin/openqa-dump-templates
