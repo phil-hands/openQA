@@ -1,0 +1,4 @@
+These directories contain downloaded copies of things that would otherwise be
+downloaded at build time by assetpack, so they're missing in the sense that they
+are only referred to (not included) in the upstream source, but they would end
+up in the generated binary packages.
