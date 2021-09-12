@@ -7,7 +7,7 @@ Copyright: 2010-2019 SUSE LINUX GmbH, Nuernberg, Germany.
            2015-2016 Red Hat
 License: GPL-2+
 
-Files: script/clone_job.pl
+Files: script/openqa-clone-job
 Copyright: 2013, SUSE Linux Products GmbH
 License: MIT
 
@@ -15,7 +15,7 @@ Files: lib/OpenQA/WebAPI/Plugin/HashedParams.pm
 Copyright: 2013, Grishkovelli
 License: Artistic or GPL-1+
 
-Files: docker/openqa_data/scripts/client-conf
+Files: container/openqa_data/scripts/client-conf
 Copyright: 2015, Red Hat
 License: GPL-3+
 
@@ -33,7 +33,6 @@ Copyright: 2013 Chris Pettitt
 License: MIT
 
 Files: debian/missing-sources/anser_2.0.1/*
-       assets/_debian/anser_2.0.1/*
 Copyright: 2012-21 Ionică Bizău <bizauionica@gmail.com> (https://ionicabizau.net)
 License: MIT
 
