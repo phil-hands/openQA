@@ -1,12 +1,5 @@
 openqa (4.6.1618324929.5c4cb4a68-1) UNRELEASED; urgency=medium
 
-  * update to github/master version (since releases are no longer done)
-  * rebase on top of merged upstream OAuth2 support
-
- -- Philip Hands <phil@hands.com>  Tue, 13 Apr 2021 22:30:20 +0200
-
-openqa (4.3+git20171026-1) unstable; urgency=medium
-
   * Initial release (Closes: #840253)
 
- -- Hideki Yamane <henrich@debian.org>  Sat, 07 Oct 2017 22:19:33 +0900
+ -- Philip Hands <phil@hands.com>  Sun, 12 Sep 2021 23:20:41 +0200
