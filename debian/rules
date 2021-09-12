@@ -11,7 +11,7 @@ override_dh_auto_build:
 	sed -i -e 's%https://cdn\.jsdelivr\.net/npm/fork-awesome@1\.2\.0/css/fork-awesome.min.css%_debian/fonts-fork-awesome/css/fork-awesome.css%' assets/assetpack.def
 	# convince assetpack to use local copies of the fonts:
 	for ext in eot svg ttf woff woff2 ; do \
-		printf '\n! forkawesome-webfont.%s\n< _debian/fonts-fork-awesome/fonts/forkawesome-webfont.%s\n' $ext $ext >> assets/assetpack.def ; \
+		printf '\n! forkawesome-webfont.%s\n< _debian/fonts-fork-awesome/fonts/forkawesome-webfont.%s\n' $$ext $$ext >> assets/assetpack.def ; \
 	done
 	ln -s -s /usr/share/javascript/chosen assets/_debian/libjs-chosen
 	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/chosen/1.7.0/%_debian/libjs-chosen/%' assets/assetpack.def
