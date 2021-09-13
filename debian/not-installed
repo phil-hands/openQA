@@ -1,0 +1,3 @@
+etc/apache2/vhosts.d/openqa.conf.template
+etc/apache2/vhosts.d/openqa-common.inc
+etc/apache2/vhosts.d/openqa-ssl.conf.template
