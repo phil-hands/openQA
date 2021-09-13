@@ -1,6 +1,9 @@
 # this _is_ the source (the long lines were introduced in commit f0f59782dd)
-source-is-missing assets/javascripts/admintable.js line 303 is 314 characters long (>256)
+source-is-missing assets/javascripts/admintable.js *
+source-contains-prebuilt-javascript-object assets/javascripts/admintable.js *
 
 # at least one package (lightbeam) claims this is the source, but for completeness I've also
 # included a tarball of the same versions's git commit from: https://github.com/d3/d3/tree/v4.13.0
 source-is-missing debian/missing-sources/d3js_4.13.0/d3.v4.js *
+source-contains-prebuilt-javascript-object debian/missing-sources/d3js_4.13.0/d3.v4.js *
+very-long-line-length-in-source-file debian/missing-sources/d3js_4.13.0/d3.v4.js *
