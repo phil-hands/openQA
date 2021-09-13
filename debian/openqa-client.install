@@ -1,3 +1,4 @@
+etc/openqa/client.conf
 usr/share/openqa/script/client
 usr/share/openqa/script/clone_job.pl
 usr/share/openqa/script/dump_templates

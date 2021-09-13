@@ -62,7 +62,7 @@ override_dh_install:
 
 override_dh_fixperms:
 	dh_fixperms
-	chmod 0400 $(CURDIR)/debian/openqa-worker/etc/openqa/client.conf
+	chmod 0400 $(CURDIR)/debian/openqa-client/etc/openqa/client.conf
 	chmod -x $(CURDIR)/debian/openqa/etc/logrotate.d/openqa
 	chmod +x $(CURDIR)/debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
 

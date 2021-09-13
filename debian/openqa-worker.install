@@ -1,4 +1,3 @@
-etc/openqa/client.conf
 etc/openqa/workers.ini
 etc/apparmor.d/usr.share.openqa.script.worker
 usr/lib/systemd/system-generators/systemd-openqa-generator lib/systemd/system-generators
