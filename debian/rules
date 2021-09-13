@@ -119,3 +119,6 @@ override_dh_installman:
 	done
 	pod2man --errors=stderr --section=1 --name=openqa-cli lib/OpenQA/CLI.pm scratch/man/openqa-cli.1
 	dh_installman
+
+override_dh_missing:
+	dh_missing --list-missing
