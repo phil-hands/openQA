@@ -60,11 +60,11 @@ override_dh_install:
 	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
 		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
 
-override_dh_fixperms:
-	dh_fixperms
-	chmod 0400 $(CURDIR)/debian/openqa-client/etc/openqa/client.conf
-	chmod -x $(CURDIR)/debian/openqa/etc/logrotate.d/openqa
-	chmod +x $(CURDIR)/debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
+override_dh_fixperms-arch:
+	dh_fixperms -a
+	chmod 0400 debian/openqa-client/etc/openqa/client.conf
+	chmod -x debian/openqa/etc/logrotate.d/openqa
+	chmod +x debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
 
 override_dh_auto_test:
 	# check things didn't change upstream
