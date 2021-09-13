@@ -1,4 +1,3 @@
-var/log/openqa
 usr/share/openqa/etc
 
 # iso hdd repo must be geekotest writable to enable *_URL and HDD upload functionality
