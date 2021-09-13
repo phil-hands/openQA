@@ -5,6 +5,7 @@ etc/apache2/vhosts.d/openqa.conf.template etc/apache2/sites-available
 etc/apache2/vhosts.d/openqa-common.inc etc/apache2/sites-available
 etc/apache2/vhosts.d/openqa-ssl.conf.template etc/apache2/sites-available
 etc/apparmor.d/usr.share.openqa.script.openqa
+etc/apparmor.d/local/usr.share.openqa.script.openqa
 usr/lib/systemd/system/openqa-webui.service lib/systemd/system
 usr/lib/systemd/system/openqa-livehandler.service lib/systemd/system
 usr/lib/systemd/system/openqa-gru.service lib/systemd/system
