@@ -17,6 +17,10 @@
 
 use Test::Most;
 
+BEGIN {
+    $ENV{OPENQA_UPLOAD_DELAY} = 0;
+}
+
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Mojo::Base -signatures;
@@ -24,13 +28,15 @@ use Mojo::Base -signatures;
 use Test::Fatal;
 use Test::Output qw(combined_like combined_unlike);
 use Test::MockModule;
+use Test::MockObject;
+use Mojo::Collection;
 use Mojo::File qw(path tempdir);
 use Mojo::JSON 'encode_json';
 use Mojo::UserAgent;
 use Mojo::URL;
 use Mojo::IOLoop;
-use OpenQA::Constants qw(DEFAULT_MAX_JOB_TIME WORKER_COMMAND_CANCEL WORKER_COMMAND_QUIT WORKER_COMMAND_OBSOLETE
-  WORKER_SR_SETUP_FAILURE WORKER_EC_ASSET_FAILURE WORKER_EC_CACHE_FAILURE
+use OpenQA::Constants qw(DEFAULT_MAX_JOB_TIME DEFAULT_MAX_SETUP_TIME WORKER_COMMAND_CANCEL WORKER_COMMAND_QUIT
+  WORKER_COMMAND_OBSOLETE WORKER_SR_SETUP_FAILURE WORKER_SR_TIMEOUT WORKER_EC_ASSET_FAILURE WORKER_EC_CACHE_FAILURE
   WORKER_SR_API_FAILURE WORKER_SR_DIED WORKER_SR_DONE);
 use OpenQA::Worker::Job;
 use OpenQA::Worker::Settings;
@@ -38,7 +44,8 @@ use OpenQA::Test::FakeWebSocketTransaction;
 use OpenQA::Test::TimeLimit '10';
 use OpenQA::Worker::WebUIConnection;
 use OpenQA::Jobs::Constants;
-use OpenQA::Test::Utils 'shared_hash';
+use OpenQA::Test::Utils 'mock_io_loop';
+use OpenQA::UserAgent;
 
 sub wait_for_job {
     my ($job, $check_message, $relevant_event, $check_function, $timeout) = @_;
@@ -67,9 +74,7 @@ sub wait_for_job {
     is $error, undef, "no error waiting for '$check_message'";
 }
 
-sub wait_until_job_status_ok {
-    my ($job, $status) = @_;
-
+sub wait_until_job_status_ok ($job, $status) {
     wait_for_job(
         $job,
         "job status changed to $status",
@@ -105,9 +110,11 @@ sub wait_until_uploading_logs_and_assets_concluded {
     has sent_messages        => sub { [] };
     has websocket_connection => sub { OpenQA::Test::FakeWebSocketTransaction->new };
     has ua                   => sub { Mojo::UserAgent->new };
+    has url                  => sub { Mojo::URL->new('example') };
     has register_called      => 0;
     has last_error           => undef;
     has fail_job_duplication => 0;
+    has configured_retries   => 5;
     sub send {
         my ($self, $method, $path, %args) = @_;
         my $params                = $args{params};
@@ -121,7 +128,7 @@ sub wait_until_uploading_logs_and_assets_concluded {
             $self->last_error('fake API error');
             return Mojo::IOLoop->next_tick(sub { $args{callback}->(0) });
         }
-        Mojo::IOLoop->next_tick(sub { $args{callback}->({}) }) if $args{callback};
+        Mojo::IOLoop->next_tick(sub { $args{callback}->({}) }) if $args{callback} && $args{callback} ne 'no';
     }
     sub reset_last_error { shift->last_error(undef) }
     sub send_status      { push(@{shift->sent_messages}, @_) }
@@ -130,6 +137,8 @@ sub wait_until_uploading_logs_and_assets_concluded {
         my ($self, $context) = @_;
         $self->last_error($self->last_error . " on $context");
     }
+    sub _retry_delay   { 0 }
+    sub evaluate_error { OpenQA::Worker::WebUIConnection::evaluate_error(@_) }
 }
 {
     package Test::FakeEngine;    # uncoverable statement count:2
@@ -140,15 +149,18 @@ sub wait_until_uploading_logs_and_assets_concluded {
     sub stop { shift->is_running(0) }
 }
 
-my $isotovideo            = Test::FakeEngine->new;
-my $worker                = Test::FakeWorker->new;
-my $pool_directory        = tempdir('poolXXXX');
-my $testresults_directory = $pool_directory->child('testresults')->make_path;
-$testresults_directory->child('test_order.json')->spurt('[]');
+my $isotovideo      = Test::FakeEngine->new;
+my $worker          = Test::FakeWorker->new;
+my $pool_directory  = tempdir('poolXXXX');
+my $testresults_dir = $pool_directory->child('testresults')->make_path;
+$testresults_dir->child('test_order.json')->spurt('[]');
+$testresults_dir->child('.thumbs')->make_path;
 $worker->pool_directory($pool_directory);
 my $client = Test::FakeClient->new;
 $client->ua->connect_timeout(0.1);
-my $engine_url = '127.0.0.1:' . Mojo::IOLoop::Server->generate_port;
+my $disconnected_client = Test::FakeClient->new(websocket_connection => undef);
+my $engine_url          = '127.0.0.1:' . Mojo::IOLoop::Server->generate_port;
+my $io_loop_mock        = mock_io_loop(subprocess => 1);
 
 # Define a function to get the usually expected status updates
 sub usual_status_updates {
@@ -160,19 +172,9 @@ sub usual_status_updates {
         @expected_api_calls,
         {
             path => "jobs/$job_id/status",
-            json => {
-                status => {
-                    uploading => 1,
-                    worker_id => 1
-                }
-            },
+            json => {status => {uploading => 1, worker_id => 1}},
         });
-    push(
-        @expected_api_calls,
-        {
-            path => "jobs/$job_id/duplicate",
-            json => undef,
-        }) if $args{duplicate};
+    push(@expected_api_calls, {path => "jobs/$job_id/duplicate", json => undef}) if $args{duplicate};
     push(
         @expected_api_calls,
         {
@@ -195,42 +197,47 @@ sub usual_status_updates {
 my $engine_mock   = Test::MockModule->new('OpenQA::Worker::Engines::isotovideo');
 my $engine_result = {error => 'this is not a real isotovideo'};
 $engine_mock->redefine(
-    engine_workit => sub {
+    engine_workit => sub ($job, $callback) {
         note 'pretending isotovideo startup error';
-        return $engine_result;
+        return $callback->($engine_result);
     });
 
 # Mock log file and asset uploads to collect diagnostics
-my $job_mock            = Test::MockModule->new('OpenQA::Worker::Job');
-my $default_shared_hash = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
-shared_hash $default_shared_hash;
-
-sub upload_mock {
-    # uncoverable subroutine
-    my ($key, $self, @args) = @_;     # uncoverable statement
-    my $shared_hash = shared_hash;    # uncoverable statement
-
-    # uncoverable statement count:1
-    # uncoverable statement count:2
-    push @{$shared_hash->{$key}}, \@args;
-    shared_hash $shared_hash;                # uncoverable statement
-    return $shared_hash->{upload_result};    # uncoverable statement
+my $job_mock     = Test::MockModule->new('OpenQA::Worker::Job');
+my $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+sub upload_mock ($key, $self, @args) {
+    push @{$upload_stats->{$key}}, \@args;
+    return $upload_stats->{upload_result};
 }
-
-# uncoverable statement count:2
-$job_mock->redefine(_upload_log_file => sub { upload_mock('uploaded_files', @_) });
-# uncoverable statement count:2
-$job_mock->redefine(_upload_asset => sub { upload_mock('uploaded_assets', @_) });
+$job_mock->redefine(_upload_log_file => sub { upload_mock('uploaded_files',  @_) });
+$job_mock->redefine(_upload_asset    => sub { upload_mock('uploaded_assets', @_) });
 
 subtest 'Format reason' => sub {
-    # call the function explicitely; further cases are covered in subsequent subtests where the
+    # call the function explicitly; further cases are covered in subsequent subtests where the
     # function is called indirectly
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 1234});
     is($job->_format_reason(PASSED, WORKER_SR_DONE), undef, 'no reason added if it is just "done"');
+    $job->{_result_upload_error} = 'Unable…';
+    is($job->_format_reason(PASSED, WORKER_SR_DONE), 'api failure: Unable…', 'upload error considered API failure');
     like($job->_format_reason(INCOMPLETE, WORKER_SR_DIED), qr/died: .+/, 'generic phrase appended to died');
     is($job->_format_reason('foo', 'foo'),    undef,    'no reason added if it equals the result');
     is($job->_format_reason('foo', 'foobar'), 'foobar', 'unknown reason "passed as-is" if it differs from the result');
     is($job->_format_reason(USER_CANCELLED, WORKER_COMMAND_CANCEL), undef, 'cancel omitted');
+    like $job->_format_reason(TIMEOUT_EXCEEDED, WORKER_SR_TIMEOUT), qr/timeout: setup exceeded/, 'setup timeout';
+    $job->{_engine} = 1;    # pretend isotovideo has been started
+    like $job->_format_reason(TIMEOUT_EXCEEDED, WORKER_SR_TIMEOUT), qr/timeout: test execution exceeded/,
+      'test timeout';
+};
+
+subtest 'Lost WebSocket connection' => sub {
+    my $job = OpenQA::Worker::Job->new($worker, $disconnected_client, {id => 1, URL => $engine_url});
+    my $event_data;
+    $job->on(status_changed => sub ($job, $data) { $event_data = $data });
+    $job->accept;
+    is $job->status, 'stopped', 'job has been stopped';
+    is $event_data->{reason}, WORKER_SR_API_FAILURE, 'reason';
+    like $event_data->{error_message}, qr/Unable to accept.*websocket connection to not relevant here has been lost./,
+      'error message';
 };
 
 subtest 'Interrupted WebSocket connection' => sub {
@@ -245,13 +252,7 @@ subtest 'Interrupted WebSocket connection' => sub {
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 1,
-                    type  => 'accepted',
-                }}
-        ],
+        [{json => {jobid => 1, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
@@ -273,13 +274,7 @@ subtest 'Interrupted WebSocket connection (before we can tell the WebUI that we 
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 2,
-                    type  => 'accepted',
-                }}
-        ],
+        [{json => {jobid => 2, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
@@ -335,34 +330,21 @@ subtest 'Clean up pool directory' => sub {
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 3,
-                    type  => 'accepted',
-                }}
-        ],
+        [{json => {jobid => 3, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
 
-    my $uploaded_files = shared_hash->{uploaded_files};
+    my $uploaded_files = $upload_stats->{uploaded_files};
     is_deeply(
         $uploaded_files,
-        [
-            [
-                {
-                    file => {
-                        file     => "$pool_directory/worker-log.txt",
-                        filename => 'worker-log.txt'
-                    }}]
-        ],
+        [[{file => {file => "$pool_directory/worker-log.txt", filename => 'worker-log.txt'}}]],
         'would have uploaded logs'
     ) or diag explain $uploaded_files;
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply($uploaded_assets, [], 'no assets uploaded because this test so far has none')
       or diag explain $uploaded_assets;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
 };
 
 subtest 'Category from setup failure passed as reason' => sub {
@@ -469,11 +451,11 @@ subtest 'Job aborted during setup' => sub {
     # simulate that the worker received SIGTERM during setup
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 8, URL => $engine_url});
     $engine_mock->redefine(
-        engine_workit => sub {
+        engine_workit => sub ($job, $callback) {
             # stop the job like the real worker would do it within the signal handler (while $job->start is
             # being executed)
             $job->stop(WORKER_COMMAND_QUIT);
-            return {error => 'worker interrupted'};
+            return $callback->({error => 'worker interrupted'});
         });
     $job->accept;
     wait_until_job_status_ok($job, 'accepted');
@@ -501,21 +483,15 @@ subtest 'Job aborted during setup' => sub {
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 8,
-                    type  => 'accepted',
-                }}
-        ],
+        [{json => {jobid => 8, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
 
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply($uploaded_assets, [], 'no assets uploaded')
       or diag explain $uploaded_assets;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
 };
 
 subtest 'Reason turned into "api-failure" if job duplication fails' => sub {
@@ -552,16 +528,15 @@ subtest 'Reason turned into "api-failure" if job duplication fails' => sub {
     is_deeply($client->websocket_connection->sent_messages, [], 'no WebSocket messages expected')
       or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply($uploaded_assets, [], 'no assets uploaded') or diag explain $uploaded_assets;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
     $client->fail_job_duplication(0);
 };
 
 # Mock isotovideo engine (simulate successful startup and stop)
 $engine_mock->redefine(
-    engine_workit => sub {
-        my $job = shift;
+    engine_workit => sub ($job, $callback) {
         note 'pretending to run isotovideo';
         $job->once(
             uploading_results_concluded => sub {
@@ -570,7 +545,7 @@ $engine_mock->redefine(
             });
         $pool_directory->child('serial_terminal.txt')->spurt('Works!');
         $pool_directory->child('virtio_console1.log')->spurt('Works too!');
-        return {child => $isotovideo->is_running(1)};
+        return $callback->({child => $isotovideo->is_running(1)});
     });
 
 subtest 'Successful job' => sub {
@@ -583,7 +558,15 @@ subtest 'Successful job' => sub {
     $job->accept;
     is $job->status, 'accepting', 'job is now being accepted';
     wait_until_job_status_ok($job, 'accepted');
-    combined_like { $job->start } qr/isotovideo has been started/, 'isotovideo startup logged';
+
+    my ($stop_reason, $is_uploading);
+    $job->once(uploading_results_concluded => sub ($job, $result) { $is_uploading = $job->is_uploading_results });
+    $job->on(status_changed => sub ($job, $result) { $stop_reason = $result->{reason} });
+    my $assets_public = $pool_directory->child('assets_public')->make_path;
+    $assets_public->child('test.txt')->spurt('Works!');
+
+    combined_like { $job->start; wait_until_job_status_ok($job, 'stopped') }
+    qr/isotovideo has been started/, 'isotovideo startup logged';
     subtest 'settings only allowed to be set within worker config deleted' => sub {
         my $settings = $job->{_settings};
         is($settings->{EXTERNAL_VIDEO_ENCODER_CMD},
@@ -595,19 +578,8 @@ subtest 'Successful job' => sub {
         is($settings->{FOO}, 'bar', 'arbitrary settings kept');
     };
 
-    my ($status, $is_uploading_results);
-    $job->once(
-        uploading_results_concluded => sub {
-            my $job = shift;
-            $is_uploading_results = $job->is_uploading_results;
-            $status               = $job->status;
-        });
-    my $assets_public = $pool_directory->child('assets_public')->make_path;
-    $assets_public->child('test.txt')->spurt('Works!');
-    wait_until_job_status_ok($job, 'stopped');
-    is $is_uploading_results, 0,          'uploading results concluded';
-    is $status,               'stopping', 'job is stopping now';
-
+    is $is_uploading, 0,      'uploading results concluded';
+    is $stop_reason,  'done', 'job stopped because it is done';
     is $job->status,               'stopped', 'job is stopped successfully';
     is $job->is_uploading_results, 0,         'uploading results concluded';
 
@@ -638,61 +610,51 @@ subtest 'Successful job' => sub {
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 4,
-                    type  => 'accepted',
-                }}
-        ],
+        [{json => {jobid => 4, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
 
-    my $uploaded_files = shared_hash->{uploaded_files};
+    # check whether asset upload has succeeded
+    my $uploaded_files = $upload_stats->{uploaded_files};
     is_deeply(
         $uploaded_files,
         [
-            [
-                {
-                    file => {
-                        file     => "$pool_directory/worker-log.txt",
-                        filename => 'worker-log.txt'
-                    }}
-            ],
-            [
-                {
-                    file => {
-                        file     => "$pool_directory/serial_terminal.txt",
-                        filename => 'serial_terminal.txt'
-                    }}
-            ],
-            [
-                {
-                    file => {
-                        file     => "$pool_directory/virtio_console1.log",
-                        filename => 'virtio_console1.log'
-                    }}]
+            [{file => {file => "$pool_directory/worker-log.txt",      filename => 'worker-log.txt'}}],
+            [{file => {file => "$pool_directory/serial_terminal.txt", filename => 'serial_terminal.txt'}}],
+            [{file => {file => "$pool_directory/virtio_console1.log", filename => 'virtio_console1.log'}}],
         ],
         'would have uploaded logs'
     ) or diag explain $uploaded_files;
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply(
         $uploaded_assets,
-        [
-            [
-                {
-                    asset => 'public',
-                    file  => {
-                        file     => "$pool_directory/assets_public/test.txt",
-                        filename => 'test.txt'
-                    }}]
-        ],
+        [[{asset => 'public', file => {file => "$pool_directory/assets_public/test.txt", filename => 'test.txt'}}]],
         'would have uploaded assets'
     ) or diag explain $uploaded_assets;
+
+    # assume asset upload would have failed
+    $job_mock->redefine(_upload_log_file_or_asset => sub ($job, $params) { $params->{ulog} });
+    $job->_set_status(running => {});
+    $job->stop(WORKER_SR_DONE);
+    wait_until_job_status_ok($job, 'stopped');
+    is_deeply(
+        $client->sent_messages,
+        [
+            {json => {status => {uploading => 1, worker_id => 1}}, path => 'jobs/4/status'},
+            {json => undef, path => 'jobs/4/set_done', worker_id => 1, result => 'incomplete', reason => 'api failure'},
+            {json => undef, path => 'jobs/4/set_done', worker_id => 1},
+        ],
+        'expected REST-API calls happened (last API call is actually useless and could be avoided)'
+    ) or diag explain $client->sent_messages;
+    is $client->register_called, 1, 're-registration attempted';
+    $client->register_called(0)->sent_messages([])->websocket_connection->sent_messages([]);
+
     $assets_public->remove_tree;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
 };
+
+$job_mock->unmock('_upload_log_file_or_asset');
 
 subtest 'Skip job' => sub {
     is_deeply $client->websocket_connection->sent_messages, [], 'no WebSocket calls yet';
@@ -721,9 +683,9 @@ subtest 'Skip job' => sub {
       or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
 
-    my $uploaded_files = shared_hash->{uploaded_files};
+    my $uploaded_files = $upload_stats->{uploaded_files};
     is_deeply($uploaded_files, [], 'no files uploaded') or diag explain $uploaded_files;
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply($uploaded_assets, [], 'no assets uploaded') or diag explain $uploaded_assets;
 };
 
@@ -812,48 +774,25 @@ subtest 'Livelog' => sub {
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 5,
-                    type  => 'accepted',
-                }}
-        ],
+        [{json => {jobid => 5, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
 
-    my $uploaded_files = shared_hash->{uploaded_files};
+    my $uploaded_files = $upload_stats->{uploaded_files};
     is_deeply(
         $uploaded_files,
         [
-            [
-                {
-                    file => {
-                        file     => "$pool_directory/worker-log.txt",
-                        filename => 'worker-log.txt'
-                    }}
-            ],
-            [
-                {
-                    file => {
-                        file     => "$pool_directory/serial_terminal.txt",
-                        filename => 'serial_terminal.txt'
-                    }}
-            ],
-            [
-                {
-                    file => {
-                        file     => "$pool_directory/virtio_console1.log",
-                        filename => 'virtio_console1.log'
-                    }}]
+            [{file => {file => "$pool_directory/worker-log.txt",      filename => 'worker-log.txt'}}],
+            [{file => {file => "$pool_directory/serial_terminal.txt", filename => 'serial_terminal.txt'}}],
+            [{file => {file => "$pool_directory/virtio_console1.log", filename => 'virtio_console1.log'}}],
         ],
         'would have uploaded logs'
     ) or diag explain $uploaded_files;
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply($uploaded_assets, [], 'no assets uploaded because this test so far has none')
       or diag explain $uploaded_assets;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
 };
 
 subtest 'handling API failures' => sub {
@@ -919,33 +858,25 @@ subtest 'handling API failures' => sub {
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 6,
-                    type  => 'accepted'
-                }}
-        ],
+        [{json => {jobid => 6, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
 
-    my $uploaded_files = shared_hash->{uploaded_files};
+    my $uploaded_files = $upload_stats->{uploaded_files};
     is_deeply($uploaded_files, [], 'file upload skipped after API failure')
       or diag explain $uploaded_files;
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply($uploaded_assets, [], 'asset upload skipped after API failure')
       or diag explain $uploaded_assets;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
 };
 
 subtest 'handle upload failure' => sub {
     is_deeply $client->websocket_connection->sent_messages, [], 'no WebSocket calls yet';
     is_deeply $client->sent_messages, [], 'no REST-API calls yet';
 
-    my $shared_hash = shared_hash;
-    $shared_hash->{upload_result} = 0;
-    shared_hash $shared_hash;
+    $upload_stats->{upload_result} = 0;
 
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 7, URL => $engine_url});
     my @status;
@@ -1016,42 +947,29 @@ subtest 'handle upload failure' => sub {
 
     is_deeply(
         $client->websocket_connection->sent_messages,
-        [
-            {
-                json => {
-                    jobid => 7,
-                    type  => 'accepted'
-                }}
-        ],
+        [{json => {jobid => 7, type => 'accepted'}}],
         'job accepted via WebSocket'
     ) or diag explain $client->websocket_connection->sent_messages;
     $client->websocket_connection->sent_messages([]);
 
     # Verify that the upload has been skipped
     my $ok             = 1;
-    my $uploaded_files = shared_hash->{uploaded_files};
+    my $uploaded_files = $upload_stats->{uploaded_files};
     is(scalar @$uploaded_files, 2, 'only 2 files uploaded; stopped after first failure') or $ok = 0;
     my $log_name = $uploaded_files->[0][0]->{file}->{filename};
     ok($log_name eq 'bar' || $log_name eq 'foo', 'one of the logs attempted to be uploaded') or $ok = 0;
     is_deeply(
         $uploaded_files->[1],
-        [
-            {
-                file => {
-                    file     => "$pool_directory/worker-log.txt",
-                    filename => 'worker-log.txt'
-                }
-            },
-        ],
+        [{file => {file => "$pool_directory/worker-log.txt", filename => 'worker-log.txt'}}],
         'uploading autoinst log tried even though other logs failed'
     ) or $ok = 0;
     diag explain $uploaded_files unless $ok;
-    my $uploaded_assets = shared_hash->{uploaded_assets};
+    my $uploaded_assets = $upload_stats->{uploaded_assets};
     is_deeply($uploaded_assets, [], 'asset upload skipped after previous upload failure')
       or diag explain $uploaded_assets;
     $log_dir->remove_tree;
     $asset_dir->remove_tree;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
 };
 
 subtest 'Job stopped while uploading' => sub {
@@ -1067,6 +985,21 @@ subtest 'Job stopped while uploading' => sub {
     ) or diag explain $client->sent_messages;
     wait_until_uploading_logs_and_assets_concluded($job);
     is $job->status, 'stopping', 'job has not been stopped yet';
+    is_deeply $upload_stats->{uploaded_files},
+      [
+        [{file => {file => "$pool_directory/worker-log.txt",      filename => 'worker-log.txt'}}],
+        [{file => {file => "$pool_directory/serial_terminal.txt", filename => 'serial_terminal.txt'}}],
+        [{file => {file => "$pool_directory/virtio_console1.log", filename => 'virtio_console1.log'}}],
+      ],
+      'logs uploaded'
+      or diag explain $upload_stats->{uploaded_files};
+    $upload_stats->{uploaded_files} = [];
+
+    # pretend there's an image with thumbnail and a regular file to be uploaded
+    my $test_image = 'test.png';
+    path($job->_result_file_path(".thumbs/$test_image"))->touch;
+    $job->images_to_send->{'098f6bcd4621d373cade4e832627b4f6'} = $test_image;
+    $job->files_to_send->{'some-file.txt'}                     = 1;
 
     # track whether the final upload is really invoked
     # note: When omitting the call of the original functions the callback function for the upload is of course
@@ -1090,7 +1023,17 @@ subtest 'Job stopped while uploading' => sub {
     ok $final_image_upload_invoked,  'final image upload invoked';
     my $msg = $client->sent_messages->[-1];
     is $msg->{path}, 'jobs/7/set_done', 'job is done' or diag explain $client->sent_messages;
+    my @img_args = (image => 1, md5 => '098f6bcd4621d373cade4e832627b4f6');
+    is_deeply $upload_stats->{uploaded_files},
+      [
+        [{file => {file => "$testresults_dir/test.png",         filename => 'test.png'},      thumb => 0, @img_args}],
+        [{file => {file => "$testresults_dir/.thumbs/test.png", filename => 'test.png'},      thumb => 1, @img_args}],
+        [{file => {file => "$testresults_dir/some-file.txt",    filename => 'some-file.txt'}, image => 0, thumb => 0}],
+      ],
+      'image, thumbnail and text file uploaded'
+      or diag explain $upload_stats->{uploaded_files};
     $client->sent_messages([]);
+    $upload_stats->{uploaded_files} = [];
 };
 
 subtest 'Final upload triggered and job inncompleted when job stopped due to obsoletion' => sub {
@@ -1120,7 +1063,7 @@ subtest 'Scheduling failure handled correctly' => sub {
     my $callback_invoked;
     $pool_directory->child(OpenQA::Worker::Job::AUTOINST_STATUSFILE)
       ->spurt(encode_json({status => 'running', current_test => undef}));
-    $testresults_directory->child('test_order.json')->remove;
+    $testresults_dir->child('test_order.json')->remove;
     combined_like {
         $job->_upload_results_step_0_prepare(sub { $callback_invoked = 1 })
     }
@@ -1132,10 +1075,9 @@ subtest 'Scheduling failure handled correctly' => sub {
 
 # Mock isotovideo engine (simulate successful startup)
 $engine_mock->redefine(
-    engine_workit => sub {
-        my $job = shift;
+    engine_workit => sub ($job, $callback) {
         note 'pretending to run isotovideo';
-        return {child => $isotovideo->is_running(1)};
+        return $callback->({child => $isotovideo->is_running(1)});
     });
 
 $job_mock->unmock($_) for qw(_upload_results _upload_results_step_1_post_status _upload_results_step_2_upload_images);
@@ -1163,10 +1105,7 @@ subtest 'Dynamic schedule' => sub {
             name     => 'install_ltp',
             script   => 'tests/kernel/install_ltp.pm'
         }];
-    my $autoinst_status = {
-        status       => 'running',
-        current_test => 'install_ltp',
-    };
+    my $autoinst_status   = {status => 'running', current_test => 'install_ltp'};
     my $results_directory = $pool_directory->child('testresults')->make_path;
 
     my $status_file = $pool_directory->child(OpenQA::Worker::Job::AUTOINST_STATUSFILE);
@@ -1221,49 +1160,84 @@ subtest 'Dynamic schedule' => sub {
     $client->sent_messages([]);
     $client->websocket_connection->sent_messages([]);
     $results_directory->remove_tree;
-    shared_hash {upload_result => 1, uploaded_files => [], uploaded_assets => []};
+    $upload_stats = {upload_result => 1, uploaded_files => [], uploaded_assets => []};
 };
 
 subtest 'optipng' => sub {
     is OpenQA::Worker::Job::_optimize_image('foo'), undef, 'optipng call is "best-effort"';
 };
 
-subtest '_read_result_file' => sub {
-    my $test_order = [{name => 'my_result'}];
+subtest '_read_result_file and _reduce_test_order' => sub {
+    my $test_order = [{name => 'my_result'}, {name => 'your_result'}, {name => 'our_result'}];
     my $job        = OpenQA::Worker::Job->new($worker, $client, {id => 9, URL => $engine_url});
-    $job_mock->redefine(_read_module_result => {name => 'my_module', extra_test_results => [{name => 'my_extra'}]});
-    $job->{_test_order} = $test_order;
+    my %module_res = (
+        my_result => {name => 'my_module', extra_test_results => [{name => 'my_extra'}]},
+        my_extra  => {name => 'my_extra'},
+    );
+    $job_mock->redefine(_read_module_result => sub ($self, $test) { $module_res{$test} });
+    $job->{_test_order}          = $test_order;
+    $job->{_current_test_module} = 'our_result';
     my $extra_test_order;
-    my $ret       = $job->_read_result_file(undef, $extra_test_order);
-    my $extra_res = $ret->{my_extra}->{extra_test_results};
-    is $extra_res->[0]->{name}, 'my_extra', 'extra_test_results covered' or diag explain $ret;
+    my ($ret, $last_test_module) = $job->_read_result_file('your_result', $extra_test_order);
+    is $last_test_module, 'my_result',
+      'last test module is my_result because only for the one $job_mock provides a result';
+    is $ret->{my_extra}->{name}, 'my_extra', 'extra_test_results covered' or diag explain $ret;
     is $extra_test_order, undef, 'the passed reference is not updated (do we need this?)';
+    $job->_reduce_test_order('my_result');
+    is_deeply $job->test_order, [{name => 'your_result'}, {name => 'our_result'}],
+      'my_result removed from test order but not further test modules';
+
+    $module_res{$_} = {name => $_} for qw(your_result our_result);
+    ($ret, $last_test_module) = $job->_read_result_file('your_result', $extra_test_order);
+    is $last_test_module, 'your_result', 'last test module is now your_result because that is the one to upload up to';
+
+    $job->_reduce_test_order('our_result');
+    is_deeply $job->test_order, [{name => 'our_result'}], 'our_result preserved as it is still the current module';
+    # note: When pausing on a failed assert/check screen we upload up to the current module so the last module we have
+    #       uploaded results for might still be in progress and still needs to be considered on further uploads.
 };
 
-subtest 'computing max job time' => sub {
+subtest 'computing max job time and max setup time' => sub {
     my %settings;
-    is(OpenQA::Worker::Job::_compute_max_job_time(\%settings), DEFAULT_MAX_JOB_TIME, 'default scenario');
-    $settings{MAX_JOB_TIME} = sprintf('%d', DEFAULT_MAX_JOB_TIME / 2);
-    is(OpenQA::Worker::Job::_compute_max_job_time(\%settings), DEFAULT_MAX_JOB_TIME / 2, 'short scenario');
+    my ($max_job_time, $max_setup_time) = OpenQA::Worker::Job::_compute_timeouts(\%settings);
+    is $max_job_time,   DEFAULT_MAX_JOB_TIME,   'default scenario: default max job time)';
+    is $max_setup_time, DEFAULT_MAX_SETUP_TIME, 'default scenario: default max setup time)';
+
+    $settings{MAX_JOB_TIME}   = sprintf('%d', DEFAULT_MAX_JOB_TIME / 2);
+    $settings{MAX_SETUP_TIME} = sprintf('%d', DEFAULT_MAX_SETUP_TIME / 3);
+    ($max_job_time, $max_setup_time) = OpenQA::Worker::Job::_compute_timeouts(\%settings);
+    is $max_job_time,   DEFAULT_MAX_JOB_TIME / 2,   'short scenario: max job time taken from settings';
+    is $max_setup_time, DEFAULT_MAX_SETUP_TIME / 3, 'short scenario: max setup time taken from settings';
+
     $settings{TIMEOUT_SCALE} = '4';
-    is(OpenQA::Worker::Job::_compute_max_job_time(\%settings), DEFAULT_MAX_JOB_TIME * 2, 'max job time scaled');
-    is_deeply([sort keys %settings], [qw(MAX_JOB_TIME TIMEOUT_SCALE)], 'no extra settings added so far');
+    delete $settings{MAX_SETUP_TIME};
+    ($max_job_time, $max_setup_time) = OpenQA::Worker::Job::_compute_timeouts(\%settings);
+    is $max_job_time, DEFAULT_MAX_JOB_TIME * 2, 'max job time scaled';
+    is $max_setup_time, DEFAULT_MAX_SETUP_TIME, 'max setup time not scaled';
+    is_deeply [sort keys %settings], [qw(MAX_JOB_TIME TIMEOUT_SCALE)], 'no extra settings added so far';
+
     $settings{TIMEOUT_SCALE} = undef;
     $settings{MAX_JOB_TIME}  = DEFAULT_MAX_JOB_TIME + 1;
-    is(
-        OpenQA::Worker::Job::_compute_max_job_time(\%settings),
-        DEFAULT_MAX_JOB_TIME + 1,
-        'long scenario, NOVIDEO not specified'
-    );
-    is($settings{NOVIDEO}, 1, 'NOVIDEO set to 1 for long scenarios');
+    ($max_job_time, $max_setup_time) = OpenQA::Worker::Job::_compute_timeouts(\%settings);
+    is $max_job_time, DEFAULT_MAX_JOB_TIME + 1, 'long scenario, NOVIDEO not specified';
+    is $settings{NOVIDEO}, 1, 'NOVIDEO set to 1 for long scenarios';
+
     $settings{NOVIDEO} = 0;
-    is(
-        OpenQA::Worker::Job::_compute_max_job_time(\%settings),
-        DEFAULT_MAX_JOB_TIME + 1,
-        'long scenario, NOVIDEO specified'
-    );
-    is($settings{NOVIDEO}, 0, 'NOVIDEO not overridden if set to 0 explicitely');
-    is_deeply([sort keys %settings], [qw(MAX_JOB_TIME NOVIDEO TIMEOUT_SCALE)], 'only expected settings added');
+    ($max_job_time, $max_setup_time) = OpenQA::Worker::Job::_compute_timeouts(\%settings);
+    is $max_job_time, DEFAULT_MAX_JOB_TIME + 1, 'long scenario, NOVIDEO specified';
+    is $settings{NOVIDEO}, 0, 'NOVIDEO not overridden if set to 0 explicitely';
+    is_deeply [sort keys %settings], [qw(MAX_JOB_TIME NOVIDEO TIMEOUT_SCALE)], 'only expected settings added';
+};
+
+subtest 'handling timeout' => sub {
+    my ($job, $event_data) = OpenQA::Worker::Job->new($worker, $client, {id => 1, URL => $engine_url});
+    my $engine = Test::FakeEngine->new;
+    $engine->{child} = Test::MockObject->new->set_always(session => Test::MockObject->new->set_true('_protect'));
+    $job->_set_status(running => {});
+    $job->on(status_changed => sub ($job, $data) { $event_data = $data });
+    $job->_handle_timeout($engine);
+    is $job->status, 'stopping', 'stop has been triggered';
+    is $event_data->{reason}, WORKER_SR_TIMEOUT, 'stop reason is timeout';
 };
 
 subtest 'ignoring known images and files' => sub {
@@ -1326,14 +1300,115 @@ subtest 'Cache setup error handling' => sub {
     $worker->settings->global_settings->{CACHEDIRECTORY} = '/var/lib/openqa/cache';
     my $extended_reason = "do_asset_caching return error";
     $engine_mock->redefine(
-        do_asset_caching => sub {
-            return {error => $extended_reason};
+        do_asset_caching => sub ($job, $vars, $cache_dir, $assetkeys, $webui_host, $pooldir, $callback) {
+            return $callback->({error => $extended_reason});
         });
     $engine_mock->unmock('engine_workit');
     $job->accept;
     wait_until_job_status_ok($job, 'accepted');
     combined_like { $job->start } qr/Unable to setup job 12: do_asset_caching return error/,
       'show the error message that is returned by do_asset_caching correctly';
+};
+
+subtest 'calculating md5sum of result file' => sub {
+    my $job = OpenQA::Worker::Job->new($worker, $client, {id => 12, URL => $engine_url});
+    my $png = $pool_directory->child('foo.png');
+    $png->spurt('not really a PNG');
+    is $job->_calculate_file_md5('foo.png'), '454b28784a187cd782891a721b7ae31b', 'md5sum computed';
+    $png->spurt('optimized');
+    is $job->_calculate_file_md5('foo.png'), '454b28784a187cd782891a721b7ae31b', 'previous md5sum returned';
+};
+
+subtest 'posting setup status' => sub {
+    my $job = OpenQA::Worker::Job->new($worker, $client, {id => 13, URL => $engine_url});
+    $job->post_setup_status;
+    my %expected_msg = (json => {status => {setup => 1, worker_id => 1}}, path => 'jobs/13/status');
+    is_deeply $client->sent_messages->[-1], \%expected_msg, 'sent status' or diag explain $client->sent_messages;
+};
+
+subtest 'asset upload' => sub {
+    my $upload_mock = Test::MockModule->new('OpenQA::Client::Upload');
+    my @params;
+    my $mock_failure;
+    my $chunk = Test::MockObject->new->set_always(index => 2)->set_always(total => 20)->set_always(end => 50)
+      ->set_always(start => 25)->set_always(is_last => 0);
+    my $normal_res = Test::MockObject->new->set_always(is_server_error => 0);
+    my $failure_res
+      = Test::MockObject->new->set_always(is_server_error => 1)->set_always(json => {error => 'fake error'});
+    my $normal_tx  = Test::MockObject->new->set_always(error => undef)->set_always(res => $normal_res);
+    my $failure_tx = Test::MockObject->new->set_always(error => {code => 404, message => 'not found'})
+      ->set_always(res => $failure_res);
+    $upload_mock->redefine(
+        asset => sub ($upload, @args) {
+            # emit all events here to test the handlers (although in reality some events wouldn't occur together within
+            # the same upload)
+            $upload->emit('upload_local.prepare');
+            $upload->emit('upload_chunk.prepare', Mojo::Collection->new);
+            $upload->emit('upload_chunk.start');
+            $upload->emit('upload_chunk.finish',   $chunk);
+            $upload->emit('upload_local.response', $normal_tx);
+            $upload->emit('upload_chunk.response', $failure_tx);
+            $upload->emit('upload_chunk.fail',     undef, Test::MockObject->new->set_always(index => 3));
+            $upload->emit('upload_chunk.error') if $mock_failure;
+            push @params, \@args;
+        });
+    my $openqa_client = OpenQA::Client->new(base_url => 'http://base.url');
+    $client->ua($openqa_client);
+    $job_mock->unmock(qw(_upload_log_file _upload_asset));
+
+    my $job    = OpenQA::Worker::Job->new($worker, $client, {id => 14, URL => $engine_url});
+    my %params = (file => {file => 'foo', filename => 'bar'});
+
+    my $upload_res;
+    combined_like { $upload_res = $job->_upload_asset(\%params) } qr/fake error.*404.*Upload failed for chunk 3/s,
+      'upload logged';
+    is $upload_res, 1, 'upload succeeded';
+    is_deeply \@params, [[14, {asset => undef, chunk_size => 1000000, file => 'foo', name => 'bar', local => 1}]],
+      'expected params passed'
+      or diag explain \@params;
+
+    $mock_failure = 1;
+    combined_like { $upload_res = $job->_upload_asset(\%params) } qr/and all retry attempts have been exhausted/s,
+      'error logged';
+    is $upload_res, 0, 'upload failed';
+};
+
+subtest 'log file upload' => sub {
+    my $ua_mock = Test::MockModule->new('Mojo::UserAgent');
+    my ($req, $mock_failure);
+    $ua_mock->redefine(
+        start => sub ($ua, $tx) {
+            $req = $tx->req;
+            $tx->res(Mojo::Message::Response->new(code => 500, error => {message => 'Foo', code => 500}))
+              if $mock_failure;
+            return $tx;
+        });
+
+    my $job = OpenQA::Worker::Job->new($worker, $client, {id => 15, URL => $engine_url});
+    is $job->_upload_log_file({file => {filename => 'bar', some => 'param'}}), 1, 'upload successful';
+    is $req->method,       'POST',             'expected method';
+    is $req->url,          'jobs/15/artefact', 'expected URL';
+    like $req->build_body, qr/some: param/,    'expected parameters';
+
+    my $upload_res;
+    $mock_failure = 1;
+    combined_like { $upload_res = $job->_upload_log_file({file => {filename => 'bar', some => 'param'}}) }
+    qr|Uploading artefact bar.*500 resp.*attempts.*4/5.*1/5.*All 5 upload attempts have failed for bar.*500 resp|s,
+      'attempts and errors logged';
+    is $upload_res, 0, 'upload failed';
+
+    my $callback_invoked = 0;
+    $job->{_has_uploaded_logs_and_assets} = 1;            # assume final upload
+    $job->{_files_to_send}                = {bar => 1};
+    combined_like {
+        $job->_upload_results_step_2_upload_images(sub { $callback_invoked = [@_]; });
+        Mojo::IOLoop->one_tick;
+    }
+    qr|All 5 upload attempts have failed for bar.*Error uploading bar: 500 response: Foo|s,
+      'errors logged during final upload';
+    is $job->{_result_upload_error}, 'Unable to upload images: Error uploading bar: 500 response: Foo',
+      'upload failure tracked';
+    is_deeply $callback_invoked, [], 'callback invoked';
 };
 
 done_testing();

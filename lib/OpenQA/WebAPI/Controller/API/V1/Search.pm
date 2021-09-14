@@ -79,17 +79,17 @@ sub _search_perl_modules {
         # Skip files residing in the test root
         next unless -d $distri;
 
-        # Perl module filenames
+        # Test module filenames
         for my $filename (
-            $distri->list_tree()->head($cap)->map('to_rel', $distris)->grep(qr/.*\Q$keywords\E.*\.pm$/)->each)
+            $distri->list_tree()->head($cap)->map('to_rel', $distris)->grep(qr/.*\Q$keywords\E.*\.p[my]$/)->each)
         {
             push(@results, {occurrence => $filename});
             $cap--;
         }
         last if $cap < 1;
 
-        # Contents of Perl modules
-        my @cmd = ('git', '-C', $distri, 'grep', '--line-number', '--no-index', '-F', $keywords, '--', '*.pm');
+        # Contents of test modules
+        my @cmd = ('git', '-C', $distri, 'grep', '--line-number', '--no-index', '-F', $keywords, '--', '*.p[my]');
         my $stdout;
         my $stderr;
         IPC::Run::run(\@cmd, \undef, \$stdout, \$stderr);
@@ -129,7 +129,10 @@ sub _search_job_modules {
         {-or => {name => $like}},
         {
             join     => 'job',
-            group_by => ['me.id', 'job.DISTRI', 'job.VERSION', 'job.FLAVOR', 'job.TEST', 'job.ARCH', 'job.MACHINE'],
+            group_by =>
+              ['me.id', 'job.DISTRI', 'job.VERSION', 'job.FLAVOR', 'job.TEST', 'job.ARCH', 'job.MACHINE', 'job.id'],
+            prefetch => [qw(job)],
+            select   => [qw(me.id me.script me.job_id job.DISTRI job.VERSION job.FLAVOR job.ARCH job.BUILD job.TEST)],
             order_by => {-desc => 'job_id'}})->slice(0, $limit);
     while (my $job_module = $job_modules->next) {
         my $contents = $job_module->script;
@@ -180,7 +183,7 @@ sub query {
 
     # Allow n queries per minute, per user (if logged in)
     my $lockname = 'webui_query_rate_limit';
-    if (my $user = $self->current_user) { $lockname .= $user }
+    if (my $user = $self->current_user) { $lockname .= $user->username }
     return $self->render(json => {error => 'Rate limit exceeded'}, status => 400)
       unless $self->app->minion->lock($lockname, 60, {limit => $self->app->config->{'rate_limits'}->{'search'}});
 

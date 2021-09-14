@@ -72,7 +72,7 @@ has(
 
 # broadcasts a message to all JavaScript clients for the specified job ID
 # note: we don't broadcast to connections served by other prefork processes here, hence
-#       prefork musn't be used (for now)
+#       prefork mustn't be used (for now)
 sub send_message_to_java_script_clients {
     my ($self, $job_id, $type, $what, $data, $status_code_to_quit_on_finished) = @_;
 
@@ -153,7 +153,7 @@ sub finish_all_connections {
 
 # quits the developments session for the specified job ID
 # note: we can not disconnect connections served by other prefork processes here, hence
-#       prefork musn't be used (for now)
+#       prefork mustn't be used (for now)
 sub quit_development_session {
     my ($self, $job_id, $reason, $status_code) = @_;
 
@@ -425,7 +425,7 @@ sub send_message_to_os_autoinst {
     $cmd_srv_tx->send({json => $msg});
 }
 
-# disconnects explicitely from os-autoinst command server, supressing the usual handling when disconnecting from
+# disconnects explicitly from os-autoinst command server, suppressing the usual handling when disconnecting from
 # os-autoinst
 # note: This connection is actually not supposed to be cancelled from the liveviewhandler's side. The only exception
 #       is when a bad configuration (such as an incompatible version) is detected.
@@ -588,35 +588,6 @@ sub post_upload_progress {
     my $broadcast_count
       = $self->send_message_to_java_script_clients($job_id, info => 'upload progress', $progress_info);
     return $self->render(json => {broadcast_count => $broadcast_count}, status => 200);
-}
-
-# handles attempts to access a web socket route which does not exists ("404 for web sockets")
-sub not_found_ws {
-    my ($self) = @_;
-
-    my $transaction = $self->tx;
-    $transaction->send(
-        {
-            json => {
-                type => 'error',
-                what => 'route does not exist',
-            }
-        },
-        sub {
-            $transaction->finish(1011) unless ($transaction->is_finished);
-        });
-    $self->on(finish => sub { });
-}
-
-# provides a 404 error message for usual HTTP
-sub not_found_http {
-    my ($self) = @_;
-
-    return $self->respond_to(
-        any => {
-            text   => "route does not exist\n",
-            status => 404,
-        });
 }
 
 1;

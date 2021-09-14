@@ -1,6 +1,6 @@
 package OpenQA::Test::Utils;
 use Test::Most;
-use Mojo::Base -base;
+use Mojo::Base -base, -signatures;
 
 use Exporter 'import';
 use FindBin;
@@ -51,9 +51,10 @@ our (@EXPORT, @EXPORT_OK);
     qw(redirect_output create_user_for_workers),
     qw(create_webapi create_websocket_server create_scheduler create_live_view_handler),
     qw(unresponsive_worker broken_worker rejective_worker setup_share_dir setup_fullstack_temp_dir run_gru_job),
-    qw(collect_coverage_of_gru_jobs stop_service start_worker unstable_worker fake_asset_server),
+    qw(stop_service start_worker unstable_worker fake_asset_server),
     qw(cache_minion_worker cache_worker_service shared_hash embed_server_for_testing),
-    qw(run_cmd test_cmd wait_for_or_bail_out)
+    qw(run_cmd test_cmd wait_for_or_bail_out perform_minion_jobs),
+    qw(prepare_clean_needles_dir prepare_default_needle mock_io_loop assume_all_assets_exist)
 );
 
 # The function OpenQA::Utils::service_port method hardcodes ports in a
@@ -262,8 +263,7 @@ sub stop_service {
     $h->finish;
 }
 
-sub create_webapi {
-    my ($port) = @_;
+sub create_webapi ($port = undef, $no_cover = undef) {
     $port //= service_port 'webui';
     note("Starting WebUI service. Port: $port");
 
@@ -274,7 +274,7 @@ sub create_webapi {
         my $daemon = Mojo::Server::Daemon->new(listen => ["http://127.0.0.1:$port"], silent => 1);
         $daemon->build_app('OpenQA::WebAPI');
         $daemon->run;
-        Devel::Cover::report() if Devel::Cover->can('report');
+        Devel::Cover::report() if !$no_cover && Devel::Cover->can('report');
     };
     # as this might download assets on first test, we need to wait a while
     my $wait = time + 50;
@@ -292,7 +292,7 @@ sub create_webapi {
 }
 
 sub create_websocket_server {
-    my ($port, $bogus, $nowait, $with_embedded_scheduler) = @_;
+    my ($port, $bogus, $nowait, $with_embedded_scheduler, $no_cover) = @_;
     $port //= service_port 'websocket';
 
     note("Starting WebSocket service. Port: $port");
@@ -336,7 +336,7 @@ sub create_websocket_server {
         }
 
         OpenQA::WebSockets::run;
-        Devel::Cover::report() if Devel::Cover->can('report');
+        Devel::Cover::report() if !$no_cover && Devel::Cover->can('report');
     };
     if (!defined $nowait) {
         # wait for websocket server
@@ -357,9 +357,7 @@ sub create_websocket_server {
     return $h;
 }
 
-sub create_scheduler {
-    my ($port, $no_stale_job_detection) = @_;
-    $port //= service_port 'scheduler';
+sub create_scheduler ($port = service_port 'scheduler') {
     note("Starting Scheduler service. Port: $port");
     OpenQA::Scheduler::Client->singleton->port($port);
     _setup_sigchld_handler 'openqa-scheduler', start sub {
@@ -367,8 +365,6 @@ sub create_scheduler {
         local $ENV{MOJO_LISTEN}             = "http://127.0.0.1:$port";
         local $ENV{MOJO_INACTIVITY_TIMEOUT} = 9999;
         local @ARGV                         = ('daemon');
-        monkey_patch 'OpenQA::Scheduler::Model::Jobs', incomplete_and_duplicate_stale_jobs => sub { 1 }
-          if $no_stale_job_detection;
         OpenQA::Scheduler::run;
         Devel::Cover::report() if Devel::Cover->can('report');
     };
@@ -427,14 +423,14 @@ sub create_user_for_workers {
     return $schema->resultset('ApiKeys')->create({user_id => $user->id});
 }
 
-sub setup_worker {
-    my ($worker, $host) = @_;
+sub setup_worker {    # uncoverable statement
+    my ($worker, $host) = @_;    # uncoverable statement
 
-    $worker->settings->webui_hosts([]);
-    $worker->settings->webui_host_specific_settings({});
-    push(@{$worker->settings->webui_hosts}, $host);
-    $worker->settings->webui_host_specific_settings->{$host} = {};
-    $worker->log_setup_info;
+    $worker->settings->webui_hosts([]);                               # uncoverable statement
+    $worker->settings->webui_host_specific_settings({});              # uncoverable statement
+    push(@{$worker->settings->webui_hosts}, $host);                   # uncoverable statement
+    $worker->settings->webui_host_specific_settings->{$host} = {};    # uncoverable statement
+    $worker->log_setup_info;                                          # uncoverable statement
 }
 
 sub start_worker {
@@ -456,26 +452,26 @@ sub unstable_worker {
     note("Starting unstable worker. Instance: $instance for host $host");
     $ticks = 1 unless defined $ticks;
 
-    my $h = _setup_sigchld_handler 'openqa-worker-unstable', start sub {
-        _setup_sub_process 'openqa-worker-unstable';
-        my $worker = OpenQA::Worker->new(
-            {
-                apikey    => $apikey,
-                apisecret => $apisecret,
-                instance  => $instance,
-                verbose   => 1
-            });
-        setup_worker($worker, $host);
-        $worker->init();
-        if ($ticks < 0) {
-            Mojo::IOLoop->singleton->start;
-        }
-        else {
-            Mojo::IOLoop->singleton->one_tick for (0 .. $ticks);
-        }
-        Devel::Cover::report() if Devel::Cover->can('report');
-        if ($sleep) {    # uncoverable statement
-            1 while sleep $sleep;    # uncoverable statement
+    my $h = _setup_sigchld_handler 'openqa-worker-unstable', start sub {    # uncoverable statement
+        _setup_sub_process 'openqa-worker-unstable';                        # uncoverable statement
+        my $worker = OpenQA::Worker->new(                                   # uncoverable statement
+            {                                                               # uncoverable statement
+                apikey    => $apikey,                                       # uncoverable statement
+                apisecret => $apisecret,                                    # uncoverable statement
+                instance  => $instance,                                     # uncoverable statement
+                verbose   => 1                                              # uncoverable statement
+            });    # uncoverable statement
+        setup_worker($worker, $host);    # uncoverable statement
+        $worker->init();                 # uncoverable statement
+        if ($ticks < 0) {                # uncoverable statement
+            Mojo::IOLoop->singleton->start;    # uncoverable statement
+        }    # uncoverable statement
+        else {    # uncoverable statement
+            Mojo::IOLoop->singleton->one_tick for (0 .. $ticks);    # uncoverable statement
+        }    # uncoverable statement
+        Devel::Cover::report() if Devel::Cover->can('report');    # uncoverable statement
+        if ($sleep) {                                             # uncoverable statement
+            1 while sleep $sleep;                                 # uncoverable statement
         }    # uncoverable statement
     };
     sleep $sleep if $sleep;
@@ -576,24 +572,15 @@ sub run_gru_job {
     my $id     = $app->gru->enqueue(@_)->{minion_id};
     my $worker = $app->minion->worker->register;
     my $job    = $worker->dequeue(0, {id => $id});
-    $job->perform;
+    my $err;
+    defined($err = $job->execute) ? $job->fail($err) : $job->finish;
     $worker->unregister;
     return $job->info;
 }
 
-sub collect_coverage_of_gru_jobs {
-    my ($app) = @_;
-
-    $app->minion->on(
-        worker => sub {
-            my ($minion, $worker) = @_;
-            $worker->on(
-                dequeue => sub {
-                    my ($worker, $job) = @_;
-                    return undef if $job->info->{notes}{no_cover};
-                    $job->on(cleanup => sub { Devel::Cover::report() if Devel::Cover->can('report') });
-                });
-        });
+sub perform_minion_jobs ($minion, @args) {
+    if   ($ENV{TEST_FORK_MINION_JOBS}) { $minion->perform_jobs(@args) }
+    else                               { $minion->perform_jobs_in_foreground(@args) }
 }
 
 sub run_cmd {
@@ -620,7 +607,7 @@ sub test_cmd {
     return $ret;
 }
 
-sub wait_for_or_bail_out(&*;*) {
+sub wait_for_or_bail_out : prototype(&*;*) {    # `&*;*` allows calling it like `wait_for_or_bail_out { 1 } 'foo'`
     my ($function, $description, $args) = @_;
     my $timeout  = $args->{timeout}  // 60;
     my $interval = $args->{interval} // .1;
@@ -632,5 +619,28 @@ sub wait_for_or_bail_out(&*;*) {
     }
     BAIL_OUT "$description not available";
 }
+
+sub prepare_clean_needles_dir ($dir = 't/data/openqa/share/tests/opensuse/needles') {
+    return path($dir)->remove_tree->make_path;
+}
+
+sub prepare_default_needle ($dir) {
+    my $dest = path($dir, 'inst-timezone-text.json');
+    path('t/data/default-needle.json')->copy_to($dest);
+    return $dest;
+}
+
+sub mock_io_loop (%args) {
+    my $io_loop_mock = Test::MockModule->new('Mojo::IOLoop');
+    $io_loop_mock->redefine(    # avoid forking to prevent coverage analysis from slowing down the test significantly
+        subprocess => sub ($io_loop, $function, $callback) {
+            my @result = eval { $function->() };
+            my $error  = $@;
+            $io_loop->next_tick(sub { $callback->(undef, $error, @result) });
+        }) if $args{subprocess};
+    return $io_loop_mock;
+}
+
+sub assume_all_assets_exist { OpenQA::Schema->singleton->resultset('Assets')->search({})->update({size => 0}) }
 
 1;

@@ -18,10 +18,11 @@ use Mojo::Base 'Mojolicious::Plugin';
 
 use OpenQA::Log 'log_debug';
 use OpenQA::ScreenshotDeletion;
-use OpenQA::Utils qw(:DEFAULT resultdir);
-use OpenQA::Task::Utils qw(check_df finish_job_if_disk_usage_below_percentage);
+use OpenQA::Utils qw(:DEFAULT resultdir check_df);
+use OpenQA::Task::Utils qw(finish_job_if_disk_usage_below_percentage);
 use Scalar::Util 'looks_like_number';
 use List::Util 'min';
+use Time::Seconds;
 
 # define default parameters for batch processing
 use constant DEFAULT_SCREENSHOTS_PER_BATCH  => 200000;
@@ -38,16 +39,18 @@ sub register {
 sub _limit {
     my ($job, $args) = @_;
 
-    # prevent multiple limit_results_and_logs tasks and limit_screenshots_task to run in parallel
+    # prevent multiple limit_results_and_logs tasks and limit_screenshots_task/archive_job_results to run in parallel
     my $app = $job->app;
+    return $job->retry({delay => ONE_MINUTE})
+      unless my $process_job_results_guard = $app->minion->guard('process_job_results_task', ONE_DAY);
     return $job->finish('Previous limit_results_and_logs job is still active')
-      unless my $limit_results_and_logs_guard = $app->minion->guard('limit_results_and_logs_task', 86400);
+      unless my $limit_results_and_logs_guard = $app->minion->guard('limit_results_and_logs_task', ONE_DAY);
     return $job->finish('Previous limit_screenshots_task job is still active')
-      unless my $limit_screenshots_guard = $app->minion->guard('limit_screenshots_task', 86400);
+      unless my $limit_screenshots_guard = $app->minion->guard('limit_screenshots_task', ONE_DAY);
 
     # prevent multiple limit_* tasks to run in parallel
-    return $job->retry({delay => 60})
-      unless my $overall_limit_guard = $app->minion->guard('limit_tasks', 86400);
+    return $job->retry({delay => ONE_MINUTE})
+      unless my $overall_limit_guard = $app->minion->guard('limit_tasks', ONE_DAY);
 
     return undef
       if finish_job_if_disk_usage_below_percentage(
@@ -61,9 +64,19 @@ sub _limit {
     my $schema = $app->schema;
     $schema->resultset('JobGroups')->new({})->limit_results_and_logs;
 
-    my $groups = $schema->resultset('JobGroups');
+    my $groups  = $schema->resultset('JobGroups');
+    my $gru     = $app->gru;
+    my %options = (priority => 0, ttl => 2 * ONE_DAY);
     while (my $group = $groups->next) {
-        $group->limit_results_and_logs;
+        my $preserved_important_jobs;
+        $group->limit_results_and_logs(\$preserved_important_jobs);
+
+        # archive openQA jobs where logs were preserved because they are important
+        if ($preserved_important_jobs) {
+            for my $job ($preserved_important_jobs->all) {
+                $gru->enqueue(archive_job_results => [$job->id], \%options) if $job->archivable_result_dir;
+            }
+        }
     }
 
     # prevent enqueuing new limit_screenshot if there are still inactive/delayed ones
@@ -82,8 +95,6 @@ sub _limit {
     my $batches_per_minion_job = $args->{batches_per_minion_job}
       // $config->{screenshot_cleanup_batches_per_minion_job};
     my $screenshots_per_minion_job = $batches_per_minion_job * $screenshots_per_batch;
-    my $gru                        = $app->gru;
-    my %options                    = (priority => 0, ttl => 172800);
     my @screenshot_cleanup_info;
     my @parent_minion_job_ids = ($job->id);
     for (my $i = $min_id; $i < $max_id; $i += $screenshots_per_minion_job) {
@@ -106,12 +117,12 @@ sub _limit_screenshots {
 
     # prevent multiple limit_screenshots tasks to run in parallel
     my $app = $job->app;
-    return $job->retry({delay => 60})
-      unless my $limit_screenshots_guard = $app->minion->guard('limit_screenshots_task', 86400);
+    return $job->retry({delay => ONE_MINUTE})
+      unless my $limit_screenshots_guard = $app->minion->guard('limit_screenshots_task', ONE_DAY);
 
     # prevent multiple limit_* tasks to run in parallel
-    return $job->retry({delay => 60})
-      unless my $overall_limit_guard = $app->minion->guard('limit_tasks', 86400);
+    return $job->retry({delay => ONE_MINUTE})
+      unless my $overall_limit_guard = $app->minion->guard('limit_tasks', ONE_DAY);
 
     # validate ID range
     my ($min_id, $max_id, $screenshots_per_batch)
@@ -159,7 +170,8 @@ sub _ensure_results_below_threshold {
 
     # prevent multiple limit_* tasks to run in parallel
     my $app = $job->app;
-    return $job->retry({delay => 60}) unless my $overall_limit_guard = $app->minion->guard('limit_tasks', 86400);
+    return $job->retry({delay => ONE_MINUTE})
+      unless my $overall_limit_guard = $app->minion->guard('limit_tasks', ONE_DAY);
 
     # load configured free percentage
     my $min_free_percentage = $job->app->config->{misc_limits}->{results_min_free_disk_space_percentage};
@@ -181,7 +193,7 @@ sub _ensure_results_below_threshold {
     return $job->finish('Done, nothing to do') if $df_chk->();
 
     # determine the last job *before* determining important builds
-    # note: If a new important build is scheduled while the cleanup is ongoing we must not accidently clean these
+    # note: If a new important build is scheduled while the cleanup is ongoing we must not accidentally clean these
     #       jobs up because our list of important builds is outdated. It would be possible to use a transaction
     #       to avoid this. However, this would make things more complicated because the actual screenshot deletion
     #       must *not* run within that transaction so we needed to determine non-important jobs upfront. This

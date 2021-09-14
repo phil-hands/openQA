@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (C) 2014-2020 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 # Copyright (C) 2016 Red Hat
 #
 # This program is free software; you can redistribute it and/or modify
@@ -21,10 +21,9 @@ use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
 use Test::Warnings;
-use OpenQA::Test::TimeLimit '10';
+use OpenQA::Test::TimeLimit '20';
 use OpenQA::Test::Case;
 use OpenQA::Test::Client 'client';
-use OpenQA::Test::Utils 'collect_coverage_of_gru_jobs';
 use Mojo::IOLoop;
 
 use OpenQA::Utils 'locate_asset';
@@ -32,8 +31,6 @@ use OpenQA::Utils 'locate_asset';
 OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 04-products.pl');
 
 my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
-
-collect_coverage_of_gru_jobs($t->app);
 
 my $gru_tasks        = $t->app->schema->resultset('GruTasks');
 my $gru_dependencies = $t->app->schema->resultset('GruDependencies');
@@ -167,7 +164,7 @@ $rsp = schedule_iso({%params, HDD_1_DECOMPRESS_URL => 'http://adamshost/nonexist
 is($rsp->body, 'Asset download requested from non-passlisted host adamshost.');
 check_download_asset('asset _DECOMPRESS_URL not in passlist');
 
-# schedule an existant ISO against a repo to verify the ISO is registered and the repo is not
+# schedule an existent ISO against a repo to verify the ISO is registered and the repo is not
 $rsp = schedule_iso({%iso, REPO_1 => 'http://open.qa/any-repo'}, 200);
 
 is_deeply(

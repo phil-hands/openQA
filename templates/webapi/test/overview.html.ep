@@ -97,21 +97,47 @@
                         <label><input value="<%= $state %>" name="state" type="checkbox" id="filter-<%= $state %>"> <%= ucfirst $state =~ s/_/ /r %></label>
                     % }
                 </div>
-                <div class="form-group">
-                    <strong>Architecture</strong>
-                    <input type="text" class="form-control" name="arch" placeholder="any" id="filter-arch">
+                <div class="row" id="filter-arch-flavor">
+                    <div class="col-5">
+                        <div class="form-group">
+                            <strong>Architecture</strong>
+                            <input type="text" class="form-control" name="arch" placeholder="any" id="filter-arch">
+                        </div>
+                    </div>
+                    <div class="col-5">
+                        <div class="form-group">
+                            <strong>Flavor</strong>
+                            <input type="text" class="form-control" name="flavor" placeholder="any" id="filter-flavor">
+                        </div>
+                    </div>
                 </div>
-                <div class="form-group">
-                    <strong>Machines</strong>
-                    <input type="text" class="form-control" name="machine" placeholder="any" id="filter-machine">
+                <div class="row" id="filter-machine-test">
+                    <div class="col-5">
+                        <div class="form-group">
+                            <strong>Machines</strong>
+                            <input type="text" class="form-control" name="machine" placeholder="any" id="filter-machine">
+                        </div>
+                    </div>
+                    <div class="col-5">
+                        <div class="form-group">
+                            <strong>Test</strong>
+                            <input type="text" class="form-control" name="test" placeholder="any" id="filter-test">
+                        </div>
+                    </div>
                 </div>
                 <div class="row" id="filter-modules">
-                    <div class="col-8">
+                    <div class="col-4">
                         <div class="form-group">
                             <label for="filter-modules"><strong>Module</strong></label>
                             <input name="modules" type="text" id="modules"
                             placeholder="modules, comma separated, e.g. mod1,mod2"
                             class="form-control">
+                        </div>
+                    </div>
+                    <div class="col-4">
+                        <div class="form-group">
+                            <label for="filter-module-re"><strong>Test module</strong></label>
+                            <input type="text" class="form-control" name="module_re" placeholder="regular expression" id="filter-module-re">
                         </div>
                     </div>
                     <div class="col-2">

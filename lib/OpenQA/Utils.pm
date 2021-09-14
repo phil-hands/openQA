@@ -1,4 +1,4 @@
-# Copyright (C) 2012-2020 SUSE LLC
+# Copyright (C) 2012-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,11 +17,14 @@ package OpenQA::Utils;
 use strict;
 use warnings;
 
+use Mojo::Base -signatures;
 use Carp;
 use Cwd 'abs_path';
+use Filesys::Df qw(df);
 use IPC::Run();
 use Mojo::URL;
 use Regexp::Common 'URI';
+use Time::Seconds;
 use Try::Tiny;
 use Mojo::File 'path';
 use IO::Handle;
@@ -29,14 +32,16 @@ use IO::Socket::IP;
 use POSIX 'strftime';
 use Scalar::Util 'blessed';
 use Mojo::Log;
-use Scalar::Util qw(blessed reftype);
+use Scalar::Util qw(blessed reftype looks_like_number);
 use Exporter 'import';
 use OpenQA::App;
-use OpenQA::Constants qw(VIDEO_FILE_NAME_START VIDEO_FILE_NAME_REGEX);
+use OpenQA::Constants qw(VIDEO_FILE_NAME_START VIDEO_FILE_NAME_REGEX FRAGMENT_REGEX);
 use OpenQA::Log qw(log_info log_debug log_warning log_error);
 
 # avoid boilerplate "$VAR1 = " in dumper output
 $Data::Dumper::Terse = 1;
+
+my $FRAG_REGEX = FRAGMENT_REGEX;
 
 our $VERSION = sprintf "%d.%03d", q$Revision: 1.12 $ =~ /(\d+)/g;
 our @EXPORT  = qw(
@@ -66,7 +71,6 @@ our @EXPORT  = qw(
   human_readable_size
   locate_asset
   detect_current_version
-  wait_with_progress
   parse_tags_from_comments
   path_to_class
   loaded_modules
@@ -86,11 +90,13 @@ our @EXPORT  = qw(
   find_video_files
   fix_top_level_help
   looks_like_url_with_scheme
+  check_df
 );
 
 our @EXPORT_OK = qw(
   prjdir
   sharedir
+  archivedir
   resultdir
   assetdir
   imagesdir
@@ -119,7 +125,9 @@ sub prjdir { ($ENV{OPENQA_BASEDIR} || '/var/lib') . '/openqa' }
 
 sub sharedir { $ENV{OPENQA_SHAREDIR} || (prjdir() . '/share') }
 
-sub resultdir { prjdir() . '/testresults' }
+sub archivedir { $ENV{OPENQA_ARCHIVEDIR} || (prjdir() . '/archive') }
+
+sub resultdir ($archived = 0) { ($archived ? archivedir() : prjdir()) . '/testresults' }
 
 sub assetdir { sharedir() . '/factory' }
 
@@ -276,7 +284,7 @@ sub run_cmd_with_log_return_error {
         return {
             status      => 0,
             return_code => undef,
-            stderr      => "an internal error occured",
+            stderr      => "an internal error occurred",
         };
     };
 }
@@ -426,7 +434,7 @@ sub href_to_bugref {
 
 sub url_to_href {
     my ($text) = @_;
-    $text =~ s(($RE{URI}))(<a href="$1">$1</a>)gx;
+    $text =~ s!($RE{URI}$FRAG_REGEX)!<a href="$1">$1</a>!gx;
     return $text;
 }
 
@@ -649,20 +657,6 @@ sub read_test_modules {
     };
 }
 
-sub wait_with_progress {
-    my ($interval) = @_;
-    my $tics;
-    local $| = 1;
-
-    do {
-        $tics++;
-        sleep(1);
-        print ".";
-    } while ($interval > $tics);
-
-    print "\n";
-}
-
 # parse comments of the specified (parent) group and store all mentioned builds in $res (hashref)
 sub parse_tags_from_comments {
     my ($group, $res) = @_;
@@ -880,9 +874,9 @@ sub change_sec_to_word {
     return undef unless ($second);
     return undef if ($second !~ /^[[:digit:]]+$/);
     my %time_numbers = (
-        d => 86400,
-        h => 3600,
-        m => 60,
+        d => ONE_DAY,
+        h => ONE_HOUR,
+        m => ONE_MINUTE,
         s => 1
     );
     my $time_word = '';
@@ -901,5 +895,18 @@ sub find_video_files { path(shift)->list_tree->grep(VIDEO_FILE_NAME_REGEX) }
 sub fix_top_level_help { @ARGV = () if ($ARGV[0] // '') =~ qr/^(-h|(--)?help)$/ }
 
 sub looks_like_url_with_scheme { return !!Mojo::URL->new(shift)->scheme }
+
+sub check_df ($dir) {
+    my $df              = Filesys::Df::df($dir, 1) // {};
+    my $available_bytes = $df->{bavail};
+    my $total_bytes     = $df->{blocks};
+    die "Unable to determine disk usage of '$dir'"
+      unless looks_like_number($available_bytes)
+      && looks_like_number($total_bytes)
+      && $total_bytes > 0
+      && $available_bytes >= 0
+      && $available_bytes <= $total_bytes;
+    return ($available_bytes, $total_bytes);
+}
 
 1;

@@ -1,4 +1,4 @@
-# Copyright (C) 2016-2019 SUSE LLC
+# Copyright (C) 2016-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -23,6 +23,7 @@ use OpenQA::Schema::Result::Jobs;
 use OpenQA::Utils;
 use Date::Format;
 use Sort::Versions;
+use Time::Seconds;
 
 sub init_job_figures {
     my ($job_result) = @_;
@@ -35,6 +36,7 @@ sub init_job_figures {
     $job_result->{failed}     = 0;
     $job_result->{unfinished} = 0;
     $job_result->{labeled}    = 0;
+    $job_result->{comments}   = 0;
     $job_result->{softfailed} = 0;
     $job_result->{skipped}    = 0;
     $job_result->{total}      = 0;
@@ -58,8 +60,12 @@ sub count_job {
             return;
         }
         if (grep { $job->result eq $_ } OpenQA::Jobs::Constants::NOT_OK_RESULTS) {
+            my $comment_data = $labels->{$job->id};
             $jr->{failed}++;
-            $jr->{labeled}++ if $labels->{$job->id};
+            if ($comment_data) {
+                $jr->{labeled}++  if $comment_data->{reviewed};
+                $jr->{comments}++ if $comment_data->{comments} || $comment_data->{reviewed};
+            }
             return;
         }
         # note: Incompletes and timeouts are accounted to both categories - failed and skipped.
@@ -69,11 +75,9 @@ sub count_job {
         return;
     }
     my $state = $job->state;
-    if (grep { /$state/ } (OpenQA::Jobs::Constants::PENDING_STATES)) {
-        $jr->{unfinished}++;
-        return;
-    }
-    log_error("MISSING S:" . $job->state . " R:" . $job->result);
+    log_error("Encountered not-implemented state:" . $job->state . " result:" . $job->result)
+      unless grep { /$state/ } (OpenQA::Jobs::Constants::PENDING_STATES);
+    $jr->{unfinished}++;
     return;
 }
 
@@ -82,6 +86,7 @@ sub add_review_badge {
 
     $build_res->{all_passed} = $build_res->{passed} + $build_res->{softfailed} >= $build_res->{total};
     $build_res->{reviewed}   = $build_res->{labeled} >= $build_res->{failed};
+    $build_res->{commented}  = $build_res->{comments} >= $build_res->{failed};
 }
 
 sub filter_subgroups {
@@ -156,7 +161,7 @@ sub compute_build_results {
     my %search_filter = (group_id => {in => $group_ids});
     if ($time_limit_days) {
         $search_filter{t_created}
-          = {'>' => time2str('%Y-%m-%d %H:%M:%S', time - 24 * 3600 * $time_limit_days, 'UTC')};
+          = {'>' => time2str('%Y-%m-%d %H:%M:%S', time - ONE_DAY * $time_limit_days, 'UTC')};
     }
 
     # add search filter for tags
@@ -213,31 +218,21 @@ sub compute_build_results {
         }
 
         my %seen;
-        my @ids = map { $_->id } $jobs->all;
-        # prefetch comments to count. Any comment is considered a label here
-        # so a build is considered as 'reviewed' if all failures have at least
-        # a comment. This could be improved to distinguish between
-        # "only-labels", "mixed" and such
-        my $c = $group->result_source->schema->resultset('Comments')->search({job_id => {in => \@ids}});
-        my %labels;
-        while (my $comment = $c->next) {
-            $labels{$comment->job_id}++;
-        }
-        $jobs->reset;
-
-        while (my $job = $jobs->next) {
+        my @jobs = map {
+            my $key = $_->TEST . "-" . $_->ARCH . "-" . $_->FLAVOR . "-" . $_->MACHINE;
+            $seen{$key}++ ? () : $_;
+        } $jobs->all;
+        my $comment_data = $group->result_source->schema->resultset('Comments')->comment_data_for_jobs(\@jobs);
+        for my $job (@jobs) {
             $jr{distris}->{$job->DISTRI} = 1;
-            my $key = $job->TEST . "-" . $job->ARCH . "-" . $job->FLAVOR . "-" . $job->MACHINE;
-            next if $seen{$key}++;
-
             $jr{oldest} = $job->t_created if $job->t_created < $jr{oldest};
-            count_job($job, \%jr, \%labels);
+            count_job($job, \%jr, $comment_data);
             if ($jr{children}) {
                 my $child = $jr{children}->{$job->group_id};
                 $child->{distris}->{$job->DISTRI} = 1;
                 $child->{version} //= $job->VERSION;
                 $child->{build}   //= $job->BUILD;
-                count_job($job, $child, \%labels);
+                count_job($job, $child, $comment_data);
                 add_review_badge($child);
             }
         }

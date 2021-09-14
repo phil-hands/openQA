@@ -100,23 +100,17 @@ requests for consideration or create an issue with a code change proposal.
 == Getting involved into development
 [id="getting_involved"]
 
-But developers willing to get really involved into the development of openQA or
+Developers willing to get really involved into the development of openQA or
 people interested in following the always-changing roadmap should take a look
 at the https://progress.opensuse.org/projects/openqav3[openQAv3 project] in
 openSUSE's project management tool. This Redmine instance is used to coordinate
 the main development effort organizing the existing issues (bugs and desired
 features) into 'target versions'.
 
-Currently developers meet in IRC channel
-irc://chat.freenode.net/opensuse-factory[#opensuse-factory] and in a weekly
-https://github.com/jangouts/jangouts[jangouts] call of the core developer team.
-
-In addition to the ones representing development sprints there is another
-version that is always open. https://progress.opensuse.org/versions/490[Future
-improvements] groups features that are in the developers' and users' wish list
-but that have little chances to be addressed in the short term, either because
-the return of investment is not worth it or because they are out of the
-current scope of the development. Developers looking for a place to start
+https://progress.opensuse.org/versions/490[Future improvements] groups
+features that are in the developers' and users' wish list but that have little
+chances to be addressed in the short term, normally because they are out of
+the current scope of the development. Developers looking for a place to start
 contributing are encouraged to simply go to that list and assign any open
 issue to themselves.
 
@@ -372,13 +366,13 @@ for the openSUSE RPM package>>.
 
 === Perl and other packages
 In openQA, there is a `dependencies.yaml` file including a list of
-dependencies, seperated in groups. For example the openQA client does not need
+dependencies, separated in groups. For example the openQA client does not need
 all modules required to run openQA. Edit this file to add or change a dependency
 and run `make update-deps`.  This will generate the `cpanfile` and
 `dist/rpm/openQA.spec` files.
 
 The same applies to `os-autoinst` where `make update-deps` will generate the
-`cpanfile`, `os-autoinst.spec` and `container/travis_test/Dockerfile`.
+`cpanfile`, `os-autoinst.spec` and `container/ci/Dockerfile`.
 
 If changing any package dependencies make sure packages and updated packages
 are available in openSUSE Factory and whatever current Leap version is in
@@ -387,7 +381,7 @@ according change into the main openQA repo the dependency should be published
 as part of openSUSE Tumbleweed.
 
 === Remarks regarding CI
-* The CI of os-autoinst uses the container made using `container/travis_test/Dockerfile`.
+* The CI of os-autoinst uses the container made using `container/ci/Dockerfile`.
 * The CI of openQA uses the container made using `container/devel:openQA:ci/base/Dockerfile`
   and further dependencies listed in `.circleci/ci-packages.txt` (see
   <<Contributing.asciidoc#circleci-workflow,CircleCI documentation>>).
@@ -396,12 +390,15 @@ as part of openSUSE Tumbleweed.
 
 [[update-asset-cache]]
 === Update asset cache for openSUSE RPM package
-1. Clone the repository (or a branch to it if you do not have the rights to push directly)
-   locally, e.g. `osc co devel:openQA/openQA`.
-2. Run `bash update-cache.sh` inside the repository folder. Follow the log checking no
-   download errors occurred.
-3. Do a sanity check on the generated `cache.txz`. It usually should not be smaller than
-   before, contain the newly added sources and must not contain any empty files.
+1. Clone the repository (or a branch to it if you do not have the rights to
+   push directly) locally, e.g. `osc co devel:openQA/openQA`.
+2. Get the script `update-cache.sh` from the main git repository with
+   `osc service ra`
+2. Run `bash *update-cache.sh` inside the repository folder. Follow the log
+   checking no download errors occurred.
+3. Do a sanity check on the generated `cache.txz`. It usually should not be
+   smaller than before, contain the newly added sources and must not contain
+   any empty files.
 4. Add an entry to the changes file using `osc vc openQA.changes`.
 5. `osc ci -m 'Update asset cache'`
 
@@ -581,7 +578,7 @@ To launch the test suite first it is required to pull the docker image:
   docker pull registry.opensuse.org/devel/openqa/containers/openqa_dev:latest
 
 This Docker image is provided by the OBS repository https://build.opensuse.org/package/show/devel:openQA/openqa_dev
-and based on the `Dockerfile` within the `docker/travis_test` sub directory of the openQA repository.
+and based on the `Dockerfile` within the `docker/ci` sub directory of the openQA repository.
 
 Build the image using Makefile target:
 
@@ -609,7 +606,6 @@ environment variables defining our test matrix:
 |FULLSTACK=0| UITESTS=0
 |FULLSTACK=0| UITESTS=1
 |FULLSTACK=1|
-|SCHEDULER_FULLSTACK=1 DEVELOPER_FULLSTACK=1|
 |HEAVY=1|
 |GH_PUBLISH=true|
 |============================
@@ -678,6 +674,10 @@ executing while test coverage data is collected as longer runtimes should be
 expected in these cases. Consider lowering the timeout value based on usual
 local execution times whenever a test module is optimized in runtime. If the
 timeout is hit the test module normally aborts with a corresponding message.
+
+To disable the timeout globably set the environment variable
+`OPENQA_TEST_TIMEOUT_DISABLE=1`.
+
 Please be aware of the exception when the timeout triggers after the actual
 test part of a test module has finished but not all involved processes have
 finished or END blocks are processed. In this case the output can look like
@@ -695,6 +695,22 @@ Result: FAIL
 
 where "Wstat: 14" and "Non-zero wait status: 14" mean that the test process
 received the "ALRM" signal (signal number 14).
+
+In case of problems with timeouts look into `OpenQA::Test::TimeLimit` to find
+environment variables that can tweaked to disable or change timeout values or
+timeout scale factors. If you want to disable the timeout for indefinite
+manual debugging, set the environment variable
+`OPENQA_TEST_TIMEOUT_DISABLE=1`. The option `OPENQA_TEST_TIMEOUT_SCALE_CI` is
+only effective if the environment variable `CI` is set, which e.g. it is in
+circleCI and OBS but not in local development environments. When running with
+coverage analysis enabled the scaling factor of
+`OPENQA_TEST_TIMEOUT_SCALE_COVER` is applied to account for the runtime
+overhead.
+
+In case of Selenium based UI tests timing out trying to find a local
+chromedriver instance the variable `OPENQA_SELENIUM_TEST_STARTUP_TIMEOUT` can
+be set to a higher value. See
+https://metacpan.org/pod/Selenium::Chrome#startup_timeout for details.
 
 [[circleci-workflow]]
 == CircleCI workflow
@@ -898,7 +914,7 @@ node_modules/jshint/bin/jshint path/to/javascript.js
 == Profiling the web UI
 1. Install NYTProf, under openSUSE Tumbleweed: `zypper in perl-Devel-NYTProf perl-Mojolicious-Plugin-NYTProf`
 2. Put `profiling_enabled = 1+ in  `openqa.ini`.
-3. Optionally import production data like described in the official contributers documentation.
+3. Optionally import production data like described in the official contributors documentation.
 4. Restart the web UI, browse some pages. Profiling is done in the background.
 5. Access profiling data via `/nytprof` route.
 

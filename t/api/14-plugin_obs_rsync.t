@@ -1,4 +1,4 @@
-# Copyright (C) 2019-2020 SUSE LLC
+# Copyright (C) 2019-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -17,35 +17,13 @@ use Test::Most;
 
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
-use Test::Mojo;
-use OpenQA::Test::TimeLimit '30';
-use OpenQA::Test::Database;
-use OpenQA::Test::Case;
-use OpenQA::Test::Utils 'collect_coverage_of_gru_jobs';
-use Mojo::File qw(tempdir path);
-use File::Copy::Recursive 'dircopy';
+use OpenQA::Test::TimeLimit '50';
+use Mojo::IOLoop;
+use OpenQA::Test::Utils 'perform_minion_jobs';
+use OpenQA::Test::ObsRsync 'setup_obs_rsync_test';
 
-OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl');
-
-$ENV{OPENQA_CONFIG} = my $tempdir = tempdir;
-my $home_template = path(__FILE__)->dirname->dirname->child('data', 'openqa-trigger-from-obs');
-my $home          = "$tempdir/openqa-trigger-from-obs";
-dircopy($home_template, $home);
-my $concurrency    = 2;
-my $queue_limit    = 2;
-my $retry_interval = 1;
-$tempdir->child('openqa.ini')->spurt(<<"EOF");
-[global]
-plugins=ObsRsync
-[obs_rsync]
-home=$home
-queue_limit=$queue_limit
-concurrency=$concurrency
-retry_interval=$retry_interval
-EOF
-
-my $t = Test::Mojo->new('OpenQA::WebAPI');
-collect_coverage_of_gru_jobs($t->app);
+my %config = (concurrency => 2, queue_limit => 2, retry_interval => 1);
+my ($t, $tempdir, $home) = setup_obs_rsync_test(fixtures_glob => '01-jobs.pl 03-users.pl', config => \%config);
 my $app = $t->app;
 $t->ua(OpenQA::Client->new(apikey => 'ARTHURKEY01', apisecret => 'EXCALIBUR')->ioloop(Mojo::IOLoop->singleton));
 $t->app($app);
@@ -61,7 +39,7 @@ subtest 'smoke' => sub {
     $t->put_ok('/api/v1/obs_rsync/Proj3/runs?repository=standard')->status_is(201, "trigger with repository parameter");
 };
 
-$t->app->minion->perform_jobs;
+perform_minion_jobs($t->app->minion);
 
 subtest 'appliances' => sub {
     $t->put_ok('/api/v1/obs_rsync/Proj2/runs?repository=images')->status_is(201, "trigger with repository parameter");
@@ -71,7 +49,7 @@ subtest 'appliances' => sub {
       ->status_is(201, "trigger with different repository");
 };
 
-$t->app->minion->perform_jobs;
+perform_minion_jobs($t->app->minion);
 
 sub test_queue {
     my $t = shift;
@@ -89,7 +67,7 @@ sub test_queue {
     $t->put_ok('/api/v1/obs_rsync/Proj3/runs?repository=standard')->status_is(208, "Proj3 is still in queue");
     $t->put_ok('/api/v1/obs_rsync/WRONGPROJECT/runs')->status_is(404, "wrong project still returns error");
 
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
 
     $t->put_ok('/api/v1/obs_rsync/Proj1/runs')->status_is(201, "Proj1 just starts as queue is empty now");
 }
@@ -97,13 +75,13 @@ sub test_queue {
 subtest 'test queue' => sub {
     test_queue($t);
 };
-$t->app->minion->perform_jobs;
+perform_minion_jobs($t->app->minion);
 
 subtest 'test queue again' => sub {
     test_queue($t);
 };
 
-$t->app->minion->perform_jobs;
+perform_minion_jobs($t->app->minion);
 
 my $helper = $t->app->obs_rsync;
 
@@ -153,7 +131,7 @@ subtest 'test lock after failure' => sub {
     # now similate error by deleting the script
     unlink(Mojo::File->new($home, 'script', 'rsync.sh'));
     $t->put_ok('/api/v1/obs_rsync/Proj1/runs')->status_is(201, "trigger rsync");
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
 
     lock_test();
 };

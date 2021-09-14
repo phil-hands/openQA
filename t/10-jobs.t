@@ -37,22 +37,16 @@ use Mojo::JSON 'decode_json';
 use Test::Warnings ':report_warnings';
 use Mojo::File qw(path tempdir);
 use Mojo::IOLoop::ReadWriteProcess;
-use OpenQA::Test::Utils qw(collect_coverage_of_gru_jobs redirect_output);
+use OpenQA::Test::Utils qw(perform_minion_jobs redirect_output);
 use OpenQA::Test::TimeLimit '40';
 use OpenQA::Parser::Result::OpenQA;
 use OpenQA::Parser::Result::Test;
 use OpenQA::Parser::Result::Output;
 
-plan skip_all => 'set HEAVY=1 to execute (takes longer)' unless $ENV{HEAVY};
-
 my $schema = OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 05-job_modules.pl 06-job_dependencies.pl');
 my $t      = Test::Mojo->new('OpenQA::WebAPI');
 my $jobs   = $t->app->schema->resultset("Jobs");
 my $users  = $t->app->schema->resultset("Users");
-
-collect_coverage_of_gru_jobs($t->app);
-
-sub perform_minion_jobs { $t->app->minion->perform_jobs }
 
 # for "investigation" tests
 my $job_mock     = Test::MockModule->new('OpenQA::Schema::Result::Jobs', no_auto => 1);
@@ -399,17 +393,17 @@ subtest 'job with at least one softfailed => overall is softfailed' => sub {
     is($job->result, OpenQA::Jobs::Constants::SOFTFAILED, 'job result is softfailed');
 };
 
-subtest 'job with no modules => overall is failed' => sub {
+subtest 'job with no modules => overall is incomplete' => sub {
     my %_settings = %settings;
     $_settings{TEST} = 'J';
     my $job = _job_create(\%_settings);
     $job->update;
     $job->discard_changes;
 
-    is($job->result, OpenQA::Jobs::Constants::NONE, 'result is not yet set');
+    is $job->result, NONE, 'result is not yet set';
     $job->done;
     $job->discard_changes;
-    is($job->result, OpenQA::Jobs::Constants::FAILED, 'job result is failed');
+    is $job->result, INCOMPLETE, 'job result is incomplete';
 };
 
 subtest 'carry over, including soft-fails' => sub {
@@ -452,15 +446,25 @@ subtest 'carry over, including soft-fails' => sub {
     $job->insert_module({name => 'b', category => 'b', script => 'b', flags => {}});
     $job->update_module('b', {result => 'fail', details => []});
     $job->update;
+    $job->done;
+    $job->discard_changes;
+
+    $_settings{BUILD} = '669';
+    $job = _job_create(\%_settings);
+    $job->insert_module({name => 'a', category => 'a', script => 'a', flags => {}});
+    $job->update_module('a', {result => 'ok', details => [], dents => 1});
+    $job->insert_module({name => 'b', category => 'b', script => 'b', flags => {}});
+    $job->update_module('b', {result => 'fail', details => []});
+    $job->update;
     $job->discard_changes;
     is($job->result,   OpenQA::Jobs::Constants::NONE, 'result is not yet set');
     is($job->comments, 0,                             'no comment');
 
     subtest 'additional investigation notes provided on new failed' => sub {
-        path('t/data/last_good.json')->copy_to(path(($job->_previous_scenario_jobs)[0]->result_dir(), 'vars.json'));
+        path('t/data/last_good.json')->copy_to(path(($job->_previous_scenario_jobs)[1]->result_dir(), 'vars.json'));
         path('t/data/first_bad.json')->copy_to(path($job->result_dir(),                               'vars.json'));
         path('t/data/last_good_packages.txt')
-          ->copy_to(path(($job->_previous_scenario_jobs)[0]->result_dir(), 'worker_packages.txt'));
+          ->copy_to(path(($job->_previous_scenario_jobs)[1]->result_dir(), 'worker_packages.txt'));
         path('t/data/first_bad_packages.txt')->copy_to(path($job->result_dir(), 'worker_packages.txt'));
         $job->done;
         is($job->result, OpenQA::Jobs::Constants::FAILED, 'job result is failed');
@@ -470,7 +474,11 @@ subtest 'carry over, including soft-fails' => sub {
         is($last_good->{text},                     99998,  'last_good hash has the text');
         is($last_good->{type},                     'link', 'last_good hash has the type');
         is($last_good->{link},                     '/tests/99998', 'last_good hash has the correct link');
-        like($inv->{diff_to_last_good}, qr/^\+.*BUILD.*668/m, 'diff for job settings is shown');
+        is(ref(my $first_bad = $inv->{first_bad}), 'HASH', 'previous job identified as first bad and it is a hash');
+        is($first_bad->{text},                     99999,  'first_bad hash has the text');
+        is($first_bad->{type},                     'link', 'first_bad hash has the type');
+        is($first_bad->{link},                     '/tests/99999', 'first_bad hash has the correct link');
+        like($inv->{diff_to_last_good}, qr/^\+.*BUILD.*669/m, 'diff for job settings is shown');
         unlike($inv->{diff_to_last_good}, qr/JOBTOKEN/, 'special variables are not included');
         like($inv->{diff_packages_to_last_good}, qr/^\+python/m, 'diff packages for job is shown');
         is($inv->{test_log},    $fake_git_log, 'test git log is evaluated');
@@ -487,19 +495,19 @@ subtest 'carry over, including soft-fails' => sub {
                 $openqa_job->update({reason => "timeout --kill-after=$kill_timeout $timeout $hook"}) if $hook;
             });
         $job->done;
-        perform_minion_jobs;
+        perform_minion_jobs($t->app->minion);
         $job->discard_changes;
         is($job->reason, undef, 'no hook is called by default');
         $ENV{OPENQA_JOB_DONE_HOOK_INCOMPLETE} = 'should not be called';
         $job->done;
-        perform_minion_jobs;
+        perform_minion_jobs($t->app->minion);
         $job->discard_changes;
         is($job->reason, undef, 'hook not called if result does not match');
         $ENV{OPENQA_JOB_DONE_HOOK_FAILED}       = 'true';
         $ENV{OPENQA_JOB_DONE_HOOK_TIMEOUT}      = '10m';
         $ENV{OPENQA_JOB_DONE_HOOK_KILL_TIMEOUT} = '5s';
         $job->done;
-        perform_minion_jobs;
+        perform_minion_jobs($t->app->minion);
         $job->discard_changes;
         is($job->reason, 'timeout --kill-after=5s 10m true', 'hook called if result matches');
         $job->update({reason => undef});
@@ -509,16 +517,17 @@ subtest 'carry over, including soft-fails' => sub {
         $t->app->config->{hooks}->{job_done_hook_failed} = 'echo hook called';
         $task_mock->unmock_all;
         $job->done;
-        perform_minion_jobs;
-        my $res = $t->app->minion->jobs->next->{notes}{hook_result};
-        like($res, qr/hook called/, 'real hook cmd from config called if result matches');
+        perform_minion_jobs($t->app->minion);
+        my $notes = $t->app->minion->jobs->next->{notes};
+        is($notes->{hook_cmd}, 'echo hook called', 'real hook cmd in notes if result matches');
+        like($notes->{hook_result}, qr/hook called/, 'real hook cmd from config called if result matches');
     };
 };
 
 subtest 'carry over for ignore_failure modules' => sub {
     my %_settings = %settings;
     $_settings{TEST}  = 'K';
-    $_settings{BUILD} = '669';
+    $_settings{BUILD} = '670';
     my $job = _job_create(\%_settings);
     $job->insert_module({name => 'a', category => 'a', script => 'a', flags => {ignore_failure => 1}});
     $job->update_module('a', {result => 'fail', details => []});
@@ -533,7 +542,7 @@ subtest 'carry over for ignore_failure modules' => sub {
     my $user = $users->create_user('foo');
     $job->comments->create({text => 'bsc#101', user_id => $user->id});
 
-    $_settings{BUILD} = '670';
+    $_settings{BUILD} = '671';
     $job = _job_create(\%_settings);
     $job->insert_module({name => 'a', category => 'a', script => 'a', flags => {ignore_failure => 1}});
     $job->update_module('a', {result => 'fail', details => []});
@@ -549,7 +558,7 @@ subtest 'carry over for ignore_failure modules' => sub {
     is($job->comments, 1,                               'one comment');
     like($job->comments->first->text, qr/\Qbsc#101\E/, 'right take over');
 
-    $_settings{BUILD} = '671';
+    $_settings{BUILD} = '672';
     $job = _job_create(\%_settings);
     $job->insert_module({name => 'a', category => 'a', script => 'a', flags => {ignore_failure => 1}});
     $job->update_module('a', {result => 'fail', details => []});
@@ -625,16 +634,11 @@ subtest 'job with skipped modules' => sub {
 sub job_is_linked {
     my ($job) = @_;
     $job->discard_changes;
-    my $comments = $job->comments;
-    while (my $comment = $comments->next) {
-        if (($comment->label // '') eq 'linked') {
-            return 1;
-        }
-    }
-    return 0;
+    $job->comments->find({text => {like => 'label:linked%'}}) ? 1 : 0;
 }
 
 subtest 'job is marked as linked if accessed from recognized referal' => sub {
+    my $test_referer = 'http://test.referer.info/foobar';
     $t->app->config->{global}->{recognized_referers}
       = ['test.referer.info', 'test.referer1.info', 'test.referer2.info', 'test.referer3.info'];
     my %_settings = %settings;
@@ -642,7 +646,7 @@ subtest 'job is marked as linked if accessed from recognized referal' => sub {
     my $job    = _job_create(\%_settings);
     my $linked = job_is_linked($job);
     is($linked, 0, 'new job is not linked');
-    $t->get_ok('/tests/' . $job->id => {Referer => 'http://test.referer.info'})->status_is(200);
+    $t->get_ok('/tests/' . $job->id => {Referer => $test_referer})->status_is(200);
     $linked = job_is_linked($job);
     is($linked, 1, 'job linked after accessed from known referer');
 
@@ -654,7 +658,7 @@ subtest 'job is marked as linked if accessed from recognized referal' => sub {
     $job->update;
     $linked = job_is_linked($job);
     is($linked, 0, 'new job is not linked');
-    $t->get_ok('/tests/' . $job->id . '/modules/' . $module->id . '/steps/1' => {Referer => 'http://test.referer.info'})
+    $t->get_ok('/tests/' . $job->id . '/modules/' . $module->id . '/steps/1' => {Referer => $test_referer})
       ->status_is(302);
     $linked = job_is_linked($job);
     is($linked, 1, 'job linked after accessed from known referer');
@@ -671,6 +675,9 @@ subtest 'job is not marked as linked if accessed from unrecognized referal' => s
     $t->get_ok('/tests/' . $job->id => {Referer => 'http://unknown.referer.info'})->status_is(200);
     $linked = job_is_linked($job);
     is($linked, 0, 'job not linked after accessed from unknown referer');
+    $t->get_ok('/tests/' . $job->id => {Referer => 'http://test.referer.info/'})->status_is(200);
+    $linked = job_is_linked($job);
+    is($linked, 0, 'job not linked after accessed from referer with empty query_path');
 };
 
 subtest 'job set_running()' => sub {
@@ -735,7 +742,7 @@ subtest 'create result dir, delete results' => sub {
         $job->discard_changes;
         is $job->logs_present, 0, 'logs not present anymore';
         is $job->result_size, $initially_assumed_result_size - length($file_content) * (@fake_results + @ulogs),
-          'deleted size substracted from result size';
+          'deleted size subtracted from result size';
         is $result_dir->list_tree({hidden => 1})->size, 0, 'no more files left';
         is_deeply $job->video_file_paths->to_array, [], 'no more videos found'
           or diag explain $job->video_file_paths->to_array;
@@ -752,7 +759,7 @@ subtest 'create result dir, delete results' => sub {
         $job->discard_changes;
         is $job->logs_present, 1, 'logs still considered present';
         is $job->result_size, $initially_assumed_result_size - length($file_content) * 3 - $symlink_size,
-          'deleted size substracted from result size';
+          'deleted size subtracted from result size';
         is_deeply $job->video_file_paths->to_array, [], 'no more videos found'
           or diag explain $job->video_file_paths->to_array;
         ok -e path($result_dir, $_), "$_ still present" for qw(autoinst-log.txt serial0.txt serial_terminal.txt);
@@ -767,6 +774,38 @@ subtest 'create result dir, delete results' => sub {
     };
 
     # note: Deleting results is tested in 42-screenshots.t because the screenshots are the interesting part here.
+
+    subtest 'archiving job' => sub {
+        my $job = $jobs->create({TEST => 'to-be-archived'});
+        $job->discard_changes;
+        $job->create_result_dir;
+        is $job->archived, 0,     'job not archived by default';
+        is $job->archive,  undef, 'early return if job has not been concluded yet';
+
+        my $result_dir = path($job->result_dir);
+        like $result_dir, qr|$base_dir/openqa/testresults/\d{5}/\d{8}-to-be-archived|,
+          'normal result directory returned by default';
+        $result_dir->child('subdir')->make_path->child('some-file')->spurt('test');
+        $job->update({state => DONE});
+        $job->discard_changes;
+
+        my $copy_mock = Test::MockModule->new('File::Copy::Recursive', no_auto => 1);
+        $copy_mock->redefine(dircopy => sub { $! = 4; return 0 });
+        throws_ok { $job->archive } qr/Unable to copy '.+' to '.+': .+/, 'error when copying archive handled';
+        ok -d $result_dir, 'normal result directory still exists';
+        undef $copy_mock;
+
+        my $archive_dir = $job->archive;
+        ok -d $archive_dir, 'archive result directory created';
+        ok !-d $result_dir, 'normal result directory removed';
+
+        $result_dir = path($job->result_dir);
+        like $result_dir, qr|$base_dir/openqa/archive/testresults/\d{5}/\d{8}-to-be-archived|,
+          'archive result directory returned if archived';
+        is $result_dir->child('subdir')->make_path->child('some-file')->slurp, 'test', 'nested file moved';
+
+        is $job->archive, undef, 'early return if job has already been archived';
+    };
 };
 
 # continue testing with the usual base dir for test fixtures

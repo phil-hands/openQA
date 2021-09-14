@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (C) 2014-2020 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 # Copyright (C) 2016 Red Hat
 #
 # This program is free software; you can redistribute it and/or modify
@@ -21,17 +21,15 @@ use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
-use OpenQA::Test::TimeLimit '100';
+use OpenQA::Test::TimeLimit '300';
 use OpenQA::Test::Case;
 use OpenQA::Test::Client 'client';
-use OpenQA::Test::Utils 'collect_coverage_of_gru_jobs';
+use OpenQA::Test::Utils qw(assume_all_assets_exist perform_minion_jobs);
 use OpenQA::Schema::Result::ScheduledProducts;
 use Mojo::IOLoop;
 
 OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 04-products.pl');
 my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
-
-collect_coverage_of_gru_jobs($t->app);
 
 my $schema             = $t->app->schema;
 my $job_templates      = $schema->resultset('JobTemplates');
@@ -39,6 +37,7 @@ my $test_suites        = $schema->resultset('TestSuites');
 my $jobs               = $schema->resultset('Jobs');
 my $scheduled_products = $schema->resultset('ScheduledProducts');
 my $gru_tasks          = $schema->resultset('GruTasks');
+assume_all_assets_exist;
 
 sub lj {
     return unless $ENV{HARNESS_IS_VERBOSE};
@@ -359,7 +358,7 @@ schedule_iso({%iso, FLAVOR    => 'cherry'}, 200, {}, 'no product found');
 schedule_iso({%iso, _GROUP_ID => 12345},    404, {}, 'no templates found');
 
 # handle list of tests
-$res = schedule_iso({%iso, TEST => 'server,kde,textmode', _OBSOLETE => 1}, 200);
+$res = schedule_iso({%iso, TEST => 'server,kde,textmode', _OBSOLETE => 1, _FORCE_OBSOLETE => 1}, 200);
 is($res->json->{count}, 5, '5 new jobs created (two twice for both machine types)');
 
 # delete the iso
@@ -795,14 +794,14 @@ subtest 'async flag' => sub {
     is_deeply($json->{settings}, \%scheduling_params, 'settings stored correctly');
 
     # run gru and check whether scheduled product has actually been scheduled
-    $t->app->minion->perform_jobs;
+    perform_minion_jobs($t->app->minion);
     $t->get_ok("/api/v1/isos/$scheduled_product_id?include_job_ids=1")->status_is(200);
     $json = $t->tx->res->json;
     my $ok = 1;
     is($json->{status}, OpenQA::Schema::Result::ScheduledProducts::SCHEDULED, 'scheduled product marked as scheduled')
       or $ok = 0;
-    is(scalar @{$json->{job_ids}},                       10, '10 jobs scheduled')              or $ok = 0;
-    is(scalar @{$json->{results}->{successful_job_ids}}, 10, 'all jobs sucessfully scheduled') or $ok = 0;
+    is(scalar @{$json->{job_ids}},                       10, '10 jobs scheduled')               or $ok = 0;
+    is(scalar @{$json->{results}->{successful_job_ids}}, 10, 'all jobs successfully scheduled') or $ok = 0;
     is_deeply(
         $json->{results}->{failed_job_info}->[0]->{error_messages},
         ['textmode@32bit has no child, check its machine placed or dependency setting typos'],
@@ -823,7 +822,7 @@ subtest 're-schedule product' => sub {
     $t->get_ok("/api/v1/isos/$cloned_scheduled_product_id?include_job_ids=1")->status_is(200);
     $json = $t->tx->res->json;
     is($json->{status}, OpenQA::Schema::Result::ScheduledProducts::ADDED, 'scheduled product trackable');
-    is_deeply($json->{settings}, \%scheduling_params, 'parameter idential to the original scheduled product');
+    is_deeply($json->{settings}, \%scheduling_params, 'parameter identical to the original scheduled product');
 };
 
 subtest 'circular reference' => sub {

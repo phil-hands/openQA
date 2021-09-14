@@ -7,12 +7,13 @@
 requires 'Archive::Extract', '> 0.7';
 requires 'BSD::Resource';
 requires 'CSS::Minifier::XS', '>= 0.01';
+requires 'Capture::Tiny';
 requires 'Carp';
-requires 'Carp::Always';
+requires 'Carp::Always', '>= 0.14.02';
 requires 'CommonMark';
 requires 'Config::IniFiles';
 requires 'Config::Tiny';
-requires 'Cpanel::JSON::XS';
+requires 'Cpanel::JSON::XS', '>= 4.09';
 requires 'Cwd';
 requires 'DBD::Pg', '>= 3.007004';
 requires 'DBI', '>= 1.632';
@@ -49,7 +50,7 @@ requires 'JSON::Validator';
 requires 'JavaScript::Minifier::XS', '>= 0.11';
 requires 'LWP::Protocol::https';
 requires 'LWP::UserAgent';
-requires 'Minion', '>= 10.12';
+requires 'Minion', '>= 10.22';
 requires 'Minion::Backend::SQLite', '>= 5.0.1';
 requires 'Module::Load::Conditional';
 requires 'Module::Pluggable';
@@ -63,7 +64,7 @@ requires 'Mojo::RabbitMQ::Client', '>= v0.2';
 requires 'Mojo::SQLite';
 requires 'Mojo::URL';
 requires 'Mojo::Util';
-requires 'Mojolicious', '>= 8.55';
+requires 'Mojolicious', '>= 9.11';
 requires 'Mojolicious::Commands';
 requires 'Mojolicious::Plugin';
 requires 'Mojolicious::Plugin::AssetPack', '>= 1.36';
@@ -116,7 +117,7 @@ on 'test' => sub {
 on 'devel' => sub {
     requires 'Devel::Cover';
     requires 'Devel::Cover::Report::Codecovbash';
-    requires 'Perl::Tidy', '== 20210111';
+    requires 'Perl::Tidy', '== 20210717';
 
 };
 

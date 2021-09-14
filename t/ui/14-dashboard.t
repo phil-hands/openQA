@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (C) 2014-2020 SUSE LLC
+# Copyright (C) 2014-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -22,13 +22,13 @@ use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
 use OpenQA::Log 'log_debug';
-use OpenQA::Test::TimeLimit '20';
+use OpenQA::Test::TimeLimit '30';
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 
 OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
 
-plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
+driver_missing unless my $driver = call_driver;
 
 # DO NOT MOVE THIS INTO A 'use' FUNCTION CALL! It will cause the tests
 # to crash if the module is unavailable
@@ -41,6 +41,22 @@ plan skip_all => 'Install Selenium::Remote::WDKeys to run this test'
 $driver->title_is("openQA", "on main page");
 my @build_headings = $driver->find_elements('.h4', 'css');
 is(scalar @build_headings, 4, '4 builds shown');
+
+subtest 'Back to top button' => sub {
+    my $check_visibility
+      = sub { $driver->execute_script('return getComputedStyle(document.getElementById("back-to-top")).display') };
+    is $check_visibility->(), 'none', 'button is not visible';
+    # scroll down resizing the jumbotron to ensure there's enough content for scrolling down
+    $driver->execute_script(
+        'document.getElementsByClassName("jumbotron")[0].style.height = "10000px";
+         window.scrollTo(0, document.body.scrollHeight);'
+    );
+    wait_until sub { $check_visibility->() ne 'none' }, 'button is visible after scrolling down', 10;
+    $driver->find_element('#back-to-top')->click;
+    wait_until sub { $check_visibility->() eq 'none' }, 'button is not visible anymore after using it', 10;
+    # note: Using `wait_until` because even with disabled animations the button might now show up or hide
+    #       instantly, see poo#95839.
+};
 
 # click on last build which should be Build0091
 $driver->find_child_element($build_headings[-1], 'a', 'css')->click();

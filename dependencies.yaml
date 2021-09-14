@@ -29,15 +29,17 @@ build_requires:
 common_requires:
   perl: '>= 5.20.0'
   perl(Archive::Extract): '> 0.7'
+  perl(Carp::Always): '>= 0.14.02'
   perl(Config::IniFiles):
-  perl(Cpanel::JSON::XS):
+  perl(Cpanel::JSON::XS): '>= 4.09'
   perl(Cwd):
   perl(Data::Dump):
   perl(Data::Dumper):
   perl(Digest::MD5):
+  perl(Filesys::Df):
   perl(Getopt::Long):
-  perl(Minion): '>= 10.12'
-  perl(Mojolicious): '>= 8.55'
+  perl(Minion): '>= 10.22'
+  perl(Mojolicious): '>= 9.11'
   perl(Regexp::Common):
   perl(Storable):
   perl(Try::Tiny):
@@ -72,7 +74,7 @@ devel_no_selenium_requires:
   xorg-x11-fonts:
   perl(Devel::Cover):
   perl(Devel::Cover::Report::Codecovbash):
-  perl(Perl::Tidy): '== 20210111'
+  perl(Perl::Tidy): '== 20210717'
 
 devel_requires:
   '%devel_no_selenium_requires':
@@ -81,6 +83,7 @@ devel_requires:
 main_requires:
   '%assetpack_requires':
   git-core:
+  hostname:  # for script/configure-web-proxy
   perl(aliased):
   perl(base):
   perl(constant):
@@ -89,7 +92,6 @@ main_requires:
   perl(warnings):
   perl(BSD::Resource):
   perl(Carp):
-  perl(Carp::Always):
   perl(Config::Tiny):
   perl(CommonMark):
   perl(Date::Format):
@@ -109,7 +111,6 @@ main_requires:
   perl(DBIx::Class::Storage::Statistics):
   perl(Exporter):
   perl(Fcntl):
-  perl(Filesys::Df):
   perl(File::Basename):
   perl(File::Copy):
   perl(File::Copy::Recursive):
@@ -156,6 +157,7 @@ worker_requires:
   openQA-client:
   optipng:
   sqlite3: '>= 3.24.0'   # for INSERT INTO … ON CONFLICT … DO UPDATE SET … required by cache service
+  perl(Capture::Tiny):
   perl(Mojo::IOLoop::ReadWriteProcess): '>= 0.26'
   perl(Minion::Backend::SQLite): '>= 5.0.1'
   perl(Mojo::SQLite):
@@ -174,7 +176,6 @@ test_requires:
   postgresql-server:
   python3-setuptools:
   python3-yamllint:
-  python3-jsbeautifier:
   perl(App::cpanminus):
   perl(Mojolicious::Plugin::OAuth2):
   perl(Perl::Critic):

@@ -19,8 +19,9 @@ use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
-use OpenQA::Test::TimeLimit '10';
+use OpenQA::Test::TimeLimit '30';
 use OpenQA::Test::Case;
+use OpenQA::Test::Utils qw(assume_all_assets_exist);
 use OpenQA::SeleniumTest;
 use OpenQA::JobDependencies::Constants;
 use Date::Format 'time2str';
@@ -77,6 +78,8 @@ sub prepare_database {
             child_job_id => 99903,
             dependency   => OpenQA::JobDependencies::Constants::PARALLEL,
         });
+
+    assume_all_assets_exist;
 }
 
 prepare_database;
@@ -91,7 +94,7 @@ sub expected_job_id_regex {
     return qr|tests/$expected_job_id|;
 }
 
-plan skip_all => $OpenQA::SeleniumTest::drivermissing unless my $driver = call_driver;
+driver_missing unless my $driver = call_driver;
 
 $driver->title_is('openQA', 'on main page');
 $driver->find_element_by_link_text('Login')->click();

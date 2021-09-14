@@ -1,19 +1,7 @@
 ! bootstrap.css
 # download the fonts
 < https://cdn.datatables.net/1.10.16/css/dataTables.bootstrap4.css
-< https://use.fontawesome.com/releases/v5.0.10/css/all.css
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-brands-400.eot
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-brands-400.woff2
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-brands-400.ttf
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-brands-400.svg
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-regular-400.eot
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-regular-400.woff2
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-regular-400.ttf
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-regular-400.svg
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-solid-900.eot
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-solid-900.woff2
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-solid-900.ttf
-<< https://use.fontawesome.com/releases/v5.0.10/webfonts/fa-solid-900.svg
+< https://cdn.jsdelivr.net/npm/fork-awesome@1.2.0/css/fork-awesome.min.css
 < stylesheets/openqa.scss
 < https://raw.githubusercontent.com/bootstrapthemesco/bootstrap-4-multi-dropdown-navbar/beta2.0/css/bootstrap-4-navbar.css
 < https://cdnjs.cloudflare.com/ajax/libs/chosen/1.7.0/chosen.css
@@ -99,6 +87,7 @@
 << https://raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss/utilities/_visibility.scss
 << https://raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss/_print.scss
 < https://raw.githubusercontent.com/sorich87/bootstrap-tour/6a1028fb562f9aa68c451f0901f8cfeb43cad140/build/css/bootstrap-tour.css
+< stylesheets/back_to_top.css
 
 ! dagre-d3.js
 < https://d3js.org/d3.v4.js
@@ -136,6 +125,7 @@
 < javascripts/admin_groups.js
 < javascripts/admin_assets.js
 < javascripts/audit_log.js
+< javascripts/back_to_top.js
 < javascripts/tests.js
 < javascripts/job_templates.js
 < javascripts/overview.js
@@ -154,11 +144,16 @@
 < javascripts/disable_animations.js [mode==test]
 < https://raw.githubusercontent.com/sorich87/bootstrap-tour/6a1028fb562f9aa68c451f0901f8cfeb43cad140/build/js/bootstrap-tour.min.js
 
+! anser.js
+< javascripts/anser-import.js
+< https://raw.githubusercontent.com/IonicaBizau/anser/2.0.1/lib/index.js
+
 ! test_result.js
 < javascripts/render.js
 < javascripts/test_result.js
 < javascripts/needlediff.js
 < javascripts/running.js
+< javascripts/disable_status_updates.js [mode==test]
 
 ! job_next_previous.js
 < javascripts/job_next_previous.js
@@ -168,6 +163,9 @@
 
 ! ws_console.css
 < stylesheets/ws_console.scss
+
+! ansi-colors.css
+< stylesheets/ansi-colors.scss
 
 ! ws_console.js
 < javascripts/ws_console.js

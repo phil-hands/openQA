@@ -131,8 +131,18 @@ sub startup ($self) {
     $r->get('/search')->name('search')->to(template => 'search/search');
 
     $r->get('/tests')->name('tests')->to('test#list');
-    $r->get('/tests/overview' => [format => ['json', 'html']])->name('tests_overview')
-      ->to('test#overview', format => 'html');
+    # we have to set this and some later routes up differently on Mojo
+    # < 9 and Mojo >= 9.11
+    if ($Mojolicious::VERSION > 9.10) {
+        $r->get('/tests/overview' => [format => ['json', 'html']])->name('tests_overview')
+          ->to('test#overview', format => undef);
+    }
+    elsif ($Mojolicious::VERSION < 9) {
+        $r->get('/tests/overview')->name('tests_overview')->to('test#overview');
+    }
+    else {
+        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
+    }
     $r->get('/tests/latest')->name('latest')->to('test#latest');
 
     $r->get('/tests/export')->name('tests_export')->to('test#export');
@@ -168,7 +178,8 @@ sub startup ($self) {
     $test_r->get('/images/thumb/#filename')->name('test_thumbnail')->to('file#test_thumbnail');
     $test_r->get('/file/#filename')->name('test_file')->to('file#test_file');
     $test_r->get('/settings/:dir/*link_path')->name('filesrc')->to('test#show_filesrc');
-    $test_r->get('/video' => sub ($c) { $c->render('test/video') })->name('video');
+    $test_r->get('/video'   => sub ($c) { $c->render('test/video') })->name('video');
+    $test_r->get('/logfile' => sub ($c) { $c->render('test/logfile') })->name('logfile');
     # adding assetid => qr/\d+/ doesn't work here. wtf?
     $test_r->get('/asset/#assetid')->name('test_asset_id')->to('file#test_asset');
     $test_r->get('/asset/#assettype/#assetname')->name('test_asset_name')->to('file#test_asset');
@@ -181,7 +192,7 @@ sub startup ($self) {
     my $step_auth = $test_auth->any('/modules/:moduleid/steps/<stepid:step>');
     $step_r->get('/view')->to(action => 'view');
     $step_r->get('/edit')->name('edit_step')->to(action => 'edit');
-    $step_r->get('/src')->name('src_step')->to(action => 'src');
+    $step_r->get('/src', [format => ['txt']])->name('src_step')->to(action => 'src', format => undef);
     $step_auth->post('/')->name('save_needle_ajax')->to('step#save_needle_ajax');
     $step_r->get('/')->name('step')->to(action => 'view');
 
@@ -194,16 +205,34 @@ sub startup ($self) {
     # due to the split md5_dirname having a /
     $r->get('/image/:md5_1/:md5_2/.thumbs/#md5_basename')->to('file#thumb_image');
 
-    $r->get('/group_overview/<groupid:num>' => [format => ['json', 'html']])->name('group_overview')
-      ->to('main#job_group_overview', format => 'html');
-    $r->get('/parent_group_overview/<groupid:num>' => [format => ['json', 'html']])->name('parent_group_overview')
-      ->to('main#parent_group_overview', format => 'html');
+    if ($Mojolicious::VERSION > 9.10) {
+        $r->get('/group_overview/<groupid:num>' => [format => ['json', 'html']])->name('group_overview')
+          ->to('main#job_group_overview', format => undef);
+        $r->get('/parent_group_overview/<groupid:num>' => [format => ['json', 'html']])->name('parent_group_overview')
+          ->to('main#parent_group_overview', format => undef);
+    }
+    elsif ($Mojolicious::VERSION < 9) {
+        $r->get('/group_overview/<groupid:num>')->name('group_overview')->to('main#job_group_overview');
+        $r->get('/parent_group_overview/<groupid:num>')->name('parent_group_overview')
+          ->to('main#parent_group_overview');
+    }
+    else {
+        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
+    }
 
     # Favicon
-    $r->get('/favicon.ico'             => sub ($c) { $c->render_static('favicon.ico') });
-    $r->get('/index'                   => sub ($c) { $c->render('main/index') });
-    $r->get('/dashboard_build_results' => [format => ['json', 'html']])->name('dashboard_build_results')
-      ->to('main#dashboard_build_results', format => 'html');
+    $r->get('/favicon.ico' => sub ($c) { $c->render_static('favicon.ico') });
+    $r->get('/index'       => sub ($c) { $c->render('main/index') });
+    if ($Mojolicious::VERSION > 9.10) {
+        $r->get('/dashboard_build_results' => [format => ['json', 'html']])->name('dashboard_build_results')
+          ->to('main#dashboard_build_results', format => undef);
+    }
+    elsif ($Mojolicious::VERSION < 9) {
+        $r->get('/dashboard_build_results')->name('dashboard_build_results')->to('main#dashboard_build_results');
+    }
+    else {
+        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
+    }
     $r->get('/api_help' => sub ($c) { $c->render('admin/api_help') })->name('api_help');
 
     # Default route
@@ -242,8 +271,16 @@ sub startup ($self) {
     $pub_admin_r->get('/assets')->name('admin_assets')->to('asset#index');
     $pub_admin_r->get('/assets/status')->name('admin_asset_status_json')->to('asset#status_json');
 
-    $pub_admin_r->get('/workers' => [format => ['json', 'html']])->name('admin_workers')
-      ->to('workers#index', format => 'html');
+    if ($Mojolicious::VERSION > 9.10) {
+        $pub_admin_r->get('/workers' => [format => ['json', 'html']])->name('admin_workers')
+          ->to('workers#index', format => undef);
+    }
+    elsif ($Mojolicious::VERSION < 9) {
+        $pub_admin_r->get('/workers')->name('admin_workers')->to('workers#index');
+    }
+    else {
+        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
+    }
     $pub_admin_r->get('/workers/<worker_id:num>')->name('admin_worker_show')->to('workers#show');
     $pub_admin_r->get('/workers/<worker_id:num>/ajax')->name('admin_worker_previous_jobs_ajax')
       ->to('workers#previous_jobs_ajax');

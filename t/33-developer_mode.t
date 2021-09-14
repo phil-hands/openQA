@@ -1,5 +1,5 @@
 #!/usr/bin/env perl
-# Copyright (C) 2018-2020 SUSE LLC
+# Copyright (C) 2018-2021 SUSE LLC
 #
 # This program is free software; you can redistribute it and/or modify
 # it under the terms of the GNU General Public License as published by
@@ -49,7 +49,7 @@ use OpenQA::Test::FullstackUtils;
 use OpenQA::Test::TimeLimit '60';
 use OpenQA::SeleniumTest;
 
-plan skip_all => 'set DEVELOPER_FULLSTACK=1 (be careful)'                       unless $ENV{DEVELOPER_FULLSTACK};
+plan skip_all => 'set FULLSTACK=1 (be careful)'                                 unless $ENV{FULLSTACK};
 plan skip_all => 'set TEST_PG to e.g. "DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
 
 plan skip_all => 'Install Selenium::Remote::WDKeys to run this test'
@@ -63,7 +63,7 @@ sub turn_down_stack {
     stop_service($_) for ($worker, $ws, $livehandler, $scheduler);
 }
 
-plan skip_all => $OpenQA::SeleniumTest::drivermissing unless check_driver_modules;
+driver_missing unless check_driver_modules;
 
 # setup directories
 my $tempdir   = setup_fullstack_temp_dir('full-stack.d');
@@ -130,19 +130,13 @@ sub wait_for_session_info {
 
     # give the session info 10 seconds to appear
     my $developer_session_info = $driver->find_element('#developer-session-info')->get_text();
-    my $seconds_waited         = 0;
+    my $waited_s               = 0;
     while (!$developer_session_info || !($developer_session_info =~ $info_regex)) {
-        if ($seconds_waited > 10) {
-            last if ($developer_session_info);
-
-            # handle case when there's no $developer_session_info at all
-            fail('no session info after 10 seconds, expected ' . $diag_info);
-            return;
-        }
-
+        # handle case when there's no $developer_session_info at all
+        die 'no session info after 10 seconds, expected ' . $diag_info if $waited_s > 10 && !$developer_session_info;
         sleep 1;
         $developer_session_info = $driver->find_element('#developer-session-info')->get_text();
-        $seconds_waited += 1;
+        $waited_s += 1;
     }
 
     like($developer_session_info, $info_regex, $diag_info);

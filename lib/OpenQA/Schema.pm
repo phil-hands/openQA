@@ -32,16 +32,16 @@ use OpenQA::Utils qw(:DEFAULT prjdir);
 
 # after bumping the version please look at the instructions in the docs/Contributing.asciidoc file
 # on what scripts should be run and how
-our $VERSION = $ENV{OPENQA_SCHEMA_VERSION_OVERRIDE} // 92;
+our $VERSION = $ENV{OPENQA_SCHEMA_VERSION_OVERRIDE} // 93;
 
 __PACKAGE__->load_namespaces;
 
 my $SINGLETON;
 
 sub connect_db {
-    my %args  = @_;
-    my $check = $args{check};
-    $check //= 1;
+    my %args         = @_;
+    my $check_deploy = $args{deploy};
+    $check_deploy //= 1;
 
     unless ($SINGLETON) {
 
@@ -57,7 +57,7 @@ sub connect_db {
             die 'Could not find database section \'' . $mode . '\' in ' . $database_file unless $ini{$mode};
             $SINGLETON = __PACKAGE__->connect($ini{$mode});
         }
-        deploy $SINGLETON if $check;
+        deploy $SINGLETON if $check_deploy;
     }
 
     return $SINGLETON;
@@ -131,6 +131,12 @@ sub _try_deploy_db {
         $version = $dh->version_storage->database_version;
     }
     catch {
+        # If the table does not exist, we want to deploy, and the error
+        # is expected. If we get other errors like "Permission denied" in case
+        # the database is not readable by the current user, we print the
+        # error message
+        warn "Error when trying to get the database version: $_"
+          unless m/relation "dbix_class_deploymenthandler_versions" does not exist/;
         $dh->install;
         $schema->create_system_user;    # create system user right away
     };

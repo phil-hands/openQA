@@ -92,7 +92,7 @@ $mock_asset->mock(refresh_assets => sub { });
 $mock_limit->redefine(_remove_if => sub { return 0; });
 
 # define a fix asset_size_limit configuration for this test to be independent of the default value
-# we possibly want to adjust without going into the details of this test (the test t/36-job_group_defaults.t
+# we possibly want to adjust without going into the details of this test (the test t/36-job_group_settings.t
 # is covering defaults)
 $app->config->{default_group_limits}->{asset_size_limit} = 100;
 
@@ -123,7 +123,7 @@ sub prepare_asset_status {
         # check that all assets which have no max_job at all are considered last
         if ($asset->{max_job}) {
             $assets_with_max_job_count += 1;
-            fail('assets without max_job should go last') if (%assets_without_max_job);
+            fail('assets without max_job should go last') if keys %assets_without_max_job;
             next;
         }
 
@@ -245,6 +245,18 @@ my @expected_assets_with_max_job = (
         parents     => {},
     },
     {
+        groups      => {1001 => 99938},
+        fixed       => 0,
+        id          => undef,                                                   # ID might vary
+        max_job     => 99938,
+        name        => 'iso/openSUSE-Factory-DVD-x86_64-Build0048-Media.iso',
+        parents     => {},
+        pending     => 0,
+        picked_into => '1001',
+        size        => undef,    # non-existing asset, pulled in by registering assets from settings of job 99938
+        type        => 'iso'
+    },
+    {
         groups      => {1001 => 99926},
         parents     => {},
         fixed       => 0,
@@ -254,7 +266,7 @@ my @expected_assets_with_max_job = (
         type        => 'iso',
         pending     => 0,
         id          => 4,
-        size        => 0,
+        size        => undef,    # non-existing asset, explicitely defined in fixtures (01-jobs.pl)
     },
 );
 my %expected_assets_without_max_job = (
@@ -398,6 +410,7 @@ subtest 'asset status with pending state, max_job and max_job by group' => sub {
     }
     qr/Skipping asset $empty_asset_id because its name is empty/, 'warning about skipped asset';
     my ($assets_with_max_job, $assets_without_max_job) = prepare_asset_status($asset_status);
+    $assets_with_max_job->[5]->{id} = undef;    # might vary
     is_deeply($asset_status->{groups},  \%expected_groups,                 'groups');
     is_deeply($asset_status->{parents}, \%expected_parents,                'parents');
     is_deeply($assets_with_max_job,     \@expected_assets_with_max_job,    'assets with max job');
@@ -430,7 +443,9 @@ subtest 'asset status without pending state, max_job and max_job by group' => su
         compute_max_job_by_group          => 0,
     );
     my ($assets_with_max_job, $assets_without_max_job) = prepare_asset_status($asset_status);
-    is_deeply($assets_with_max_job, \@expected_assets_with_max_job, 'assets with max job');
+    $assets_with_max_job->[5]->{id} = undef;    # might vary
+    is_deeply($assets_with_max_job, \@expected_assets_with_max_job, 'assets with max job')
+      or diag explain $assets_with_max_job;
     is(
         join(' ', sort keys %$assets_without_max_job),
         join(' ', sort keys %expected_assets_without_max_job),
