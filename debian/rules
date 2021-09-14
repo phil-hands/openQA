@@ -101,8 +101,6 @@ override_dh_auto_test:
 		dh_auto_test -- \
 		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
 
-#NOTE should provide libjs-chosen for public/javascripts/chosen.jquery.js
-
 override_dh_auto_clean:
 	-rm -rf assets/_debian/
 	rm -fr t/data/openqa/testresults/ .sass-cache/ assets/cache
