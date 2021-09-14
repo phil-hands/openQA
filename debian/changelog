@@ -1,6 +1,7 @@
-openqa (4.6.1631288156.16e44e0-1) UNRELEASED; urgency=medium
+openqa (4.6.1631608585.77a6c34-1) UNRELEASED; urgency=medium
 
   * Initial release (Closes: #840253)
   * Update to new upstream version 4.6.1631288156.16e44e0.
+  * Update to new upstream version 4.6.1631608585.77a6c34.
 
- -- Philip Hands <phil@hands.com>  Tue, 14 Sep 2021 11:10:11 +0200
+ -- Philip Hands <phil@hands.com>  Tue, 14 Sep 2021 11:28:39 +0200
