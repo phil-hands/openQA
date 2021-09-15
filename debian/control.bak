@@ -163,25 +163,28 @@ Recommends: apparmor-profiles, apparmor-utils,
             libdbd-pg-perl,
             libmojolicious-plugin-oauth2-perl,
 Description: automatic Operating System testing framework (webUI & scheduler)
- openQA is a testing framework that allows you to run tests on pretty-much
- anything that you can get 'remote' control of (most often, anything you can run
- in a VM and point VNC at). This allows testing of things including GUI
- applications, system boot-up (BIOS, bootloaders, kernels), installers and whole
- operating systems.
+ openQA is a testing framework
+ that allows you to run tests on pretty-much anything
+ that you can get 'remote' control of
+ (most often, anything you can run in a VM and point VNC at).
+ This allows testing of things including GUI applications,
+ system boot-up (BIOS, bootloaders, kernels),
+ installers and whole operating systems.
  .
- Tests (using Perl syntax) generally consist mostly of sequences of code like:
-   assert_and_click 'some_icon';
-   assert_screen 'some_prompt';
-   send_key 'ret';
- which are run using the os-autoinst test engine, by a worker. The tags named in
- scripts can then be associated with 'needles' (elements of screenshots) via the
- webUI (either from past tests, or while controlling a live test). Other testing
- possibilities include: serial-connected headless systems, multi-host networked
- tests, and non-VM 'real' systems.
+ Tests (using Perl syntax) generally consist of
+ little more than sequences like:
+ assert_and_click 'some_icon'; assert_screen 'some_prompt'; send_key 'ret';
+ which are run using the os-autoinst test engine, by a worker.
+ The tags named in scripts
+ can then be associated with 'needles' (elements of screenshots)
+ via the webUI (either from past tests, or while controlling a live test).
+ Other testing possibilities include:
+ serial-connected headless systems,
+ multi-host networked tests, and non-VM 'real' systems.
  .
- This package includes the job scheduler, the elements providing the services to
- allow workers to run tests and upload results, and the Web-based user
- interface.
+ This package includes the job scheduler,
+ the elements providing the services to allow workers to run tests and upload results,
+ and the Web-based user interface.
 
 Package: openqa-common
 Architecture: all
@@ -222,12 +225,13 @@ Depends: ${misc:Depends},
 Recommends:
          git-lfs,
 Description: automatic Operating System testing framework (common files)
- This package contains shared resources for openQA web front-end and openQA
- workers.
+ This package contains shared resources
+ for openQA web-frontend and openQA workers.
  .
- openQA is a testing framework that allows you to run tests on pretty-much
- anything that you can 'remotely' control. For instance, a VM that can be
- accessed via VNC.
+ openQA is a testing framework
+ that allows you to run tests on pretty-much anything
+ that you can 'remotely' control.
+ For instance, a VM that can be accessed via VNC.
 
 Package: openqa-client
 Architecture: any
@@ -241,13 +245,15 @@ Depends: ${misc:Depends},
 Suggests: python3,
           python3-future,
 Description: automatic Operating System testing framework (utilities)
- This package includes scripts such as 'openqa-cli' and 'openqa-clone-job' to
- provide easy control of openQA servers, via the REST API, as well as commands
- useful when administering an OpenQA server.
+ This package includes scripts such as 'openqa-cli' and 'openqa-clone-job'
+ to provide easy control of openQA servers, via the REST API,
+ as well as commands useful when administering an OpenQA server.
  .
- openQA is a testing framework that allows you to run tests on pretty-much
- anything that you can 'remotely' control. For instance, a VM that can be
- accessed via VNC.
+ openQA is a testing framework
+ that allows you to run tests on pretty-much anything
+ that you can 'remotely' control.
+ For instance, a VM that can be accessed via VNC.
+
 
 Package: openqa-worker
 Architecture: all
@@ -264,32 +270,39 @@ Depends: ${misc:Depends},
 Recommends: qemu,
             libminion-backend-sqlite-perl,
 Description: automatic Operating System testing framework (worker)
- openQA is a testing framework that allows you to run tests on pretty-much
- anything that you can get 'remote' control of (most often, anything you can run
- in a VM and point VNC at). This allows testing of things including GUI
- applications, system boot-up (BIOS, bootloaders, kernels), installers and whole
- operating systems.
+ openQA is a testing framework
+ that allows you to run tests on pretty-much anything
+ that you can get 'remote' control of
+ (most often, anything you can run in a VM and point VNC at).
+ This allows testing of things including GUI applications,
+ system boot-up (BIOS, bootloaders, kernels),
+ installers and whole operating systems.
  .
- Tests (using Perl syntax) generally consist of little more than sequences like:
+ Tests (using Perl syntax) generally consist of
+ little more than sequences like:
  assert_and_click 'some_icon'; assert_screen 'some_prompt'; send_key 'ret';
- which are run using the os-autoinst test engine, by a worker. The tags named in
- scripts can then be associated with 'needles' (elements of screenshots) via the
- webUI (either from past tests, or while controlling a live test). Other testing
- possibilities include: serial-connected headless systems, multi-host networked
- tests, and non-VM 'real' systems.
+ which are run using the os-autoinst test engine, by a worker.
+ The tags named in scripts
+ can then be associated with 'needles' (elements of screenshots)
+ via the webUI (either from past tests, or while controlling a live test).
+ Other testing possibilities include:
+ serial-connected headless systems,
+ multi-host networked tests, and non-VM 'real' systems.
  .
  This package is to be installed on a worker system (which may also be acting as
  a server). Workers register with a server (or perhaps multiple servers), and
- can then accept jobs, and run tests (using the os-autoinst test engine).
+ can then accept jobs to run, and run tests (using the os-autoinst test engine).
 
 Package: openqa-doc
 Architecture: all
 Section: doc
 Depends: ${misc:Depends},
 Description: automatic Operating System testing framework - documentation
- Documentation for openQA (and the associated os-autoinst test engine), covering
- topics including: installation, configuration, and basic test writing.
+ Documentation for openQA (and the associated os-autoinst test engine),
+ covering topics inclusing:
+ installation, configuration, and basic test writing.
  .
- openQA is a testing framework that allows you to run tests on pretty-much
- anything that you can 'remotely' control. For instance, a VM that can be
- accessed via VNC.
+ openQA is a testing framework
+ that allows you to run tests on pretty-much anything
+ that you can 'remotely' control.
+ For instance, a VM that can be accessed via VNC.
