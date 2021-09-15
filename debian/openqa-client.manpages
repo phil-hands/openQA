@@ -4,4 +4,4 @@ scratch/man/openqa-clone-job.1
 scratch/man/openqa-dump-templates.1
 scratch/man/openqa-load-templates.1
 scratch/man/openqa-validate-yaml.1
-man/openqa-label-all.1
+scratch/man/openqa-label-all.1
