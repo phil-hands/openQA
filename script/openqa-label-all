@@ -64,7 +64,7 @@ def call(cmds, dry_run=False):
 def main():
     args = parse_args()
     request_params = {'result': args.result, 'latest': 1, 'scope': 'relevant'}
-    openqa_cmd = ['openqa-client', '--host', args.openqa_host, '--json-output']
+    openqa_cmd = ['/usr/share/openqa/script/client', '--host', args.openqa_host, '--json-output']
     def openqa_call(cmds):
         return call(openqa_cmd + cmds, args.dry_run)
 
