@@ -109,13 +109,14 @@ override_dh_auto_clean:
 	rm -fr $(CURDIR)/debian/DB
 	dh_auto_clean
 
+pod2man_opts := --errors=stderr --section=1 --center "openQA Documentation" --release 'openQA $(shell dpkg-parsechangelog -SVersion)'
 override_dh_installman:
 	mkdir -p scratch/man
-	for src in client load_templates dump_templates openqa-clone-job openqa-label-all ; do \
+	for src in client load_templates dump_templates openqa-clone-job openqa-label-all openqa-validate-yaml ; do \
 		dst=$$(echo $$src | sed -e 's/_/-/;s/^\(openqa-\)\?/openqa-/') ; \
-		pod2man --errors=stderr --section=1 --name=$$dst script/$$src scratch/man/$$dst.1 ; \
+		pod2man $(pod2man_opts) --name=$$dst script/$$src scratch/man/$$dst.1 ; \
 	done
-	pod2man --errors=stderr --section=1 --name=openqa-cli lib/OpenQA/CLI.pm scratch/man/openqa-cli.1
+	pod2man $(pod2man_opts) --name=openqa-cli lib/OpenQA/CLI.pm scratch/man/openqa-cli.1
 	dh_installman
 
 override_dh_missing:
