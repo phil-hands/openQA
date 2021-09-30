@@ -111,6 +111,7 @@ Build-Depends: debhelper-compat (= 13),
                libfile-map-perl,
 #              for avoiding assetpack downloads
                fonts-fork-awesome,
+               fonts-roboto,
                libjs-chosen,
                libjs-jquery-datatables,
                libjs-bootstrap4,

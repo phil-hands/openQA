@@ -10,6 +10,7 @@ override_dh_auto_build:
 	# create links to locally installed assets
 	mkdir -p assets/_debian
 	ln -s /usr/share/fonts-fork-awesome assets/_debian
+	ln -s /usr/share/fonts-roboto-fontface assets/_debian
 	sed -i -e 's%https://cdn\.jsdelivr\.net/npm/fork-awesome@1\.2\.0/css/fork-awesome.min.css%_debian/fonts-fork-awesome/css/fork-awesome.css%' assets/assetpack.def
 	# convince assetpack to use local copies of the fonts:
 	for ext in eot svg ttf woff woff2 ; do \
