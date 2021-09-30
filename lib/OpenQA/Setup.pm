@@ -54,7 +54,8 @@ sub read_config {
             job_investigate_git_timeout => 20,
             worker_timeout              => DEFAULT_WORKER_TIMEOUT,
             search_results_limit        => 50000,
-            auto_clone_regex            => '^(cache failure|terminated prematurely): ',
+            auto_clone_regex            =>
+'^(cache failure: |terminated prematurely: |api failure: Failed to register .* 503|backend died: .*VNC.*Connection timed out)',
         },
         rate_limits => {
             search => 5,
@@ -126,12 +127,18 @@ sub read_config {
             concurrency        => 2,
             project_status_url => '',
         },
+        cleanup => {
+            concurrent => 0,
+        },
         default_group_limits => {
             asset_size_limit                  => OpenQA::JobGroupDefaults::SIZE_LIMIT_GB,
             log_storage_duration              => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
             important_log_storage_duration    => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
             result_storage_duration           => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
             important_result_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_RESULTS_IN_DAYS,
+        },
+        minion_task_triggers => {
+            on_job_done => '',
         },
         misc_limits => {
             untracked_assets_storage_duration         => 14,
@@ -223,6 +230,8 @@ sub read_config {
         $app->log->warn("Deprecated use of config key '[audit]: blacklist'. Use '[audit]: blocklist' instead");
         $config->{audit}->{blocklist} = delete $config->{audit}->{blacklist};
     }
+    my $minion_task_triggers = $config->{minion_task_triggers};
+    $minion_task_triggers->{$_} = [split(/\s+/, $minion_task_triggers->{$_})] for keys %{$minion_task_triggers};
     if (my $minion_fail_job_blocklist = $config->{influxdb}->{ignored_failed_minion_jobs}) {
         $config->{influxdb}->{ignored_failed_minion_jobs} = [split(/\s+/, $minion_fail_job_blocklist)];
     }

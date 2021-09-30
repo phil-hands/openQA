@@ -18,7 +18,7 @@ use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
 use Mojo::ByteStream;
 use OpenQA::Schema;
-use OpenQA::Utils qw(bugurl render_escaped_refs href_to_bugref);
+use OpenQA::Utils qw(bugurl human_readable_size render_escaped_refs href_to_bugref);
 use OpenQA::Events;
 
 sub register ($self, $app, $config) {
@@ -34,7 +34,10 @@ sub register ($self, $app, $config) {
         format_time_duration => sub {
             my ($c, $timedate) = @_;
             return unless $timedate;
-            if ($timedate->hours() > 0) {
+            if ($timedate->days() > 0) {
+                sprintf("%d days %02d:%02d hours", $timedate->days(), $timedate->hours(), $timedate->minutes());
+            }
+            elsif ($timedate->hours() > 0) {
                 sprintf("%02d:%02d hours", $timedate->hours(), $timedate->minutes());
             }
             else {
@@ -72,6 +75,12 @@ sub register ($self, $app, $config) {
         bug_report_actions => sub {
             my ($c, %args) = @_;
             return $c->include_branding('external_reporting', %args);
+        });
+
+    $app->helper(
+        human_readable_size => sub {
+            my ($c, $size) = @_;
+            return human_readable_size($size);
         });
 
     $app->helper(
@@ -353,7 +362,7 @@ sub _compose_job_overview_search_args ($c) {
     $v->optional('limit',          'not_empty')->num(0, undef);
 
     # add simple query params to search args
-    for my $arg (qw(distri version flavor build test limit)) {
+    for my $arg (qw(distri version flavor test limit)) {
         next unless $v->is_valid($arg);
         my $params      = $v->every_param($arg);
         my $param_count = scalar @$params;
@@ -364,6 +373,11 @@ sub _compose_job_overview_search_args ($c) {
             $search_args{$arg} = {-in => $params};
         }
     }
+
+    # handle build separately
+    my $build = $v->every_param('build');
+    $search_args{build} = $build if $build && @$build;
+
     my $modules = $v->every_param('modules');
     $search_args{modules} = $modules if $modules && @$modules;
     my $result = $v->every_param('modules_result');
@@ -391,13 +405,14 @@ sub _compose_job_overview_search_args ($c) {
         if (@groups) {
             my %builds;
             for my $group (@groups) {
-                my $build = $schema->resultset('Jobs')->latest_build(%search_args, groupid => $group->id) or next;
-                $builds{$build}++;
+                my $last_build = $schema->resultset('Jobs')->latest_build(%search_args, groupid => $group->id) or next;
+                $builds{$last_build}++;
             }
-            $search_args{build} = [sort keys %builds];
+            $search_args{build} = [sort keys %builds] if %builds;
         }
         else {
-            $search_args{build} = $schema->resultset('Jobs')->latest_build(%search_args);
+            my $build = $schema->resultset('Jobs')->latest_build(%search_args);
+            $search_args{build} = $build if $build;
         }
 
         # print debug output
@@ -408,7 +423,7 @@ sub _compose_job_overview_search_args ($c) {
             $c->app->log->debug('Only one group but no build specified, searching for build');
         }
         else {
-            $c->app->log->info('More than one group but no build specified, selecting build of first group');
+            $c->app->log->info('More than one group but no build specified, selecting all latest builds in groups');
         }
     }
 

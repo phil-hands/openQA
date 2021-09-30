@@ -17,6 +17,7 @@
 
 use Test::Most;
 
+use DateTime;
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
 use Test::Mojo;
@@ -69,6 +70,9 @@ sub prepare_database {
     # store the needle dir's realpath within the database; that is what the lookup for the candidates menu is
     # expected to use
     $needle_dir_fixture->update({path => $needle_dir->realpath});
+
+    my $assets = $schema->resultset('Assets');
+    $assets->find({type => 'iso', name => 'openSUSE-13.1-DVD-i586-Build0091-Media.iso'})->update({size => 0});
 }
 
 prepare_database;
@@ -450,6 +454,9 @@ subtest 'misc details: title, favicon, go back, go to source view, go to log vie
     # load "Logs & Assets" tab contents directly because accessing the tab within the whole page in a straight forward
     # way lead to unstability (see poo#94060)
     $driver->get('/tests/99946/downloads_ajax');
+    like $driver->find_element_by_id('asset-list')->get_text,
+      qr/openSUSE-13.1-DVD-i586-Build0091-Media.iso \(0 Byte\)[\n|\s]+openSUSE-13.1-x86_64.hda \(does not exist\)/,
+      'asset list';
     $driver->find_element_by_link_text('autoinst-log.txt')->click;
     wait_for_ajax msg => 'log contents';
     like $driver->find_element('.embedded-logfile .ansi-blue-fg')->get_text, qr/send(autotype|key)/, 'log is colorful';
@@ -671,6 +678,31 @@ subtest 'archived icon' => sub {
     $jobs->find(99947)->update({archived => 1});
     $t->get_ok('/tests/99947/infopanel_ajax')->status_is(200);
     is $t->tx->res->dom->find('#job-archived-badge')->size, 1, 'archived icon shown if job is archived';
+};
+
+subtest 'test duration' => sub {
+    my $start = DateTime->new(
+        year       => 2021,
+        month      => 9,
+        day        => 14,
+        hour       => 15,
+        minute     => 0,
+        second     => 0,
+        nanosecond => 0,
+        time_zone  => 'UTC',
+    );
+    my $end = DateTime->new(
+        year       => 2021,
+        month      => 9,
+        day        => 16,
+        hour       => 17,
+        minute     => 30,
+        second     => 0,
+        nanosecond => 0,
+        time_zone  => 'UTC',
+    );
+    my $duration = $t->app->format_time_duration($end - $start);
+    like $duration, qr/2 days 02:30 hours/, 'duration formatted';
 };
 
 kill_driver();

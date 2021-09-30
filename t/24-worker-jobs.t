@@ -568,7 +568,7 @@ subtest 'Successful job' => sub {
     combined_like { $job->start; wait_until_job_status_ok($job, 'stopped') }
     qr/isotovideo has been started/, 'isotovideo startup logged';
     subtest 'settings only allowed to be set within worker config deleted' => sub {
-        my $settings = $job->{_settings};
+        my $settings = $job->settings;
         is($settings->{EXTERNAL_VIDEO_ENCODER_CMD},
             undef, 'video encoder settings deleted (should only be set within worker config)');
         is($settings->{GENERAL_HW_CMD_DIR},
@@ -1056,7 +1056,18 @@ subtest 'Posting status during upload fails' => sub {
     is $job->status, 'stopped', 'job immediately considered stopped (as it was still in status new)';
     Mojo::IOLoop->one_tick;    # the callback is supposed to be invoked on the next tick
     ok $callback_invoked, 'callback invoked also when posting status did not work';
+
+    $callback_invoked = 0;
+    $job_mock->redefine(stop => sub { fail 'stop should not have been invoked when already stopping' });
+    combined_like {
+        $job->_upload_results_step_0_prepare(sub { $callback_invoked = 1 })
+    }
+    qr/Unable to make final image uploads/, 'aborting logged when already stopping';
+    Mojo::IOLoop->one_tick;    # the callback is supposed to be invoked on the next tick
+    ok $callback_invoked, 'callback invoked also when posting status did not work (2)';
 };
+
+$job_mock->unmock('stop');
 
 subtest 'Scheduling failure handled correctly' => sub {
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 7, URL => $engine_url});
@@ -1165,6 +1176,17 @@ subtest 'Dynamic schedule' => sub {
 
 subtest 'optipng' => sub {
     is OpenQA::Worker::Job::_optimize_image('foo'), undef, 'optipng call is "best-effort"';
+};
+
+subtest '_read_module_result' => sub {
+    my $job = OpenQA::Worker::Job->new($worker, $client, {id => 9, URL => $engine_url});
+    is undef, $job->_read_module_result('foo'), 'unable to read module result';
+
+    my %res = (details => [{audio => 'recording.ogg', text => 'log.txt'}]);
+    $pool_directory->child('testresults')->make_path->child('result-foo.json')->spurt(encode_json(\%res));
+    is_deeply $job->_read_module_result('foo'), \%res, 'module result returned';
+    ok $job->files_to_send->{'recording.ogg'}, 'audio file added to be sent';
+    ok $job->files_to_send->{'log.txt'},       'text file added to be sent';
 };
 
 subtest '_read_result_file and _reduce_test_order' => sub {

@@ -18,7 +18,7 @@ use Mojo::Base 'Mojolicious::Plugin';
 
 use OpenQA::Log qw(log_info log_debug);
 use OpenQA::Utils qw(:DEFAULT assetdir);
-use OpenQA::Task::Utils qw(finish_job_if_disk_usage_below_percentage);
+use OpenQA::Task::Utils qw(acquire_limit_lock_or_retry finish_job_if_disk_usage_below_percentage);
 
 use Mojo::URL;
 use Data::Dump 'pp';
@@ -62,9 +62,7 @@ sub _limit {
     return $job->finish('Previous limit_assets job is still active')
       unless my $guard = $app->minion->guard('limit_assets_task', ONE_DAY);
 
-    # prevent multiple limit_* tasks to run in parallel
-    return $job->retry({delay => ONE_MINUTE})
-      unless my $limit_guard = $app->minion->guard('limit_tasks', ONE_DAY);
+    return undef unless my $limit_guard = acquire_limit_lock_or_retry($job);
 
     return undef
       if finish_job_if_disk_usage_below_percentage(
@@ -105,7 +103,9 @@ sub _limit {
         my $untracked_assets_patterns         = $config->{'assets/storage_duration'} // {};
         my $now                               = DateTime->now();
         for my $asset (@$assets) {
-            $update_sth->execute($asset->{max_job} && $asset->{max_job} >= 0 ? $asset->{max_job} : undef, $asset->{id});
+            my ($max_job, $max_job_before) = ($asset->{max_job}, $asset->{last_job});
+            $update_sth->execute($max_job && $max_job >= 0 ? $max_job : undef, $asset->{id})
+              if !$max_job_before || $max_job != $max_job_before;
             next if $asset->{fixed} || scalar(keys %{$asset->{groups}}) > 0;
 
             my $asset_name    = $asset->{name};
