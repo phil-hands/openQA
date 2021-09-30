@@ -3,6 +3,12 @@
 @import "bootswatch_litera_theme.scss";
 @import "openqa_theme.scss";
 
+// use Roboto font from linked build dependency on Debian
+@font-face {
+  font-family: 'Roboto';
+  src: url('../_debian/fonts-roboto-fontface/fonts/roboto/Roboto-Regular.ttf') format('truetype');
+}
+
 // include Bootstrap 4
 @import "../cache/raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss/bootstrap.scss";
 
