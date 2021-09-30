@@ -3,8 +3,8 @@ delta against upstream is either kept as a single patch, or maintained
 in some VCS, and exported as a single patch instead of more manageable
 atomic patches.
 
---- openqa-4.6.1631608585.77a6c34.orig/assets/stylesheets/openqa.scss
-+++ openqa-4.6.1631608585.77a6c34/assets/stylesheets/openqa.scss
+--- openqa-4.6.1632930736.2895850.orig/assets/stylesheets/openqa.scss
++++ openqa-4.6.1632930736.2895850/assets/stylesheets/openqa.scss
 @@ -3,9 +3,6 @@
  @import "bootswatch_litera_theme.scss";
  @import "openqa_theme.scss";
@@ -15,8 +15,8 @@ atomic patches.
  // include Bootstrap 4
  @import "../cache/raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss/bootstrap.scss";
  
---- openqa-4.6.1631608585.77a6c34.orig/assets/stylesheets/openqa_theme.scss
-+++ openqa-4.6.1631608585.77a6c34/assets/stylesheets/openqa_theme.scss
+--- openqa-4.6.1632930736.2895850.orig/assets/stylesheets/openqa_theme.scss
++++ openqa-4.6.1632930736.2895850/assets/stylesheets/openqa_theme.scss
 @@ -6,7 +6,6 @@ $grid-breakpoints: (
      xl: 1000px
  );
@@ -25,8 +25,8 @@ atomic patches.
  $default-font:                "Roboto", "Helvetica Neue", Helvetica, Arial, sans-serif;
  $icon-font-path:              '/fonts/';
  $default-font-color:          #666666;
---- openqa-4.6.1631608585.77a6c34.orig/etc/apache2/vhosts.d/openqa-ssl.conf.template
-+++ openqa-4.6.1631608585.77a6c34/etc/apache2/vhosts.d/openqa-ssl.conf.template
+--- openqa-4.6.1632930736.2895850.orig/etc/apache2/vhosts.d/openqa-ssl.conf.template
++++ openqa-4.6.1632930736.2895850/etc/apache2/vhosts.d/openqa-ssl.conf.template
 @@ -1,12 +1,12 @@
  # sample apache config file for the ssl enabled openqa vhost.
  # At the very minimum you need to set the ServerName.
@@ -53,8 +53,8 @@ atomic patches.
 -</IfDefine>
 -</IfDefine>
 -
---- openqa-4.6.1631608585.77a6c34.orig/etc/apache2/vhosts.d/openqa.conf.template
-+++ openqa-4.6.1631608585.77a6c34/etc/apache2/vhosts.d/openqa.conf.template
+--- openqa-4.6.1632930736.2895850.orig/etc/apache2/vhosts.d/openqa.conf.template
++++ openqa-4.6.1632930736.2895850/etc/apache2/vhosts.d/openqa.conf.template
 @@ -17,6 +17,7 @@
  # a2enmod proxy_http
  # a2enmod proxy_wstunnel
@@ -63,8 +63,8 @@ atomic patches.
  
  <VirtualHost *:80>
  
---- openqa-4.6.1631608585.77a6c34.orig/etc/openqa/workers.ini
-+++ openqa-4.6.1631608585.77a6c34/etc/openqa/workers.ini
+--- openqa-4.6.1632930736.2895850.orig/etc/openqa/workers.ini
++++ openqa-4.6.1632930736.2895850/etc/openqa/workers.ini
 @@ -36,7 +36,7 @@
  # packages against the list of packages during the previous last good job.
  # Configuring this variable provides a command line to list the packages and
@@ -74,20 +74,9 @@ atomic patches.
  
  # The section ids are the instance of the workers.
  # The key/value pairs will appear in vars.json
---- openqa-4.6.1631608585.77a6c34.orig/lib/OpenQA/CLI.pm
-+++ openqa-4.6.1631608585.77a6c34/lib/OpenQA/CLI.pm
-@@ -27,6 +27,10 @@ has namespaces => sub { ['OpenQA::CLI']
- 
- =encoding utf8
- 
-+=head1 NAME
-+
-+openqa-cli - provides command-line access to the openQA API
-+
- =head1 SYNOPSIS
- 
-   Usage: openqa-cli COMMAND [OPTIONS]
-@@ -40,8 +44,8 @@ has namespaces => sub { ['OpenQA::CLI']
+--- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/CLI.pm
++++ openqa-4.6.1632930736.2895850/lib/OpenQA/CLI.pm
+@@ -44,8 +44,8 @@ openqa-cli - provides command-line acces
      # Show details for job from arbitrary host
      openqa-cli api --host http://openqa.example.com jobs/408
  
@@ -98,7 +87,7 @@ atomic patches.
  
      # Archive job from O3
      openqa-cli archive --o3 408 /tmp/job_408
-@@ -54,6 +58,7 @@ has namespaces => sub { ['OpenQA::CLI']
+@@ -58,6 +58,7 @@ openqa-cli - provides command-line acces
      -h, --help                  Get more information on a specific command
          --osd                   Set target host to http://openqa.suse.de
          --o3                    Set target host to https://openqa.opensuse.org
@@ -106,8 +95,8 @@ atomic patches.
  
    Configuration:
      API key and secret are read from "client.conf" if not specified via CLI
---- openqa-4.6.1631608585.77a6c34.orig/lib/OpenQA/CLI/api.pm
-+++ openqa-4.6.1631608585.77a6c34/lib/OpenQA/CLI/api.pm
+--- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/CLI/api.pm
++++ openqa-4.6.1632930736.2895850/lib/OpenQA/CLI/api.pm
 @@ -74,8 +74,8 @@ sub command {
      # Show details for job from arbitrary host
      openqa-cli api --host http://openqa.example.com jobs/408
@@ -127,8 +116,8 @@ atomic patches.
          --param-file <param=file> Load content of params from files instead of
                                    from command line arguments. Multiple params
                                    may be specified by adding the option
---- openqa-4.6.1631608585.77a6c34.orig/lib/OpenQA/CLI/archive.pm
-+++ openqa-4.6.1631608585.77a6c34/lib/OpenQA/CLI/archive.pm
+--- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/CLI/archive.pm
++++ openqa-4.6.1632930736.2895850/lib/OpenQA/CLI/archive.pm
 @@ -49,8 +49,8 @@ sub command {
  
    Usage: openqa-cli archive [OPTIONS] JOB PATH
@@ -148,8 +137,8 @@ atomic patches.
      -t, --with-thumbnails          Download thumbnails as well
  
  =cut
---- openqa-4.6.1631608585.77a6c34.orig/lib/OpenQA/Command.pm
-+++ openqa-4.6.1631608585.77a6c34/lib/OpenQA/Command.pm
+--- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/Command.pm
++++ openqa-4.6.1632930736.2895850/lib/OpenQA/Command.pm
 @@ -108,7 +108,8 @@ sub run {
        'apisecret=s' => sub { $self->apisecret($_[1]) },
        'host=s'      => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
@@ -160,8 +149,8 @@ atomic patches.
  
      return $self->command(@args);
  }
---- openqa-4.6.1631608585.77a6c34.orig/lib/OpenQA/Utils.pm
-+++ openqa-4.6.1631608585.77a6c34/lib/OpenQA/Utils.pm
+--- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/Utils.pm
++++ openqa-4.6.1632930736.2895850/lib/OpenQA/Utils.pm
 @@ -362,6 +362,8 @@ my %bugrefs = (
      kde => 'https://bugs.kde.org/show_bug.cgi?id=',
      fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
@@ -180,7 +169,7 @@ atomic patches.
  
  my $MARKER_REFS = join('|', keys %bugrefs);
 --- /dev/null
-+++ openqa-4.6.1631608585.77a6c34/man/openqa-label-all.1.in
++++ openqa-4.6.1632930736.2895850/man/openqa-label-all.1.in
 @@ -0,0 +1,72 @@
 +.\"                                      Hey, EMACS: -*- nroff -*-
 +.\" First parameter, NAME, should be all caps
@@ -254,58 +243,9 @@ atomic patches.
 +.SH AUTHOR
 +This manual page was written by Philip Hands <phil@hands.com>, for the Debian
 +GNU/Linux system (but may be used by others).
---- openqa-4.6.1631608585.77a6c34.orig/profiles/apparmor.d/usr.share.openqa.script.openqa
-+++ openqa-4.6.1631608585.77a6c34/profiles/apparmor.d/usr.share.openqa.script.openqa
-@@ -16,23 +16,32 @@
-   #include <abstractions/nameservice>
-   #include <abstractions/perl>
- 
-+  /etc/gitconfig r,
-   /etc/openqa/database.ini r,
-   /etc/openqa/openqa.ini r,
-   /etc/openqa/templates/ r,
-   /etc/openqa/templates/** r,
-+  /etc/mailname r,
-+  /etc/ssl/openssl.cnf r,
-   /proc/meminfo r,
-   /tmp/** rwk,
-+  /usr/bin/dash ix,
-   /usr/bin/perl ix,
-   /usr/bin/ssh rcx,
-   /usr/bin/timeout rix,
--  /usr/bin/unzip-plain rix,
--  /usr/lib/git/git rix,
--  /usr/lib/git/git-add rix,
--  /usr/lib/git/git-commit rix,
--  /usr/lib/git/git-push rix,
--  /usr/lib/git/git-rebase rix,
--  /usr/lib/git/git-remote rix,
--  /usr/lib/git/git-rm rix,
-+  /usr/bin/unzip{,-plain} rix,
-+  /usr/bin/git rix,
-+  /usr/bin/git-lfs rix,
-+  /usr/lib/git{,-core}/git rix,
-+  /usr/lib/git{,-core}/git-add rix,
-+  /usr/lib/git{,-core}/git-commit rix,
-+  /usr/lib/git{,-core}/git-push rix,
-+  /usr/lib/git{,-core}/git-rebase rix,
-+  /usr/lib/git{,-core}/git-remote rix,
-+  /usr/lib/git{,-core}/git-remote-http rix,
-+  /usr/lib/git{,-core}/git-remote-https rix,
-+  /usr/lib/git{,-core}/git-rm rix,
-+  /usr/lib/git{,-core}/git-upload-pack rix,
-   /usr/libexec/git/git rix,
-   /usr/libexec/git/git-add rix,
-   /usr/libexec/git/git-commit rix,
-@@ -74,6 +83,7 @@
-   /var/lib/openqa/share/tests/ r,
-   /var/lib/openqa/share/tests/** rw,
-   /var/lib/openqa/share/tests/*/needles/.git/objects/*/* rwl,
-+  /var/lib/openqa/share/tests/*/.git/hooks/* rix,
-   /var/lib/openqa/testresults/ r,
-   /var/lib/openqa/testresults/** rw,
-   /var/lib/openqa/webui/** rw,
-@@ -81,6 +91,13 @@
+--- openqa-4.6.1632930736.2895850.orig/profiles/apparmor.d/usr.share.openqa.script.openqa
++++ openqa-4.6.1632930736.2895850/profiles/apparmor.d/usr.share.openqa.script.openqa
+@@ -91,6 +91,13 @@
    /var/tmp/* rwk,
    owner /var/lib/openqa/share/tests/** rwl,
  
@@ -319,7 +259,7 @@ atomic patches.
  
    profile /usr/bin/ssh {
      #include <abstractions/base>
-@@ -97,51 +114,6 @@
+@@ -107,51 +114,6 @@
  
    }
  
@@ -371,30 +311,21 @@ atomic patches.
    # Site-specific additions and overrides. See local/README for details.
    #include <local/usr.share.openqa.script.openqa>
  }
---- openqa-4.6.1631608585.77a6c34.orig/profiles/apparmor.d/usr.share.openqa.script.worker
-+++ openqa-4.6.1631608585.77a6c34/profiles/apparmor.d/usr.share.openqa.script.worker
-@@ -26,7 +26,7 @@
- 
-   network netbeui raw,
- 
--  /{usr/,}bin/bash rix,
-+  /{usr/,}bin/{b,d}ash rix,
-   /{usr/,}bin/pkill rix,
-   /dev/ r,
-   /dev/bus/usb/ r,
-@@ -36,7 +36,11 @@
+--- openqa-4.6.1632930736.2895850.orig/profiles/apparmor.d/usr.share.openqa.script.worker
++++ openqa-4.6.1632930736.2895850/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -36,8 +36,11 @@
    /dev/ptmx rw,
    /dev/pts/* rw,
    /dev/tty rw,
 +  /etc/apt/** r,
 +  /etc/dpkg/dpkg.cfg{,.d,.d/*} r,
-+  /etc/gitconfig r,
+   /etc/gitconfig r,
    /etc/libnl/classid r,
 +  /etc/machine-id r,
    /etc/openqa/client.conf r,
    /etc/openqa/workers.ini r,
    /etc/qemu/* r,
-@@ -44,6 +48,7 @@
+@@ -45,6 +48,7 @@
    /etc/vde2/vdecmd r,
    /proc/*/auxv r,
    /proc/*/cmdline r,
@@ -402,24 +333,12 @@ atomic patches.
    /proc/*/mountinfo r,
    /proc/*/net/psched r,
    /proc/*/stat r,
-@@ -53,6 +58,7 @@
-   /proc/meminfo r,
-   /proc/sys/vm/overcommit_memory r,
-   /proc/sys/fs/pipe-max-size r,
-+  /proc/sys/vm/nr_hugepages r,
-   /run/nscd/group r,
-   /run/openqa/vde.ctl/* rw,
-   /run/udev/queue.bin r,
-@@ -64,14 +70,17 @@
-   /sys/devices/system/node/** r,
-   /sys/firmware/devicetree/base/ r,
-   /sys/fs/cgroup/systemd/openqa.slice/** rw,
-+  /sys/kernel/mm/transparent_hugepage/enabled r,
+@@ -69,12 +73,14 @@
+   /sys/kernel/mm/transparent_hugepage/enabled r,
    /tmp/* rwk,
    /usr/bin/Xvnc rCx,
--  /usr/bin/cat rix,
 +  /usr/bin/apt rix,
-+  /{usr/,}bin/cat rix,
+   /{usr/,}bin/cat rix,
    /usr/bin/chattr rix,
    /usr/bin/cksum rix,
    /usr/bin/cp rix,
@@ -429,16 +348,7 @@ atomic patches.
    /usr/bin/eatmydata rix,
    /usr/bin/env rix,
    /usr/bin/find rix,
-@@ -88,7 +97,7 @@
-   /usr/bin/mkdir rix,
-   /usr/bin/nice rix,
-   /usr/bin/optipng rix,
--  /usr/bin/pwd rix,
-+  /{usr/,}bin/pwd rix,
-   /usr/bin/python3.* ix,
-   /usr/bin/qemu-img rix,
-   /usr/bin/qemu-kvm rix,
-@@ -108,12 +117,13 @@
+@@ -111,6 +117,7 @@
    /usr/bin/x3270 cx,
    /usr/bin/xterm-console rix,
    /usr/bin/xz rix,
@@ -446,15 +356,7 @@ atomic patches.
    /usr/lib*/qemu/block-curl.so rix,
    /usr/lib*/qemu/block-iscsi.so mr,
    /usr/lib*/qemu/block-rbd.so mr,
-   /usr/lib*/qemu/block-ssh.so mr,
--  /usr/lib/git/git rix,
--  /usr/lib/git/git-remote-http rix,
-+  /usr/lib/git{,-core}/git rix,
-+  /usr/lib/git{,-core}/git-remote-http rix,
-   /usr/lib/os-autoinst/videoencoder rix,
-   /usr/lib/os-autoinst/check_qemu_oom arCx,
-   /usr/libexec/git/git rix,
-@@ -122,6 +132,7 @@
+@@ -125,6 +132,7 @@
    /usr/lib/utempter/utempter rix,
    /usr/sbin/smbd rix,
    /usr/sbin/ipmiconsole rix,
@@ -462,107 +364,17 @@ atomic patches.
    /usr/share/openqa/lib/** r,
    /usr/share/openqa/lib/DBIx/Class/Timestamps.pm r,
    /usr/share/openqa/lib/OpenQA/** r,
-@@ -129,7 +140,11 @@
-   /usr/share/git-core/templates/ r,
-   /usr/share/git-core/templates/** r,
-   /usr/share/qemu/* rk,
-+  /usr/share/seabios/* r,
+@@ -135,6 +143,8 @@
+   /usr/share/seabios/* r,
    /usr/share/qemu/keymaps/* r,
-+  /usr/share/OVMF/* rk,
+   /usr/share/OVMF/* rk,
 +  /var/lib/apt/** r,
 +  /var/lib/dpkg/status r,
    /var/lib/openqa/cache/ r,
    /var/lib/openqa/cache/** rwk,
    /var/lib/openqa/pool/ r,
---- openqa-4.6.1631608585.77a6c34.orig/script/client
-+++ openqa-4.6.1631608585.77a6c34/script/client
-@@ -15,9 +15,15 @@
- # You should have received a copy of the GNU General Public License along
- # with this program; if not, see <http://www.gnu.org/licenses/>.
- 
-+=head1 NAME
-+
-+openqa-client - deprecated script for talking to an openQA server
-+
- =head1 SYNOPSIS
- 
--client [OPTIONS] PATH
-+This script is deprecated, use openqa-cli instead
-+
-+openqa-client [OPTIONS] PATH
- 
- =head1 OPTIONS
- 
-@@ -92,8 +98,12 @@ jobs/1/artefact post --form file.file=ba
- 
- print help
- 
-+=back
-+
- =head2 Archive mode
- 
-+=over 4
-+
- =item B<--archive, -a> DIRECTORY
- 
- Archive mode: Download assets and test results from a job to DIRECTORY.
-@@ -107,6 +117,8 @@ Archive mode: Include thumbnails
- Archive mode: Download assets that do not exceed the specified limit in bytes
- The default limit is 200 MB.
- 
-+=back
-+
- =head1 SYNOPSIS
- 
- Interact with the openQA API by specified route entry points and optionally
-@@ -116,6 +128,8 @@ for available API routes.
- 
- Common top level entry points: jobs, workers, isos.
- 
-+=over 4
-+
- =item client --host openqa.example.com jobs
- 
- List all jobs. Caution: this will take a very long time or even timeout on big
-@@ -147,6 +161,7 @@ Trigger jobs on iso B<bar.iso> matching
- 
- Download all assets and test logs and images from job B<42> with asset limit of B<1GB> to B</path/to/directory>.
- 
-+=back
- =cut
- 
- use strict;
---- openqa-4.6.1631608585.77a6c34.orig/script/dump_templates
-+++ openqa-4.6.1631608585.77a6c34/script/dump_templates
-@@ -15,7 +15,7 @@
- # You should have received a copy of the GNU General Public License along
- # with this program; if not, see <http://www.gnu.org/licenses/>.
- 
--=head1 dump_templates
-+=head1 NAME
- 
- dump_templates - dump openQA templates
- 
-@@ -89,6 +89,8 @@ print help
- 
- =head1 SYNOPSIS
- 
-+=over 4
-+
- =item dump_templates --host openqa.example.com Products
- 
- =item dump_templates --host openqa.example.com --group "openSUSE Tumbleweed" --full
-@@ -97,6 +99,8 @@ print help
- 
- =item dump_templates --host openqa.example.com --machine "64bit"
- 
-+=back
-+
- =head1 DESCRIPTION
- 
- Dump openQA database tables for Machines TestSuites Products
---- openqa-4.6.1631608585.77a6c34.orig/script/fetchneedles
-+++ openqa-4.6.1631608585.77a6c34/script/fetchneedles
+--- openqa-4.6.1632930736.2895850.orig/script/fetchneedles
++++ openqa-4.6.1632930736.2895850/script/fetchneedles
 @@ -1,23 +1,32 @@
  #!/bin/sh -e
 -[ "$1" = "-h" ] || [ "$1" = "--help" ] && echo "Get openSUSE tests and needles from https://github.com/os-autoinst/os-autoinst-distri-opensuse" && exit
@@ -616,41 +428,8 @@ atomic patches.
      else
          do_fetch "$target"
      fi
---- openqa-4.6.1631608585.77a6c34.orig/script/load_templates
-+++ openqa-4.6.1631608585.77a6c34/script/load_templates
-@@ -15,7 +15,7 @@
- # You should have received a copy of the GNU General Public License along
- # with this program; if not, see <http://www.gnu.org/licenses/>.
- 
--=head1 load_templates
-+=head1 NAME
- 
- load_templates - load openqa job templates
- 
---- openqa-4.6.1631608585.77a6c34.orig/script/openqa-clone-job
-+++ openqa-4.6.1631608585.77a6c34/script/openqa-clone-job
-@@ -19,14 +19,16 @@
- # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- # SOFTWARE.
- 
--=head1 openqa-clone-job
-+=head1 NAME
-+
-+openqa-clone-job - creates a new job based on an existing job
-+
-+=head1 SYNOPSIS
- 
- Clones a job from the local or a remote openQA instance. Downloads all assets
- associated with the job (unless --skip-download is specified). Optionally
- settings can be modified.
- 
--=head1 SYNOPSIS
--
-   openqa-clone-job [OPTIONS] JOBREF [KEY=[VALUE] ...]
- 
-   # clones job 42 (and any existing parents) from "openqa.opensuse.org" to the local openQA instance
---- openqa-4.6.1631608585.77a6c34.orig/script/openqa-label-all
-+++ openqa-4.6.1631608585.77a6c34/script/openqa-label-all
+--- openqa-4.6.1632930736.2895850.orig/script/openqa-label-all
++++ openqa-4.6.1632930736.2895850/script/openqa-label-all
 @@ -64,7 +64,7 @@ def call(cmds, dry_run=False):
  def main():
      args = parse_args()
@@ -660,8 +439,8 @@ atomic patches.
      def openqa_call(cmds):
          return call(openqa_cmd + cmds, args.dry_run)
  
---- openqa-4.6.1631608585.77a6c34.orig/script/openqa-validate-yaml
-+++ openqa-4.6.1631608585.77a6c34/script/openqa-validate-yaml
+--- openqa-4.6.1632930736.2895850.orig/script/openqa-validate-yaml
++++ openqa-4.6.1632930736.2895850/script/openqa-validate-yaml
 @@ -19,6 +19,52 @@
  # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  # SOFTWARE.
@@ -715,8 +494,8 @@ atomic patches.
  use strict;
  use warnings;
  use 5.010;
---- openqa-4.6.1631608585.77a6c34.orig/systemd/openqa-webui.service
-+++ openqa-4.6.1631608585.77a6c34/systemd/openqa-webui.service
+--- openqa-4.6.1632930736.2895850.orig/systemd/openqa-webui.service
++++ openqa-4.6.1632930736.2895850/systemd/openqa-webui.service
 @@ -4,6 +4,7 @@ Wants=apache2.service openqa-setup-db.se
  Before=apache2.service
  After=postgresql.service openqa-setup-db.service openqa-scheduler.service nss-lookup.target remote-fs.target
@@ -725,8 +504,8 @@ atomic patches.
  
  [Service]
  User=geekotest
---- openqa-4.6.1631608585.77a6c34.orig/systemd/openqa-worker@.service
-+++ openqa-4.6.1631608585.77a6c34/systemd/openqa-worker@.service
+--- openqa-4.6.1632930736.2895850.orig/systemd/openqa-worker@.service
++++ openqa-4.6.1632930736.2895850/systemd/openqa-worker@.service
 @@ -7,6 +7,7 @@ Description=openQA Worker #%i
  Wants=network.target
  After=openqa-slirpvde.service network.target nss-lookup.target remote-fs.target
@@ -735,8 +514,8 @@ atomic patches.
  
  [Service]
  Type=simple
---- openqa-4.6.1631608585.77a6c34.orig/t/43-cli-api.t
-+++ openqa-4.6.1631608585.77a6c34/t/43-cli-api.t
+--- openqa-4.6.1632930736.2895850.orig/t/43-cli-api.t
++++ openqa-4.6.1632930736.2895850/t/43-cli-api.t
 @@ -103,6 +103,10 @@ subtest 'Host' => sub {
      like $@, qr/Usage: openqa-cli api/, 'usage';
      is $api->host, 'https://openqa.opensuse.org', 'host';
@@ -748,8 +527,8 @@ atomic patches.
      eval { $api->run(@host) };
      like $@, qr/Usage: openqa-cli api/, 'usage';
      is $api->host, $host, 'host';
---- openqa-4.6.1631608585.77a6c34.orig/t/43-cli-archive.t
-+++ openqa-4.6.1631608585.77a6c34/t/43-cli-archive.t
+--- openqa-4.6.1632930736.2895850.orig/t/43-cli-archive.t
++++ openqa-4.6.1632930736.2895850/t/43-cli-archive.t
 @@ -89,6 +89,10 @@ subtest 'Host' => sub {
      like $@, qr/Usage: openqa-cli archive/, 'usage';
      is $archive->host, 'https://openqa.opensuse.org', 'host';
@@ -761,8 +540,8 @@ atomic patches.
      eval { $archive->run(@host) };
      like $@, qr/Usage: openqa-cli archive/, 'usage';
      is $archive->host, $host, 'host';
---- openqa-4.6.1631608585.77a6c34.orig/templates/webapi/comments/add_comment_form_groups.html.ep
-+++ openqa-4.6.1631608585.77a6c34/templates/webapi/comments/add_comment_form_groups.html.ep
+--- openqa-4.6.1632930736.2895850.orig/templates/webapi/comments/add_comment_form_groups.html.ep
++++ openqa-4.6.1632930736.2895850/templates/webapi/comments/add_comment_form_groups.html.ep
 @@ -19,7 +19,7 @@
                  </p>
                  <ul>
