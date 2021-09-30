@@ -11,44 +11,44 @@ override_dh_auto_build:
 	mkdir -p assets/_debian
 	ln -s /usr/share/fonts-fork-awesome assets/_debian
 	ln -s /usr/share/fonts-roboto-fontface assets/_debian
-	sed -i -e 's%https://cdn\.jsdelivr\.net/npm/fork-awesome@1\.2\.0/css/fork-awesome.min.css%_debian/fonts-fork-awesome/css/fork-awesome.css%' assets/assetpack.def
+	sed -i -e 's%https://cdn\.jsdelivr\.net/npm/fork-awesome@1\.2\.0/css/fork-awesome\.min\.css%_debian/fonts-fork-awesome/css/fork-awesome.css%' assets/assetpack.def
 	# convince assetpack to use local copies of the fonts:
 	for ext in eot svg ttf woff woff2 ; do \
 		printf '\n! forkawesome-webfont.%s\n< _debian/fonts-fork-awesome/fonts/forkawesome-webfont.%s\n' $$ext $$ext >> assets/assetpack.def ; \
 	done
 	ln -s -s /usr/share/javascript/chosen assets/_debian/libjs-chosen
-	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/chosen/1.7.0/%_debian/libjs-chosen/%' assets/assetpack.def
+	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/chosen/1\.7\.0/%_debian/libjs-chosen/%' assets/assetpack.def
 	mkdir -p assets/_debian/datatables
 	cp --dereference -v -s /usr/share/javascript/jquery-datatables/css/dataTables.bootstrap4.css \
 		/usr/share/javascript/jquery-datatables/jquery.dataTables.js \
 		/usr/share/javascript/jquery-datatables/dataTables.bootstrap4.js assets/_debian/datatables
-	sed -i -e 's%https://cdn\.datatables\.net/1.10.16/\(css\|js\)/%_debian/datatables/%' assets/assetpack.def
+	sed -i -e 's%https://cdn\.datatables\.net/1\.10\.16/\(css\|js\)/%_debian/datatables/%' assets/assetpack.def
 	mkdir -p assets/_debian/libjs-bootstrap4
 	ln -s /usr/share/sass/bootstrap assets/_debian/libjs-bootstrap4/sass
 	ln -s /usr/share/javascript/bootstrap4/js assets/_debian/libjs-bootstrap4/js
 	sed -i -e 's%https://raw\.githubusercontent\.com/twbs/bootstrap/v4\.1\.1/scss/\(.*\)%_debian/libjs-bootstrap4/sass/\1%' \
-	       -e 's%https://maxcdn.bootstrapcdn.com/bootstrap/4.0.0/js/bootstrap.js%_debian/libjs-bootstrap4/js/bootstrap.js%' assets/assetpack.def
-	sed -i -e 's%cache/raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss%_debian/libjs-bootstrap4/sass%' assets/stylesheets/openqa.scss
+	       -e 's%https://maxcdn\.bootstrapcdn\.com/bootstrap/4\.0\.0/js/bootstrap\.js%_debian/libjs-bootstrap4/js/bootstrap.js%' assets/assetpack.def
+	sed -i -e 's%cache/raw\.githubusercontent\.com/twbs/bootstrap/v4\.1\.1/scss%_debian/libjs-bootstrap4/sass%' assets/stylesheets/openqa.scss
 	ln -s /usr/share/javascript/bootstrap-tour assets/_debian/libjs-bootstrap-tour
 	sed -i -e 's%https://raw\.githubusercontent\.com/sorich87/bootstrap-tour/6a1028fb562f9aa68c451f0901f8cfeb43cad140/build/\(css\|js\)/bootstrap-tour\.\(css\|min\.js\)%_debian/libjs-bootstrap-tour/bootstrap-tour.\2%' assets/assetpack.def
 	ln -s /usr/share/javascript/codemirror assets/_debian/libjs-codemirror
-	sed -i -e 's%https://raw.githubusercontent.com/codemirror/CodeMirror/8097c7e75ce7ef0512debe9967d7568626106e53/\(lib\|mode\)\(.*\)%_debian/libjs-codemirror/\1\2%' assets/assetpack.def
+	sed -i -e 's%https://raw\.githubusercontent\.com/codemirror/CodeMirror/8097c7e75ce7ef0512debe9967d7568626106e53/\(lib\|mode\)\(.*\)%_debian/libjs-codemirror/\1\2%' assets/assetpack.def
 	ln -s /usr/share/javascript/jquery assets/_debian/libjs-jquery
-	sed -i -e 's%https://code.jquery.com/jquery-3.3.1.js%_debian/libjs-jquery/jquery.js%' assets/assetpack.def
+	sed -i -e 's%https://code\.jquery\.com/jquery-3\.3\.1\.js%_debian/libjs-jquery/jquery.js%' assets/assetpack.def
 	cp -v -r debian/missing-sources/bootstrap-4-multi-dropdown-navbar_957865f9 assets/_debian/bootstrap-4-multi-dropdown-navbar_957865f9
 	sed -i -e 's%https://raw\.githubusercontent\.com/bootstrapthemesco/bootstrap-4-multi-dropdown-navbar/beta2\.0/\(css\|js\)/%_debian/bootstrap-4-multi-dropdown-navbar_957865f9/%' assets/assetpack.def
 	ln -s /usr/share/javascript/jquery-timeago assets/_debian/libjs-jquery-timeago
-	sed -i -e 's%http://timeago.yarp.com/jquery.timeago.js%_debian/libjs-jquery-timeago/jquery.timeago.js%' assets/assetpack.def
+	sed -i -e 's%http://timeago\.yarp\.com/jquery\.timeago\.js%_debian/libjs-jquery-timeago/jquery.timeago.js%' assets/assetpack.def
 	ln -s /usr/share/nodejs/popper.js/dist assets/_debian/libjs-popper.js
-	sed -i -e 's%https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.12.9/umd/popper.js%_debian/libjs-popper.js/umd/popper.js%' assets/assetpack.def
+	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/popper\.js/1\.12\.9/umd/popper\.js%_debian/libjs-popper.js/umd/popper.js%' assets/assetpack.def
 	ln -s /usr/lib/nodejs/jquery-ujs/src assets/_debian/node-jquery-ujs
-	sed -i -e 's%https://cdnjs.cloudflare.com/ajax/libs/jquery-ujs/1.2.1/rails.js%_debian/node-jquery-ujs/rails.js%' assets/assetpack.def
+	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/jquery-ujs/1\.2\.1/rails\.js%_debian/node-jquery-ujs/rails.js%' assets/assetpack.def
 	cp -v -r debian/missing-sources/d3js_4.13.0 assets/_debian/d3js_4.13.0
-	sed -i -e 's%https://d3js.org/d3.v4.js%_debian/d3js_4.13.0/d3.v4.js%' assets/assetpack.def
+	sed -i -e 's%https://d3js\.org/d3\.v4\.js%_debian/d3js_4.13.0/d3.v4.js%' assets/assetpack.def
 	tar -xvz --transform='s%.*dist%assets/_debian/dagre-d3_0.5.0%' -f debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz dagre-d3-0.5.0/dist/dagre-d3.js
-	sed -i -e 's%https://raw.githubusercontent.com/dagrejs/dagre-d3/v0.5.0/dist/dagre-d3.js%_debian/dagre-d3_0.5.0/dagre-d3.js%' assets/assetpack.def
+	sed -i -e 's%https://raw\.githubusercontent\.com/dagrejs/dagre-d3/v0\.5\.0/dist/dagre-d3\.js%_debian/dagre-d3_0.5.0/dagre-d3.js%' assets/assetpack.def
 	cp -v -r debian/missing-sources/anser_2.0.1 assets/_debian/anser_2.0.1
-	sed -i -e 's%https://raw.githubusercontent.com/IonicaBizau/\(anser\)/\(2.0.1\)/lib/\(index.js\)%_debian/\1_\2/\3%' assets/assetpack.def
+	sed -i -e 's%https://raw\.githubusercontent\.com/IonicaBizau/\(anser\)/\(2\.0\.1\)/lib/\(index\.js\)%_debian/\1_\2/\3%' assets/assetpack.def
 	ln -sf /usr/share/javascript/cropper/cropper.css assets/stylesheets/cropper.css
 	! grep http assets/assetpack.def
 
@@ -60,7 +60,7 @@ override_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant
 	find $(CURDIR)/debian/openqa*/usr/share/openqa -type f -print0 | \
 		xargs -r0 sed -i -e '1s%^\(#!/usr/bin/\)env \(perl\|python3\)%\1\2%'
-	sed -i 's#/etc/apache2/vhosts.d#/etc/apache2/sites-available#' \
+	sed -i 's#/etc/apache2/vhosts\.d#/etc/apache2/sites-available#' \
 		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
 
 override_dh_fixperms-arch:
