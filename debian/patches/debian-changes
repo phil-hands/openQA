@@ -17,16 +17,20 @@ upload of upstream version 1.2.3, you could use:
 A single combined diff, containing all the changes, follows.
 --- openqa-4.6.1632930736.2895850.orig/assets/stylesheets/openqa.scss
 +++ openqa-4.6.1632930736.2895850/assets/stylesheets/openqa.scss
-@@ -3,9 +3,6 @@
+@@ -3,8 +3,11 @@
  @import "bootswatch_litera_theme.scss";
  @import "openqa_theme.scss";
  
 -// include Roboto font
 -@import url($web-font-path);
--
++// use Roboto font from linked build dependency on Debian
++@font-face {
++  font-family: 'Roboto';
++  src: url('../_debian/fonts-roboto-fontface/fonts/roboto/Roboto-Regular.ttf') format('truetype');
++}
+ 
  // include Bootstrap 4
  @import "../cache/raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss/bootstrap.scss";
- 
 --- openqa-4.6.1632930736.2895850.orig/assets/stylesheets/openqa_theme.scss
 +++ openqa-4.6.1632930736.2895850/assets/stylesheets/openqa_theme.scss
 @@ -6,7 +6,6 @@ $grid-breakpoints: (
