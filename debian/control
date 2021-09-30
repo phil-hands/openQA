@@ -11,7 +11,7 @@ Build-Depends: debhelper-compat (= 13),
                systemd,
                ruby-sass,
                fdupes,
-               libmojolicious-perl (>= 7.24),
+               libmojolicious-perl (>= 9.11),
 ### Bug#839569
 #              libselenium-remote-driver-perl (>= 1.0),
 ### for test&runtime
@@ -187,7 +187,7 @@ Package: openqa-common
 Architecture: all
 Depends: ${misc:Depends},
          ${perl:Depends},
-         libmojolicious-perl (>= 7.24),
+         libmojolicious-perl (>= 9.11),
          libjs-chosen,
 ### for test&runtime
          libdbd-sqlite3-perl,
@@ -236,7 +236,7 @@ Depends: ${misc:Depends},
          libjson-perl,
          libconfig-inifiles-perl,
          libdata-dump-perl,
-         libmojolicious-perl (>= 7.24),
+         libmojolicious-perl (>= 9.11),
          openqa-common (= ${source:Version}),
 Suggests: python3,
           python3-future,
