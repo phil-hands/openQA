@@ -45,7 +45,7 @@ openqa-cli - provides command-line access to the openQA API
     openqa-cli api --host http://openqa.example.com jobs/408
 
     # Show details for open.debian.net job (prettified JSON)
-    openqa-cli api --odn --pretty jobs/21610
+    openqa-cli api --odn --pretty jobs/4160811
 
     # Archive job from O3
     openqa-cli archive --o3 408 /tmp/job_408
