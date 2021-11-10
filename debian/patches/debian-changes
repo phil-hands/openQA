@@ -99,7 +99,7 @@ A single combined diff, containing all the changes, follows.
 -    # Show details for OSD job (prettified JSON)
 -    openqa-cli api --osd --pretty jobs/4160811
 +    # Show details for open.debian.net job (prettified JSON)
-+    openqa-cli api --odn --pretty jobs/21610
++    openqa-cli api --odn --pretty jobs/4160811
  
      # Archive job from O3
      openqa-cli archive --o3 408 /tmp/job_408
