@@ -15,8 +15,8 @@ upload of upstream version 1.2.3, you could use:
 (If you have dgit, use `dgit clone openqa`, rather than plain `git clone`.)
 
 A single combined diff, containing all the changes, follows.
---- openqa-4.6.1632930736.2895850.orig/assets/stylesheets/openqa.scss
-+++ openqa-4.6.1632930736.2895850/assets/stylesheets/openqa.scss
+--- openqa-4.6.1639057582.07f0f29.orig/assets/stylesheets/openqa.scss
++++ openqa-4.6.1639057582.07f0f29/assets/stylesheets/openqa.scss
 @@ -3,8 +3,11 @@
  @import "bootswatch_litera_theme.scss";
  @import "openqa_theme.scss";
@@ -31,8 +31,8 @@ A single combined diff, containing all the changes, follows.
  
  // include Bootstrap 4
  @import "../cache/raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss/bootstrap.scss";
---- openqa-4.6.1632930736.2895850.orig/assets/stylesheets/openqa_theme.scss
-+++ openqa-4.6.1632930736.2895850/assets/stylesheets/openqa_theme.scss
+--- openqa-4.6.1639057582.07f0f29.orig/assets/stylesheets/openqa_theme.scss
++++ openqa-4.6.1639057582.07f0f29/assets/stylesheets/openqa_theme.scss
 @@ -6,7 +6,6 @@ $grid-breakpoints: (
      xl: 1000px
  );
@@ -41,8 +41,8 @@ A single combined diff, containing all the changes, follows.
  $default-font:                "Roboto", "Helvetica Neue", Helvetica, Arial, sans-serif;
  $icon-font-path:              '/fonts/';
  $default-font-color:          #666666;
---- openqa-4.6.1632930736.2895850.orig/etc/apache2/vhosts.d/openqa-ssl.conf.template
-+++ openqa-4.6.1632930736.2895850/etc/apache2/vhosts.d/openqa-ssl.conf.template
+--- openqa-4.6.1639057582.07f0f29.orig/etc/apache2/vhosts.d/openqa-ssl.conf.template
++++ openqa-4.6.1639057582.07f0f29/etc/apache2/vhosts.d/openqa-ssl.conf.template
 @@ -1,12 +1,12 @@
  # sample apache config file for the ssl enabled openqa vhost.
  # At the very minimum you need to set the ServerName.
@@ -69,8 +69,8 @@ A single combined diff, containing all the changes, follows.
 -</IfDefine>
 -</IfDefine>
 -
---- openqa-4.6.1632930736.2895850.orig/etc/apache2/vhosts.d/openqa.conf.template
-+++ openqa-4.6.1632930736.2895850/etc/apache2/vhosts.d/openqa.conf.template
+--- openqa-4.6.1639057582.07f0f29.orig/etc/apache2/vhosts.d/openqa.conf.template
++++ openqa-4.6.1639057582.07f0f29/etc/apache2/vhosts.d/openqa.conf.template
 @@ -17,6 +17,7 @@
  # a2enmod proxy_http
  # a2enmod proxy_wstunnel
@@ -79,8 +79,8 @@ A single combined diff, containing all the changes, follows.
  
  <VirtualHost *:80>
  
---- openqa-4.6.1632930736.2895850.orig/etc/openqa/workers.ini
-+++ openqa-4.6.1632930736.2895850/etc/openqa/workers.ini
+--- openqa-4.6.1639057582.07f0f29.orig/etc/openqa/workers.ini
++++ openqa-4.6.1639057582.07f0f29/etc/openqa/workers.ini
 @@ -36,7 +36,7 @@
  # packages against the list of packages during the previous last good job.
  # Configuring this variable provides a command line to list the packages and
@@ -90,9 +90,9 @@ A single combined diff, containing all the changes, follows.
  
  # The section ids are the instance of the workers.
  # The key/value pairs will appear in vars.json
---- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/CLI.pm
-+++ openqa-4.6.1632930736.2895850/lib/OpenQA/CLI.pm
-@@ -44,8 +44,8 @@ openqa-cli - provides command-line acces
+--- openqa-4.6.1639057582.07f0f29.orig/lib/OpenQA/CLI.pm
++++ openqa-4.6.1639057582.07f0f29/lib/OpenQA/CLI.pm
+@@ -32,8 +32,8 @@ openqa-cli - provides command-line acces
      # Show details for job from arbitrary host
      openqa-cli api --host http://openqa.example.com jobs/408
  
@@ -103,7 +103,7 @@ A single combined diff, containing all the changes, follows.
  
      # Archive job from O3
      openqa-cli archive --o3 408 /tmp/job_408
-@@ -58,6 +58,7 @@ openqa-cli - provides command-line acces
+@@ -46,6 +46,7 @@ openqa-cli - provides command-line acces
      -h, --help                  Get more information on a specific command
          --osd                   Set target host to http://openqa.suse.de
          --o3                    Set target host to https://openqa.opensuse.org
@@ -111,9 +111,9 @@ A single combined diff, containing all the changes, follows.
  
    Configuration:
      API key and secret are read from "client.conf" if not specified via CLI
---- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/CLI/api.pm
-+++ openqa-4.6.1632930736.2895850/lib/OpenQA/CLI/api.pm
-@@ -74,8 +74,8 @@ sub command {
+--- openqa-4.6.1639057582.07f0f29.orig/lib/OpenQA/CLI/api.pm
++++ openqa-4.6.1639057582.07f0f29/lib/OpenQA/CLI/api.pm
+@@ -73,8 +73,8 @@ sub command {
      # Show details for job from arbitrary host
      openqa-cli api --host http://openqa.example.com jobs/408
  
@@ -124,7 +124,7 @@ A single combined diff, containing all the changes, follows.
  
      # List all jobs (CAUTION: this might time out for a large instance)
      openqa-cli api --host openqa.example.com jobs
-@@ -131,6 +131,7 @@ sub command {
+@@ -130,6 +130,7 @@ sub command {
      -j, --json                    Request content is JSON
          --osd                     Set target host to http://openqa.suse.de
          --o3                      Set target host to https://openqa.opensuse.org
@@ -132,9 +132,9 @@ A single combined diff, containing all the changes, follows.
          --param-file <param=file> Load content of params from files instead of
                                    from command line arguments. Multiple params
                                    may be specified by adding the option
---- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/CLI/archive.pm
-+++ openqa-4.6.1632930736.2895850/lib/OpenQA/CLI/archive.pm
-@@ -49,8 +49,8 @@ sub command {
+--- openqa-4.6.1639057582.07f0f29.orig/lib/OpenQA/CLI/archive.pm
++++ openqa-4.6.1639057582.07f0f29/lib/OpenQA/CLI/archive.pm
+@@ -37,8 +37,8 @@ sub command {
  
    Usage: openqa-cli archive [OPTIONS] JOB PATH
  
@@ -145,7 +145,7 @@ A single combined diff, containing all the changes, follows.
  
      # Download assets and test results from arbitrary host
      openqa-cli archive --host http://openqa.example.com 407 /tmp/foo
-@@ -68,6 +68,7 @@ sub command {
+@@ -56,6 +56,7 @@ sub command {
      -l, --asset-size-limit <num>   Asset size limit in bytes
          --osd                      Set target host to http://openqa.suse.de
          --o3                       Set target host to https://openqa.opensuse.org
@@ -153,21 +153,19 @@ A single combined diff, containing all the changes, follows.
      -t, --with-thumbnails          Download thumbnails as well
  
  =cut
---- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/Command.pm
-+++ openqa-4.6.1632930736.2895850/lib/OpenQA/Command.pm
-@@ -108,7 +108,8 @@ sub run {
-       'apisecret=s' => sub { $self->apisecret($_[1]) },
-       'host=s'      => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
-       'o3'          => sub { $self->host('https://openqa.opensuse.org') },
--      'osd'         => sub { $self->host('http://openqa.suse.de') };
-+      'osd'         => sub { $self->host('http://openqa.suse.de') },
-+      'odn'         => sub { $self->host('https://openqa.debian.net') };
+--- openqa-4.6.1639057582.07f0f29.orig/lib/OpenQA/Command.pm
++++ openqa-4.6.1639057582.07f0f29/lib/OpenQA/Command.pm
+@@ -97,6 +97,7 @@ sub run {
+       'host=s' => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
+       'o3' => sub { $self->host('https://openqa.opensuse.org') },
+       'osd' => sub { $self->host('http://openqa.suse.de') };
++      'odn' => sub { $self->host('https://openqa.debian.net') };
  
      return $self->command(@args);
  }
---- openqa-4.6.1632930736.2895850.orig/lib/OpenQA/Utils.pm
-+++ openqa-4.6.1632930736.2895850/lib/OpenQA/Utils.pm
-@@ -362,6 +362,8 @@ my %bugrefs = (
+--- openqa-4.6.1639057582.07f0f29.orig/lib/OpenQA/Utils.pm
++++ openqa-4.6.1639057582.07f0f29/lib/OpenQA/Utils.pm
+@@ -384,6 +384,8 @@ my %bugrefs = (
      kde => 'https://bugs.kde.org/show_bug.cgi?id=',
      fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
      jsc => 'https://jira.suse.de/browse/',
@@ -176,16 +174,16 @@ A single combined diff, containing all the changes, follows.
  );
  my %bugurls = (
      'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
-@@ -375,6 +377,7 @@ my %bugurls = (
-     $bugrefs{kde}                                  => 'kde',
-     $bugrefs{fdo}                                  => 'fdo',
-     $bugrefs{jsc}                                  => 'jsc',
-+    $bugrefs{deb}                                  => 'deb',
+@@ -397,6 +399,7 @@ my %bugurls = (
+     $bugrefs{kde} => 'kde',
+     $bugrefs{fdo} => 'fdo',
+     $bugrefs{jsc} => 'jsc',
++    $bugrefs{deb} => 'deb',
  );
  
  my $MARKER_REFS = join('|', keys %bugrefs);
 --- /dev/null
-+++ openqa-4.6.1632930736.2895850/man/openqa-label-all.1.in
++++ openqa-4.6.1639057582.07f0f29/man/openqa-label-all.1.in
 @@ -0,0 +1,72 @@
 +.\"                                      Hey, EMACS: -*- nroff -*-
 +.\" First parameter, NAME, should be all caps
@@ -259,9 +257,9 @@ A single combined diff, containing all the changes, follows.
 +.SH AUTHOR
 +This manual page was written by Philip Hands <phil@hands.com>, for the Debian
 +GNU/Linux system (but may be used by others).
---- openqa-4.6.1632930736.2895850.orig/profiles/apparmor.d/usr.share.openqa.script.openqa
-+++ openqa-4.6.1632930736.2895850/profiles/apparmor.d/usr.share.openqa.script.openqa
-@@ -91,6 +91,13 @@
+--- openqa-4.6.1639057582.07f0f29.orig/profiles/apparmor.d/usr.share.openqa.script.openqa
++++ openqa-4.6.1639057582.07f0f29/profiles/apparmor.d/usr.share.openqa.script.openqa
+@@ -83,6 +83,13 @@
    /var/tmp/* rwk,
    owner /var/lib/openqa/share/tests/** rwl,
  
@@ -275,7 +273,7 @@ A single combined diff, containing all the changes, follows.
  
    profile /usr/bin/ssh {
      #include <abstractions/base>
-@@ -107,51 +114,6 @@
+@@ -99,52 +106,6 @@
  
    }
  
@@ -298,7 +296,7 @@ A single combined diff, containing all the changes, follows.
 -  /usr/share/openqa/script/openqa-cli px,
 -  /usr/share/openqa/script/openqa-clone-job mrix,
 -  /usr/share/openqa/script/openqa-clone-job r,
--  /bin/bash mrix,
+-  /{usr/,}bin/{b,d}ash rix,
 -  /usr/bin/cat rix,
 -  /usr/bin/curl rix,
 -  /usr/bin/date mrix,
@@ -308,6 +306,7 @@ A single combined diff, containing all the changes, follows.
 -  /usr/bin/gawk mrix,
 -  /usr/bin/grep mrix,
 -  /usr/bin/head mrix,
+-  /usr/bin/hxselect mrix,
 -  /usr/bin/jq rix,
 -  /usr/bin/mv ix,
 -  /usr/bin/mktemp rix,
@@ -327,9 +326,9 @@ A single combined diff, containing all the changes, follows.
    # Site-specific additions and overrides. See local/README for details.
    #include <local/usr.share.openqa.script.openqa>
  }
---- openqa-4.6.1632930736.2895850.orig/profiles/apparmor.d/usr.share.openqa.script.worker
-+++ openqa-4.6.1632930736.2895850/profiles/apparmor.d/usr.share.openqa.script.worker
-@@ -36,8 +36,11 @@
+--- openqa-4.6.1639057582.07f0f29.orig/profiles/apparmor.d/usr.share.openqa.script.worker
++++ openqa-4.6.1639057582.07f0f29/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -27,8 +27,11 @@
    /dev/ptmx rw,
    /dev/pts/* rw,
    /dev/tty rw,
@@ -341,7 +340,7 @@ A single combined diff, containing all the changes, follows.
    /etc/openqa/client.conf r,
    /etc/openqa/workers.ini r,
    /etc/qemu/* r,
-@@ -45,6 +48,7 @@
+@@ -36,6 +39,7 @@
    /etc/vde2/vdecmd r,
    /proc/*/auxv r,
    /proc/*/cmdline r,
@@ -349,7 +348,7 @@ A single combined diff, containing all the changes, follows.
    /proc/*/mountinfo r,
    /proc/*/net/psched r,
    /proc/*/stat r,
-@@ -69,12 +73,14 @@
+@@ -60,12 +64,14 @@
    /sys/kernel/mm/transparent_hugepage/enabled r,
    /tmp/* rwk,
    /usr/bin/Xvnc rCx,
@@ -364,7 +363,7 @@ A single combined diff, containing all the changes, follows.
    /usr/bin/eatmydata rix,
    /usr/bin/env rix,
    /usr/bin/find rix,
-@@ -111,6 +117,7 @@
+@@ -102,6 +108,7 @@
    /usr/bin/x3270 cx,
    /usr/bin/xterm-console rix,
    /usr/bin/xz rix,
@@ -372,7 +371,7 @@ A single combined diff, containing all the changes, follows.
    /usr/lib*/qemu/block-curl.so rix,
    /usr/lib*/qemu/block-iscsi.so mr,
    /usr/lib*/qemu/block-rbd.so mr,
-@@ -125,6 +132,7 @@
+@@ -116,6 +123,7 @@
    /usr/lib/utempter/utempter rix,
    /usr/sbin/smbd rix,
    /usr/sbin/ipmiconsole rix,
@@ -380,7 +379,7 @@ A single combined diff, containing all the changes, follows.
    /usr/share/openqa/lib/** r,
    /usr/share/openqa/lib/DBIx/Class/Timestamps.pm r,
    /usr/share/openqa/lib/OpenQA/** r,
-@@ -135,6 +143,8 @@
+@@ -126,6 +134,8 @@
    /usr/share/seabios/* r,
    /usr/share/qemu/keymaps/* r,
    /usr/share/OVMF/* rk,
@@ -389,16 +388,15 @@ A single combined diff, containing all the changes, follows.
    /var/lib/openqa/cache/ r,
    /var/lib/openqa/cache/** rwk,
    /var/lib/openqa/pool/ r,
---- openqa-4.6.1632930736.2895850.orig/script/fetchneedles
-+++ openqa-4.6.1632930736.2895850/script/fetchneedles
-@@ -1,23 +1,32 @@
+--- openqa-4.6.1639057582.07f0f29.orig/script/fetchneedles
++++ openqa-4.6.1639057582.07f0f29/script/fetchneedles
+@@ -1,19 +1,19 @@
  #!/bin/sh -e
--[ "$1" = "-h" ] || [ "$1" = "--help" ] && echo "Get openSUSE tests and needles from https://github.com/os-autoinst/os-autoinst-distri-opensuse" && exit
--
  : "${dbuser:="geekotest"}"
 -: "${dbgroup:="www"}"
 +: "${dbgroup:="www-data"}"
  
+-: "${dist_name:=${dist:-"openSUSE"}}" # the display name, for the help message
 -: "${dist:="opensuse"}"
 -: "${giturl:="git://github.com/os-autoinst/os-autoinst-distri-opensuse.git"}"
 -: "${branch:="master"}"
@@ -411,6 +409,7 @@ A single combined diff, containing all the changes, follows.
  : "${username:="openQA web UI"}"
  : "${product:="$dist"}"
  
+-: "${git_lfs:="0"}"
 -: "${needles_separate:="1"}"
 -: "${needles_giturl:="git://github.com/os-autoinst/os-autoinst-needles-opensuse.git"}"
 -: "${needles_branch:="master"}"
@@ -421,42 +420,8 @@ A single combined diff, containing all the changes, follows.
  
  : "${updateall:="0"}"
  : "${force:="0"}"
- 
-+if [ "$1" = "-h" ] || [ "$1" = "--help" ] ; then
-+    echo "Get ${dist_name} tests and needles from:\n\t\t${giturl}"
-+    if [ 1 = ${needles_separate} ] ; then
-+        echo "\tand\t${needles_giturl}"
-+    fi
-+    echo "\n(environment variables mentioned in '$0' can be set to change these values)"
-+    exit
-+fi
-+
- dir="/var/lib/openqa/share/tests"
- if [ -w / ]; then
-     if [ ! -e "$dir/$dist" ]; then
-@@ -116,6 +125,9 @@ else
-             git config user.email "$email"
-             git config user.name "$username"
-         fi
-+        if [ "$git_lfs" = 1 ]; then
-+            git lfs install --local
-+        fi
-     else
-         do_fetch "$target"
-     fi
---- openqa-4.6.1632930736.2895850.orig/script/openqa-label-all
-+++ openqa-4.6.1632930736.2895850/script/openqa-label-all
-@@ -64,7 +64,7 @@ def call(cmds, dry_run=False):
- def main():
-     args = parse_args()
-     request_params = {'result': args.result, 'latest': 1, 'scope': 'relevant'}
--    openqa_cmd = ['openqa-client', '--host', args.openqa_host, '--json-output']
-+    openqa_cmd = ['/usr/share/openqa/script/client', '--host', args.openqa_host, '--json-output']
-     def openqa_call(cmds):
-         return call(openqa_cmd + cmds, args.dry_run)
- 
---- openqa-4.6.1632930736.2895850.orig/script/openqa-validate-yaml
-+++ openqa-4.6.1632930736.2895850/script/openqa-validate-yaml
+--- openqa-4.6.1639057582.07f0f29.orig/script/openqa-validate-yaml
++++ openqa-4.6.1639057582.07f0f29/script/openqa-validate-yaml
 @@ -19,6 +19,52 @@
  # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  # SOFTWARE.
@@ -510,8 +475,8 @@ A single combined diff, containing all the changes, follows.
  use strict;
  use warnings;
  use 5.010;
---- openqa-4.6.1632930736.2895850.orig/systemd/openqa-webui.service
-+++ openqa-4.6.1632930736.2895850/systemd/openqa-webui.service
+--- openqa-4.6.1639057582.07f0f29.orig/systemd/openqa-webui.service
++++ openqa-4.6.1639057582.07f0f29/systemd/openqa-webui.service
 @@ -4,6 +4,7 @@ Wants=apache2.service openqa-setup-db.se
  Before=apache2.service
  After=postgresql.service openqa-setup-db.service openqa-scheduler.service nss-lookup.target remote-fs.target
@@ -520,8 +485,8 @@ A single combined diff, containing all the changes, follows.
  
  [Service]
  User=geekotest
---- openqa-4.6.1632930736.2895850.orig/systemd/openqa-worker@.service
-+++ openqa-4.6.1632930736.2895850/systemd/openqa-worker@.service
+--- openqa-4.6.1639057582.07f0f29.orig/systemd/openqa-worker@.service
++++ openqa-4.6.1639057582.07f0f29/systemd/openqa-worker@.service
 @@ -7,6 +7,7 @@ Description=openQA Worker #%i
  Wants=network.target
  After=openqa-slirpvde.service network.target nss-lookup.target remote-fs.target
@@ -530,9 +495,9 @@ A single combined diff, containing all the changes, follows.
  
  [Service]
  Type=simple
---- openqa-4.6.1632930736.2895850.orig/t/43-cli-api.t
-+++ openqa-4.6.1632930736.2895850/t/43-cli-api.t
-@@ -103,6 +103,10 @@ subtest 'Host' => sub {
+--- openqa-4.6.1639057582.07f0f29.orig/t/43-cli-api.t
++++ openqa-4.6.1639057582.07f0f29/t/43-cli-api.t
+@@ -92,6 +92,10 @@ subtest 'Host' => sub {
      like $@, qr/Usage: openqa-cli api/, 'usage';
      is $api->host, 'https://openqa.opensuse.org', 'host';
  
@@ -543,9 +508,9 @@ A single combined diff, containing all the changes, follows.
      eval { $api->run(@host) };
      like $@, qr/Usage: openqa-cli api/, 'usage';
      is $api->host, $host, 'host';
---- openqa-4.6.1632930736.2895850.orig/t/43-cli-archive.t
-+++ openqa-4.6.1632930736.2895850/t/43-cli-archive.t
-@@ -89,6 +89,10 @@ subtest 'Host' => sub {
+--- openqa-4.6.1639057582.07f0f29.orig/t/43-cli-archive.t
++++ openqa-4.6.1639057582.07f0f29/t/43-cli-archive.t
+@@ -77,6 +77,10 @@ subtest 'Host' => sub {
      like $@, qr/Usage: openqa-cli archive/, 'usage';
      is $archive->host, 'https://openqa.opensuse.org', 'host';
  
@@ -556,8 +521,8 @@ A single combined diff, containing all the changes, follows.
      eval { $archive->run(@host) };
      like $@, qr/Usage: openqa-cli archive/, 'usage';
      is $archive->host, $host, 'host';
---- openqa-4.6.1632930736.2895850.orig/templates/webapi/comments/add_comment_form_groups.html.ep
-+++ openqa-4.6.1632930736.2895850/templates/webapi/comments/add_comment_form_groups.html.ep
+--- openqa-4.6.1639057582.07f0f29.orig/templates/webapi/comments/add_comment_form_groups.html.ep
++++ openqa-4.6.1639057582.07f0f29/templates/webapi/comments/add_comment_form_groups.html.ep
 @@ -19,7 +19,7 @@
                  </p>
                  <ul>
