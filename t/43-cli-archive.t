@@ -1,24 +1,12 @@
-# Copyright (C) 2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
+use Test::Most;
 use Mojo::Base -strict;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 
-use Test::More;
 use Capture::Tiny qw(capture_stdout);
 use Mojo::Server::Daemon;
 use Mojo::File qw(tempdir tempfile);
@@ -31,7 +19,7 @@ OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 05-j
 
 # Mock WebAPI with extra test routes
 my $daemon = Mojo::Server::Daemon->new(listen => ['http://127.0.0.1']);
-my $app    = $daemon->build_app('OpenQA::WebAPI');
+my $app = $daemon->build_app('OpenQA::WebAPI');
 $app->log->level('error');
 my $port = $daemon->start->ports->[0];
 my $host = "http://127.0.0.1:$port";
@@ -42,9 +30,9 @@ my @host = ('--host', $host);
 # Default options for authentication tests
 my @auth = ('--apikey', 'ARTHURKEY01', '--apisecret', 'EXCALIBUR', @host);
 
-my $cli     = OpenQA::CLI->new;
+my $cli = OpenQA::CLI->new;
 my $archive = OpenQA::CLI::archive->new;
-my $dir     = tempdir("/tmp/$FindBin::Script-XXXX");
+my $dir = tempdir("/tmp/$FindBin::Script-XXXX");
 
 subtest 'Help' => sub {
     my ($stdout, @result) = capture_stdout sub { $cli->run('help', 'archive') };
@@ -53,7 +41,7 @@ subtest 'Help' => sub {
 
 subtest 'Unknown options' => sub {
     my $archive = OpenQA::CLI::archive->new;
-    my $buffer  = '';
+    my $buffer = '';
     {
         open my $handle, '>', \$buffer;
         local *STDERR = $handle;
@@ -65,10 +53,10 @@ subtest 'Unknown options' => sub {
 
 subtest 'Defaults' => sub {
     my $archive = OpenQA::CLI::archive->new;
-    is $archive->apibase,   '/api/v1',          'apibase';
-    is $archive->apikey,    undef,              'no apikey';
-    is $archive->apisecret, undef,              'no apisecret';
-    is $archive->host,      'http://localhost', 'host';
+    is $archive->apibase, '/api/v1', 'apibase';
+    is $archive->apikey, undef, 'no apikey';
+    is $archive->apisecret, undef, 'no apisecret';
+    is $archive->host, 'http://localhost', 'host';
 };
 
 subtest 'Host' => sub {
@@ -102,8 +90,8 @@ subtest 'API' => sub {
 
     eval { $archive->run(@auth) };
     like $@, qr/Usage: openqa-cli archive/, 'usage';
-    is $archive->apikey,    'ARTHURKEY01', 'apikey';
-    is $archive->apisecret, 'EXCALIBUR',   'apisecret';
+    is $archive->apikey, 'ARTHURKEY01', 'apikey';
+    is $archive->apisecret, 'EXCALIBUR', 'apisecret';
 };
 
 subtest 'Archive job' => sub {
@@ -122,15 +110,15 @@ subtest 'Archive job' => sub {
     my $target = $dir->child('archive')->make_path;
     my ($stdout, $stderr, @result) = capture_stdout sub { $cli->run('archive', @host, 99937, $target->to_string) };
 
-    like $stdout, qr/Downloading test details and screenshots to $target/,         'downloading details';
-    like $stdout, qr/Saved details for .+details-isosize.json/,                    'saved details';
+    like $stdout, qr/Downloading test details and screenshots to $target/, 'downloading details';
+    like $stdout, qr/Saved details for .+details-isosize.json/, 'saved details';
     like $stdout, qr/Saved details for .+details-installer_desktopselection.json/, 'saved details';
-    like $stdout, qr/Saved details for .+details-shutdown.json/,                   'saved details';
+    like $stdout, qr/Saved details for .+details-shutdown.json/, 'saved details';
 
-    like $stdout, qr/Downloading video.ogv/,                                            'downloading video';
+    like $stdout, qr/Downloading video.ogv/, 'downloading video';
     like $stdout, qr/Asset video.ogv successfully downloaded and moved to .+video.ogv/, 'moved video';
 
-    like $stdout, qr/Downloading serial0.txt/,                                              'downloading serial0.txt';
+    like $stdout, qr/Downloading serial0.txt/, 'downloading serial0.txt';
     like $stdout, qr/Asset serial0.txt successfully downloaded and moved to .+serial0.txt/, 'moved serial0.txt';
 
     like $stdout, qr/Downloading autoinst-log.txt/, 'downloading autoinst-log.txt';
@@ -141,12 +129,12 @@ subtest 'Archive job' => sub {
 
     my $results = $target->child('testresults');
     ok -d $results, 'testresults directory exists';
-    ok -f $results->child('details-isosize.json'),                    'details-isosize.json exists';
+    ok -f $results->child('details-isosize.json'), 'details-isosize.json exists';
     ok -f $results->child('details-installer_desktopselection.json'), 'details-installer_desktopselection.json exists';
-    ok -f $results->child('details-shutdown.json'),                   'details-shutdown.json exists';
-    ok -f $results->child('video.ogv'),                               'video.ogv exists';
-    ok -f $results->child('serial0.txt'),                             'serial0.txt exists';
-    ok -f $results->child('autoinst-log.txt'),                        'autoinst-log.txt exists';
+    ok -f $results->child('details-shutdown.json'), 'details-shutdown.json exists';
+    ok -f $results->child('video.ogv'), 'video.ogv exists';
+    ok -f $results->child('serial0.txt'), 'serial0.txt exists';
+    ok -f $results->child('autoinst-log.txt'), 'autoinst-log.txt exists';
 
     ok !-e $results->child('thumbnails'), 'no thumbnails';
 };
@@ -159,8 +147,8 @@ subtest 'Archive job with thumbnails' => sub {
     my $results = $target->child('testresults');
     ok -d $results, 'testresults directory exists';
     ok -f $results->child('details-isosize.json'), 'details-isosize.json exists';
-    ok -f $results->child('autoinst-log.txt'),     'autoinst-log.txt exists';
-    ok -d $results->child('thumbnails'),           'thumbnails';
+    ok -f $results->child('autoinst-log.txt'), 'autoinst-log.txt exists';
+    ok -d $results->child('thumbnails'), 'thumbnails';
 
     $target = tempdir;
     ($stdout, $stderr, @result)
@@ -169,8 +157,8 @@ subtest 'Archive job with thumbnails' => sub {
     $results = $target->child('testresults');
     ok -d $results, 'testresults directory exists';
     ok -f $results->child('details-isosize.json'), 'details-isosize.json exists';
-    ok -f $results->child('autoinst-log.txt'),     'autoinst-log.txt exists';
-    ok -d $results->child('thumbnails'),           'thumbnails';
+    ok -f $results->child('autoinst-log.txt'), 'autoinst-log.txt exists';
+    ok -d $results->child('thumbnails'), 'thumbnails';
 };
 
 done_testing();

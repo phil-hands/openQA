@@ -1,17 +1,5 @@
-# Copyright (C) 2018-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Schema::ResultSet::DeveloperSessions;
 
@@ -37,7 +25,7 @@ sub register {
             my $worker = $schema->resultset('Workers')->search({job_id => $job_id})->first;
             return unless ($worker);
 
-            my $session                     = $self->find({job_id => $job_id});
+            my $session = $self->find({job_id => $job_id});
             my $is_session_already_existing = defined($session);
             if ($is_session_already_existing) {
                 # allow only one session per job
@@ -47,7 +35,7 @@ sub register {
                 # create a new session if none existed before
                 $session = $self->create(
                     {
-                        job_id  => $job_id,
+                        job_id => $job_id,
                         user_id => $user_id,
                     });
 
@@ -79,8 +67,8 @@ sub unregister {
     return $self->result_source->schema->txn_do(
         sub {
             my $session = $self->find({job_id => $job_id}) or return 0;
-            my $job     = $session->job                    or return 0;
-            return $job->cancel();
+            my $job = $session->job or return 0;
+            return $job->cancel(OpenQA::Jobs::Constants::USER_CANCELLED);
         });
 }
 

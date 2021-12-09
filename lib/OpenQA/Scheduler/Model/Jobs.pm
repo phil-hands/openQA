@@ -1,17 +1,5 @@
-# Copyright (C) 2015-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Scheduler::Model::Jobs;
 use Mojo::Base 'Mojo::EventEmitter', -signatures;
@@ -31,10 +19,10 @@ use List::Util qw(all shuffle);
 # How many jobs to allocate in one tick. Defaults to 80 ( set it to 0 for as much as possible)
 use constant MAX_JOB_ALLOCATION => $ENV{OPENQA_SCHEDULER_MAX_JOB_ALLOCATION} // 80;
 
-# How much the priority should be increased (the priority number decreased) to protect a parallel cluster from starvation
+# How much the priority should be increased (the priority value decreased) to protect a parallel cluster from starvation
 use constant STARVATION_PROTECTION_PRIORITY_OFFSET => $ENV{OPENQA_SCHEDULER_STARVATION_PROTECTION_PRIORITY_OFFSET} // 1;
 
-has scheduled_jobs  => sub { {} };
+has scheduled_jobs => sub { {} };
 has shuffle_workers => 1;
 
 sub determine_free_workers ($shuffle = 0) {
@@ -49,10 +37,10 @@ sub determine_scheduled_jobs ($self) {
 }
 
 sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
-    my $start_time        = time;
-    my $schema            = OpenQA::Schema->singleton;
-    my $free_workers      = determine_free_workers($self->shuffle_workers);
-    my $worker_count      = $schema->resultset('Workers')->count;
+    my $start_time = time;
+    my $schema = OpenQA::Schema->singleton;
+    my $free_workers = determine_free_workers($self->shuffle_workers);
+    my $worker_count = $schema->resultset('Workers')->count;
     my $free_worker_count = @$free_workers;
     unless ($free_worker_count) {
         $self->emit('conclude');
@@ -84,7 +72,7 @@ sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
         my $tobescheduled = _to_be_scheduled($j, $scheduled_jobs);
         next if defined $allocated_jobs->{$j->{id}};
         next unless $tobescheduled;
-        my @tobescheduled  = grep { $_->{id} } @$tobescheduled;
+        my @tobescheduled = grep { $_->{id} } @$tobescheduled;
         my $parallel_count = scalar(@tobescheduled);
         log_debug "Need to schedule $parallel_count parallel jobs for job $j->{id} (with priority $j->{priority})";
         next unless @tobescheduled;
@@ -160,10 +148,10 @@ sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
 
         # take directly chained jobs into account
         # note: That these jobs have a matching WORKER_CLASS is enforced on dependency creation.
-        my $first_job_id   = $allocated->{job};
-        my $cluster_info   = $scheduled_jobs->{$first_job_id}->{cluster_jobs};
+        my $first_job_id = $allocated->{job};
+        my $cluster_info = $scheduled_jobs->{$first_job_id}->{cluster_jobs};
         my $jobs_resultset = $schema->resultset('Jobs');
-        my %sort_criteria  = map {
+        my %sort_criteria = map {
             my $job_id = $_;
             my $sort_criteria;
             if (my $scheduled_job = $scheduled_jobs->{$job_id}) {
@@ -227,8 +215,8 @@ sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
         try {
             if ($actual_job_count > 1) {
                 my %worker_assignment = (
-                    state              => ASSIGNED,
-                    t_started          => undef,
+                    state => ASSIGNED,
+                    t_started => undef,
                     assigned_worker_id => $worker_id,
                 );
                 $schema->txn_do(
@@ -276,7 +264,7 @@ sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
             }
             catch {
                 # if we see this, we are in a really bad state
-                my $job_id = $job->id;                                                         # uncoverable statement
+                my $job_id = $job->id;    # uncoverable statement
                 log_debug("Failed resetting job '$job_id' to scheduled state, reason: $_");    # uncoverable statement
             };
         }
@@ -376,11 +364,14 @@ sub _to_be_scheduled {
 
 sub _update_scheduled_jobs {
     my $self = shift;
+    my $cur_time = DateTime->now(time_zone => 'UTC');
+    my $max_job_scheduled_time = $self->{config}->{scheduler}->{max_job_scheduled_time}
+      // 7;    # default value reused for testsuite
 
     # consider all scheduled jobs not being blocked by a parent job or Gru task
-    my $schema       = OpenQA::Schema->singleton;
+    my $schema = OpenQA::Schema->singleton;
     my $waiting_jobs = $schema->resultset('GruDependencies')->get_column('job_id')->as_query;
-    my $jobs         = $schema->resultset('Jobs')
+    my $jobs = $schema->resultset('Jobs')
       ->search({id => {-not_in => $waiting_jobs}, blocked_by_id => undef, state => SCHEDULED});
 
     my $scheduled_jobs = $self->scheduled_jobs;
@@ -388,6 +379,12 @@ sub _update_scheduled_jobs {
     my %cluster_infos;
     my @missing_worker_class;
     while (my $job = $jobs->next) {
+        # cancel jobs exceeding the max. time a job may be scheduled
+        if (($cur_time - $job->t_created)->delta_days > $max_job_scheduled_time) {
+            $job->cancel(OpenQA::Jobs::Constants::OBSOLETED, "scheduled for more than $max_job_scheduled_time days");
+            next;
+        }
+
         # the priority_offset stays in the hash for the next round
         # and is increased whenever a cluster job has to give up its
         # worker because its siblings failed to find a worker on their
@@ -395,10 +392,10 @@ sub _update_scheduled_jobs {
         my $info = $scheduled_jobs->{$job->id} || {priority_offset => 0};
         $currently_scheduled{$job->id} = 1;
         # for easier access
-        $info->{id}       = $job->id;
+        $info->{id} = $job->id;
         $info->{priority} = $job->priority - $info->{priority_offset};
-        $info->{state}    = $job->state;
-        $info->{test}     = $job->TEST;
+        $info->{state} = $job->state;
+        $info->{test} = $job->TEST;
         if (!$info->{worker_classes}) {
             push(@missing_worker_class, $job->id);
             $info->{worker_classes} = [];
@@ -467,12 +464,12 @@ sub _assign_multiple_jobs_to_worker {
     my $worker_id = $worker->id;
     my %job_data;
     my %job_info = (
-        ids                => $job_ids,
-        data               => \%job_data,
-        sequence           => $directly_chained_job_sequence,
+        ids => $job_ids,
+        data => \%job_data,
+        sequence => $directly_chained_job_sequence,
         assigned_worker_id => $worker_id,
     );
-    my $first_job         = $directly_chained_job_sequence->[0];
+    my $first_job = $directly_chained_job_sequence->[0];
     my %worker_properties = (JOBTOKEN => random_string(), WORKER_TMPDIR => tempdir());
     $job_data{$_->id} = $_->prepare_for_work($worker, \%worker_properties) for @$jobs;
     return OpenQA::WebSockets::Client->singleton->send_jobs(\%job_info);
@@ -490,7 +487,7 @@ sub incomplete_and_duplicate_stale_jobs {
                         $job->reschedule_state;
                         next;
                     }
-                    my $worker      = $job->assigned_worker // $job->worker;
+                    my $worker = $job->assigned_worker // $job->worker;
                     my $worker_info = defined $worker ? ('worker ' . $worker->name) : 'worker';
                     $job->done(
                         result => OpenQA::Jobs::Constants::INCOMPLETE,

@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2018-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -90,7 +78,7 @@ subtest 'recompose in-place' => sub {
 
     my $pieces = $original->split(103);
 
-    my $t_dir       = tempdir();
+    my $t_dir = tempdir();
     my $copied_file = tempfile();
 
 
@@ -144,7 +132,7 @@ subtest 'verify_chunks' => sub {
 
     my $pieces = $original->split(100000);
 
-    my $t_dir       = tempdir();
+    my $t_dir = tempdir();
     my $copied_file = tempfile();
 
     # Save pieces to disk
@@ -180,19 +168,19 @@ subtest 'verify_chunks' => sub {
 sub compare {
     my ($file, $chunk_size) = @_;
     my $original = file_path($FindBin::Bin, "data", $file);
-    my $pieces   = $original->split($chunk_size);
+    my $pieces = $original->split($chunk_size);
 
     is(OpenQA::File::_chunk_size($original->size, $chunk_size), $pieces->size, 'Size and pieces matches!');
 
     for (my $i = 1; $i <= $pieces->size; $i++) {
-        my $piece      = $original->get_piece($i => $chunk_size);
+        my $piece = $original->get_piece($i => $chunk_size);
         my $from_split = $pieces->get($i - 1);
         is_deeply $piece, $from_split, 'Structs are matching';
 
         $piece->prepare();
         $from_split->prepare();
 
-        ok $piece->verify_content($original->file->to_string),      'Chunk verified';
+        ok $piece->verify_content($original->file->to_string), 'Chunk verified';
         ok $from_split->verify_content($original->file->to_string), 'Chunk verified';
 
         is_deeply $piece, $from_split, 'Structs are matching after prepare()';

@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2016-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -26,14 +14,14 @@ use OpenQA::Test::TimeLimit '16';
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 
-my $test_case     = OpenQA::Test::Case->new;
-my $schema_name   = OpenQA::Test::Database->generate_schema_name;
-my $schema        = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '01-jobs.pl 02-workers.pl');
+my $test_case = OpenQA::Test::Case->new;
+my $schema_name = OpenQA::Test::Database->generate_schema_name;
+my $schema = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '01-jobs.pl 02-workers.pl');
 my $parent_groups = $schema->resultset('JobGroupParents');
 
 sub prepare_database {
     my $job_groups = $schema->resultset('JobGroups');
-    my $jobs       = $schema->resultset('Jobs');
+    my $jobs = $schema->resultset('Jobs');
     # add job groups from fixtures to new parent
     my $parent_group = $parent_groups->create({name => 'Test parent', sort_order => 0});
     while (my $job_group = $job_groups->next) {
@@ -45,31 +33,31 @@ sub prepare_database {
     # add data to test same name job group within different parent group
     my $parent_group2 = $parent_groups->create({name => 'Test parent 2', sort_order => 1});
     my $new_job_group = $job_groups->create({name => 'opensuse', parent_id => $parent_group2->id});
-    my $new_job       = $jobs->create(
+    my $new_job = $jobs->create(
         {
-            id         => 100001,
-            group_id   => $new_job_group->id,
-            result     => "none",
-            state      => "cancelled",
-            priority   => 35,
+            id => 100001,
+            group_id => $new_job_group->id,
+            result => "none",
+            state => "cancelled",
+            priority => 35,
             t_finished => undef,
             # 10 minutes ago
             t_started => time2str('%Y-%m-%d %H:%M:%S', time - 600, 'UTC'),
             # Two hours ago
-            t_created  => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
-            TEST       => "upgrade",
-            ARCH       => 'x86_64',
-            BUILD      => '0100',
-            DISTRI     => 'opensuse',
-            FLAVOR     => 'NET',
-            MACHINE    => '64bit',
-            VERSION    => '13.1',
+            t_created => time2str('%Y-%m-%d %H:%M:%S', time - 7200, 'UTC'),
+            TEST => "upgrade",
+            ARCH => 'x86_64',
+            BUILD => '0100',
+            DISTRI => 'opensuse',
+            FLAVOR => 'NET',
+            MACHINE => '64bit',
+            VERSION => '13.1',
             result_dir => '00099961-opensuse-13.1-DVD-x86_64-Build0100-kde',
-            settings   => [
-                {key => 'DESKTOP',     value => 'kde'},
+            settings => [
+                {key => 'DESKTOP', value => 'kde'},
                 {key => 'ISO_MAXSIZE', value => '4700372992'},
-                {key => 'ISO',         value => 'openSUSE-13.1-DVD-x86_64-Build0100-Media.iso'},
-                {key => 'DVD',         value => '1'},
+                {key => 'ISO', value => 'openSUSE-13.1-DVD-x86_64-Build0100-Media.iso'},
+                {key => 'DVD', value => '1'},
             ]});
 }
 
@@ -96,6 +84,16 @@ $driver->find_element_by_link_text('Build0091')->click();
 my $element = $driver->find_element_by_link_text('opensuse');
 ok($element->is_displayed(), 'link to child group expanded');
 $driver->find_element_by_link_text('Build0091')->click();
+
+subtest 'progress bar link' => sub {
+    my $first_build_row = $driver->find_elements('.build-row')->[0];
+    my $link = $driver->find_child_element($first_build_row, '.progress-bar-failed a');
+    is($link->get_text, '1 failed', 'link text');
+    my $r = qr|.*/tests/overview\?result=failed&distri=opensuse&
+    version=Factory&build=87\.5011&groupid=1001&groupid=1002|x;
+    like($link->get_attribute('href'), $r, 'link href');
+};
+
 # Looking for "is_hidden" does not turn out to be reliable so relying on xpath
 # lookup of collapsed entries instead
 ok($driver->find_element_by_xpath('//div[contains(@class,"children-collapsed")]//a'), 'link to child group collapsed');
@@ -137,8 +135,8 @@ subtest 'filtering subgroups' => sub {
     wait_for_ajax();
     $url .= '?group=Test%20parent%20%2F%20.*%20test%24';
     $url .= '&default_expanded=1&limit_builds=30&time_limit_days=140&interval=';
-    is($driver->get_current_url,                                  $url, 'URL parameters for filter are correct');
-    is(scalar @{$driver->find_elements('opensuse', 'link_text')}, 0,    "child group 'opensuse' filtered out");
+    is($driver->get_current_url, $url, 'URL parameters for filter are correct');
+    is(scalar @{$driver->find_elements('opensuse', 'link_text')}, 0, "child group 'opensuse' filtered out");
     isnt(scalar @{$driver->find_elements('opensuse test', 'link_text')}, 0, "child group 'opensuse test' present'");
 };
 

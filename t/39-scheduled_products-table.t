@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2019-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -28,18 +16,18 @@ use OpenQA::Utils;
 OpenQA::Test::Case->new->init_data;
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
-my $schema             = $t->app->schema;
+my $schema = $t->app->schema;
 my $scheduled_products = $schema->resultset('ScheduledProducts');
-my $users              = $schema->resultset('Users');
-my $user               = $users->create_user('foo');
-my %settings           = (
-    distri   => 'openSUSE',
-    version  => '15.1',
-    flavor   => 'DVD',
-    arch     => 'x86_64',
-    build    => 'foo',
+my $users = $schema->resultset('Users');
+my $user = $users->create_user('foo');
+my %settings = (
+    distri => 'openSUSE',
+    version => '15.1',
+    flavor => 'DVD',
+    arch => 'x86_64',
+    build => 'foo',
     settings => {some => 'settings'},
-    user_id  => $user->id,
+    user_id => $user->id,
 );
 
 # prevent job creation
@@ -74,7 +62,7 @@ subtest 'handling assets with invalid name' => sub {
         $scheduled_product->schedule_iso({REPO_0 => 'invalid'}),
         {
             successful_job_ids => [],
-            failed_job_info    => [],
+            failed_job_info => [],
         },
         'schedule_iso allows non-existent assets though',
     );

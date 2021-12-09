@@ -163,13 +163,13 @@ and/or os-autoinst's own behavior are:
 
 The job groups are the place where the actual test scenarios are defined by
 the selection of the medium type, the test suite and machine together with a
-priority.
+priority value.
 
-The priority is used in the scheduler to choose the next job. If multiple jobs
-are scheduled and their requirements for running them are fulfilled the ones
-with a lower value for the priority are triggered. The id is the second
-sorting key: Of two jobs with equal requirements and same priority the one
-with lower id is triggered first.
+The priority value is used in the scheduler to choose the next job. If
+multiple jobs are scheduled and their requirements for running them are
+fulfilled the ones with a lower priority value are triggered. The id is the
+second sorting key: Of two jobs with equal requirements and same priority
+value the one with lower id is triggered first.
 
 Job groups themselves can be created over the web UI as well as the REST API.
 Job groups can optionally be nested into categories. The display order of job
@@ -228,7 +228,7 @@ order for variables is as follows (from lowest to highest):
 That is, variable values set as part of the API request that triggers the jobs will
 'win' over values set at any of the other locations. In the special case of the 
 `BACKEND` variable, if there is a `MACHINE` specified, the `BACKEND` value for this
-machine defined in openQA has highest priority.
+machine defined in openQA has highest precedence.
 
 If you need to override this precedence - for example, you want the value set in
 one particular test suite to take precedence over a setting of the same value from
@@ -336,6 +336,16 @@ All issue references are stored within the internal database of openQA. The stat
 image::images/labels_closed_tickets.png[Example for visualization of closed issue references]
 
 
+=== Overwrite result of job ===
+
+One special label format is available which allows to forcefully overwrite the
+result of an openQA job using a convenient openQA comment. The expected format
+is `label:force_result:<new_result>[:<description>]`, for example
+`label:force_result:failed` or `label:force_result:softfailed:bsc#1234`. For
+this command to be effective the according user needs to have at least
+operator permissions.
+
+
 === Distinguish product and test issues bugref https://github.com/os-autoinst/openQA/pull/708[gh#708]
 
 "`progress.opensuse.org`" is used to track test issues, bugzilla for product
@@ -354,7 +364,8 @@ Based on comments on the group overview individual builds can be tagged. As
 'build' by themselves do not own any data the job group is used to store this
 information. A tag has a build to link it to a build. It also has a type
 and an optional description. The type can later on be used to distinguish
-tag types.
+tag types. Note that openQA does not define further tag types besides the
+_important_ tag. However, the user is free to choose any tag type as needed.
 
 The generic format for tags is
 -------------
@@ -972,11 +983,12 @@ _OBSOLETE:: Obsolete jobs in older builds with same DISTRI and VERSION
 (The default behavior is not obsoleting). With this option jobs which are currently pending,
 for example scheduled or running, are cancelled when a new medium is triggered.
 
-_DEPRIORITIZEBUILD:: Setting this switch to '1' will deprioritize the unfinished jobs of old
-builds, and it will obsolete the jobs once the configurable limit of priority is reached.
+_DEPRIORITIZEBUILD:: Setting this switch to '1' will deprioritize the
+unfinished jobs of old builds, and it will obsolete the jobs once the
+configurable limit of the priority value is reached.
 
-_DEPRIORITIZE_LIMIT:: The configurable limit of priority up to which jobs
-should be deprioritized. Needs `_DEPRIORITIZEBUILD`. Default 100.
+_DEPRIORITIZE_LIMIT:: The configurable limit of priority value up to which
+jobs should be deprioritized. Needs `_DEPRIORITIZEBUILD`. Defaults to 100.
 
 _ONLY_OBSOLETE_SAME_BUILD:: Only obsolete (or deprioritize) jobs for the same BUILD.
 This is useful for cases where a new build appearing does not necessarily
@@ -991,8 +1003,8 @@ _GROUP:: Job templates *not* matching the given group name are ignored. Does *no
          affect obsoletion behavior.
 
 _GROUP_ID:: Same as `_GROUP` but allows to specify the group directly by ID.
-_PRIORITY:: Sets the priority for the new jobs (which otherwise defaults to the priority
-            of the job template)
+_PRIORITY:: Sets the priority value for the new jobs (which otherwise defaults
+to the priority of the job template)
 
 Example for `_DEPRIORITIZEBUILD` and `_DEPRIORITIZE_LIMIT`.
 
@@ -1031,23 +1043,6 @@ openqa-dump-templates --json --group test > test.json
 --------------------------------------------------------------------------------
 openqa-load-templates test.json
 --------------------------------------------------------------------------------
-
-== Timers and triggers ==
-
-Cleanup can be triggered in different ways. One option is to use `minion_task_triggers`
-and specify tasks via `on_job_done`. Another way to do that is to use the systemd timers
-`openqa-enqueue-*-cleanup` to periodically run tasks. Both can be used separately or in combination.
-
-The relevant Minion tasks are:
-
-- limit_assets
-- limit_audit_events
-- limit_bugs
-- limit_results_and_logs
-- limit_screenshots
-
-These are no-ops if a task is already running so they can safely be enqueued repeatedly. Note that
-the tasks can still take considerable time computing what to delete, from seconds to minutes.
 
 == Asset handling ==
 
@@ -1187,7 +1182,7 @@ asset directory - are counted against the group size limit, but are never
 cleaned up. This is intended for things like base disk images which must
 always be available for a test to work.
 
-=== Configure limit for assets within job groups ===
+=== Configuring limit for assets within job groups ===
 
 To configure the maximum size for the assets of a group, open 'Job groups'
 in the operators menu and select a group. The size limit for assets can be
@@ -1197,7 +1192,7 @@ assets which belong to that group and not to any other group.
 The default size limit for job groups can be adjusted in the
 `default_group_limits` section of the openQA config file.
 
-=== Configure limit for groupless assets ===
+=== Configuring limit for groupless assets ===
 
 Assets not belonging to jobs within a group are deleted automatically
 after a certain number of days. That duration can be adjusted by setting
@@ -1221,6 +1216,38 @@ openSUSE.+x86_64 = 10
 
 Note that modifications to the file will count against the limit, so if an
 asset was updated within the timespan it will not be removed.
+
+=== Timers and triggers ===
+
+Cleanup can be triggered in different ways. One option is to use
+`minion_task_triggers` and specify tasks via `on_job_done`. Another way to do
+that is to use the systemd timers `openqa-enqueue-*-cleanup` to periodically
+run tasks. Both can be used separately or in combination.
+
+The relevant Minion tasks are:
+
+- limit_assets
+- limit_audit_events
+- limit_bugs
+- limit_results_and_logs
+- limit_screenshots
+
+These are no-ops if a task is already running so they can safely be enqueued
+repeatedly. Note that the tasks can still take considerable time computing
+what to delete, from seconds to minutes. The tasks can be enabled in the
+corresponding config file section.
+
+=== Disabling cleanup ===
+
+By default the cleanup is enabled with systemd timers if available. To
+completely disable cleanup make sure that no minion cleanup tasks are enabled
+over the config file and prevent individual or all cleanup systemd timers,
+for example for the asset cleanup:
+
+[source,sh]
+----
+systemctl mask openqa-enqueue-asset-cleanup.timer
+----
 
 == CLI interface
 Beside the `daemon` argument to run the actual web service the openQA

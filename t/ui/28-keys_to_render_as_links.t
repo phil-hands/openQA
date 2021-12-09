@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright © 2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -28,15 +16,15 @@ use Mojo::File 'path';
 my $schema = OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl');
 # setup openqa.ini with job_settings_ui
 $ENV{OPENQA_CONFIG} = "t/data/03-setting-links";
-my $t   = Test::Mojo->new('OpenQA::WebAPI');
+my $t = Test::Mojo->new('OpenQA::WebAPI');
 my $app = $t->app;
 $t->app($app);
 # t/data holds test files that simulates setting files that can be found in test distributions
 $ENV{OPENQA_BASEDIR} = 't/data';
 
-my $job_id                         = 99938;
-my $foo_path                       = "foo/foo.txt";
-my $uri_path_from_root_dir         = "/tests/$job_id/settings/$foo_path";
+my $job_id = 99938;
+my $foo_path = "foo/foo.txt";
+my $uri_path_from_root_dir = "/tests/$job_id/settings/$foo_path";
 my $uri_path_from_default_data_dir = "/tests/$job_id/settings/bar/foo.txt";
 
 driver_missing unless my $driver = call_driver;

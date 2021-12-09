@@ -1,17 +1,5 @@
-# Copyright (c) 2015-2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Resource::Locks;
 
@@ -37,7 +25,7 @@ sub _get_lock {
     my ($name, $jobid, $where) = @_;
     return 0 unless defined $name && defined $jobid;
     my $schema = OpenQA::Schema->singleton;
-    my $job    = $schema->resultset('Jobs')->single({id => $jobid});
+    my $job = $schema->resultset('Jobs')->single({id => $jobid});
     return 0 unless $job;
 
     # We need to get owner of the lock
@@ -130,11 +118,11 @@ sub barrier_wait {
     return -1 unless my $barrier = _get_lock($name, $jobid, $where);
 
     my $jobschema = OpenQA::Schema->singleton->resultset('Jobs');
-    my @jobs      = split ',', $barrier->locked_by // '';
+    my @jobs = split ',', $barrier->locked_by // '';
 
     if ($check_dead_job) {
         my @related_ids = map { scalar $_->id } $barrier->owner->parents->all, $barrier->owner->children->all;
-        my @results     = map { $jobschema->find($_)->result } $jobid, @jobs, @related_ids;
+        my @results = map { $jobschema->find($_)->result } $jobid, @jobs, @related_ids;
         for my $result (@results) {
             next unless $final_states{$result};
             $barrier->delete;

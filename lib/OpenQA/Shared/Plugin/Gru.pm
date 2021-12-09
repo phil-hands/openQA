@@ -1,17 +1,5 @@
-# Copyright (C) 2015-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 # a lot of this is inspired (and even in parts copied) from Minion (Artistic-2.0)
 package OpenQA::Shared::Plugin::Gru;
@@ -122,7 +110,7 @@ sub has_workers {
 sub enqueue {
     my ($self, $task, $args, $options, $jobs) = (shift, shift, shift // [], shift // {}, shift // []);
 
-    my $ttl   = $options->{ttl};
+    my $ttl = $options->{ttl};
     my $limit = $options->{limit} ? $options->{limit} : undef;
     my $notes = $options->{notes} ? $options->{notes} : undef;
     return undef if defined $limit && $self->count_jobs($task, ['inactive']) >= $limit;
@@ -131,25 +119,25 @@ sub enqueue {
 
     my $delay = $options->{run_at} && $options->{run_at} > now() ? $options->{run_at} - now() : 0;
 
-    my $schema   = OpenQA::Schema->singleton;
+    my $schema = OpenQA::Schema->singleton;
     my $priority = $options->{priority} // 0;
-    my $gru      = $schema->resultset('GruTasks')->create(
+    my $gru = $schema->resultset('GruTasks')->create(
         {
             taskname => $task,
             priority => $priority,
-            args     => $args,
-            run_at   => $options->{run_at} // now(),
-            jobs     => $jobs,
+            args => $args,
+            run_at => $options->{run_at} // now(),
+            jobs => $jobs,
         });
-    my $gru_id    = $gru->id;
-    my @ttl       = defined $ttl   ? (expire => $ttl) : ();
-    my @notes     = defined $notes ? (%$notes)        : ();
+    my $gru_id = $gru->id;
+    my @ttl = defined $ttl ? (expire => $ttl) : ();
+    my @notes = defined $notes ? (%$notes) : ();
     my $minion_id = $self->app->minion->enqueue(
         $task => $args => {
             @ttl,
             priority => $priority,
-            delay    => $delay,
-            notes    => {gru_id => $gru_id, @notes}});
+            delay => $delay,
+            notes => {gru_id => $gru_id, @notes}});
 
     return {minion_id => $minion_id, gru_id => $gru_id};
 }
@@ -175,15 +163,15 @@ sub enqueue_download_jobs {
 sub enqueue_and_keep_track {
     my ($self, %args) = @_;
 
-    my $task_name        = $args{task_name};
+    my $task_name = $args{task_name};
     my $task_description = $args{task_description};
-    my $task_args        = $args{task_args};
-    my $task_options     = $args{task_options};
+    my $task_args = $args{task_args};
+    my $task_options = $args{task_options};
 
     # set default gru task options
     $task_options = {
         priority => 20,    # high prio as this function is used for user-facing tasks like saving a needle
-        ttl      => 60,
+        ttl => 60,
     } unless ($task_options);
 
     # check whether Minion worker are available to get a nice error message instead of an inactive job

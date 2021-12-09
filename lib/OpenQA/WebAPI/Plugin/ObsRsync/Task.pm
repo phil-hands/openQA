@@ -1,17 +1,5 @@
-# Copyright (C) 2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Plugin::ObsRsync::Task;
 use Mojo::Base 'Mojolicious::Plugin';
@@ -20,14 +8,14 @@ use IPC::Run;
 
 sub register {
     my ($self, $app) = @_;
-    $app->minion->add_task(obs_rsync_run                 => \&run);
+    $app->minion->add_task(obs_rsync_run => \&run);
     $app->minion->add_task(obs_rsync_update_dirty_status => \&update_dirty_status);
-    $app->minion->add_task(obs_rsync_update_builds_text  => \&update_obs_builds_text);
+    $app->minion->add_task(obs_rsync_update_builds_text => \&update_obs_builds_text);
 }
 
 sub _retry_or_finish {
     my ($job, $helper, $project, $retry_interval, $retry_max_count) = @_;
-    $retry_interval  ||= $helper->retry_interval;
+    $retry_interval ||= $helper->retry_interval;
     $retry_max_count ||= $helper->retry_max_count;
 
     return $job->retry({delay => $retry_interval})
@@ -41,13 +29,13 @@ sub _retry_or_finish {
 sub run {
     my ($job, $args) = @_;
 
-    my $app         = $job->app;
-    my $project     = $args->{project};
-    my $helper      = $app->obs_rsync;
-    my $home        = $helper->home;
+    my $app = $job->app;
+    my $project = $args->{project};
+    my $helper = $app->obs_rsync;
+    my $home = $helper->home;
     my $queue_limit = $helper->queue_limit;
 
-    my $retry_interval_on_exception  = 120;
+    my $retry_interval_on_exception = 120;
     my $retry_max_count_on_exception = 200;
 
     if ($job->info && !$job->info->{notes}{project_lock}) {
@@ -83,9 +71,9 @@ sub run {
 sub update_dirty_status {
     my ($job, $args) = @_;
 
-    my $app     = $job->app;
+    my $app = $job->app;
     my $project = $args->{project};
-    my $helper  = $app->obs_rsync;
+    my $helper = $app->obs_rsync;
     eval { $helper->is_status_dirty($project, 1); 1 };
     return $job->finish(0);
 }
@@ -93,8 +81,8 @@ sub update_dirty_status {
 sub update_obs_builds_text {
     my ($job, $args) = @_;
 
-    my $app    = $job->app;
-    my $alias  = $args->{alias};
+    my $app = $job->app;
+    my $alias = $args->{alias};
     my $helper = $app->obs_rsync;
 
     my ($project, undef) = $helper->split_alias($alias);

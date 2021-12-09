@@ -1,19 +1,7 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2014-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -52,10 +40,10 @@ ensure_schema_is_created_and_empty $schema;
 
 my $dh = DBIx::Class::DeploymentHandler->new(
     {
-        schema           => $schema,
+        schema => $schema,
         script_directory => 'dbicdh',
-        databases        => 'PostgreSQL',
-        force_overwrite  => 0,
+        databases => 'PostgreSQL',
+        force_overwrite => 0,
     });
 my $deployed_version;
 try {
@@ -66,7 +54,7 @@ ok(!$deployed_version, 'DB not deployed by plain schema connection with deploy =
 my $ret = $schema->deploy;
 ok($dh->version_storage->database_version, 'DB deployed');
 is($dh->version_storage->database_version, $dh->schema_version, 'Schema at correct version');
-is($ret,                                   2,                   'Expected return value (2) for a deployment');
+is($ret, 2, 'Expected return value (2) for a deployment');
 
 OpenQA::Schema::disconnect_db;
 $schema = OpenQA::Schema::connect_db(mode => 'test', deploy => 0);
@@ -75,11 +63,11 @@ ensure_schema_is_created_and_empty $schema;
 # redeploy DB to the oldest still supported version and check if deployment upgrades the DB
 $dh = DBIx::Class::DeploymentHandler->new(
     {
-        schema              => $schema,
-        script_directory    => 'dbicdh',
-        databases           => 'PostgreSQL',
+        schema => $schema,
+        script_directory => 'dbicdh',
+        databases => 'PostgreSQL',
         sql_translator_args => {add_drop_table => 0},
-        force_overwrite     => 1,
+        force_overwrite => 1,
     });
 $dh->install({version => $oldest_still_supported_schema_version});
 $schema->create_system_user;
@@ -93,13 +81,13 @@ OpenQA::Test::Database->new->insert_fixtures($schema);
 
 ok($dh->version_storage->database_version, 'DB deployed');
 is($dh->version_storage->database_version, $dh->schema_version, 'Schema at correct version');
-is($ret,                                   1,                   'Expected return value (1) for an upgrade');
+is($ret, 1, 'Expected return value (1) for an upgrade');
 
 # check another deployment call doesn't do a thing
 $ret = $schema->deploy;
 ok($dh->version_storage->database_version, 'DB deployed');
 is($dh->version_storage->database_version, $dh->schema_version, 'Schema at correct version');
-is($ret,                                   0,                   'Expected return value (0) for no action needed');
+is($ret, 0, 'Expected return value (0) for no action needed');
 
 subtest 'serving common pages works after db migrations' => sub {
     my $t = Test::Mojo->new('OpenQA::WebAPI');
@@ -111,17 +99,17 @@ subtest 'serving common pages works after db migrations' => sub {
 subtest 'Full schema init+upgrade cycle works' => sub {
     $ENV{OPENQA_SCHEMA_VERSION_OVERRIDE} = my $schema_version = $dh->schema_version + 1;
     my $new_schema_dir = tempdir;
-    my $initdb         = "$FindBin::RealBin/../script/initdb";
-    my $out            = qx{$initdb --dir=$new_schema_dir --prepare_init};
-    is $?,   0,  'initdb ok';
+    my $initdb = "$FindBin::RealBin/../script/initdb";
+    my $out = qx{$initdb --dir=$new_schema_dir --prepare_init};
+    is $?, 0, 'initdb ok';
     is $out, '', 'initdb shows no errors';
     $ENV{OPENQA_SCHEMA_VERSION_OVERRIDE} = $schema_version = $schema_version + 1;
     $out = qx{$initdb --dir=$new_schema_dir --prepare_init};
-    is $?,   0,  'initdb ok for new version';
+    is $?, 0, 'initdb ok for new version';
     is $out, '', 'initdb shows no errors for new version';
     my $upgradedb = "$FindBin::RealBin/../script/upgradedb";
     qx{$upgradedb --dir=$new_schema_dir --prepare_upgrades};
-    is $?,   0,  'upgradedb ok';
+    is $?, 0, 'upgradedb ok';
     is $out, '', 'upgradedb shows no errors';
 };
 

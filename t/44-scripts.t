@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -23,8 +11,8 @@ use OpenQA::Test::TimeLimit '120';
 plan skip_all => 'set HEAVY=1 to execute (takes longer)' unless $ENV{HEAVY};
 
 my %allowed_types = (
-    'text/x-perl'        => 1,
-    'text/x-python'      => 1,
+    'text/x-perl' => 1,
+    'text/x-python' => 1,
     'text/x-shellscript' => 1,
 );
 
@@ -38,12 +26,12 @@ for my $key (keys %types) {
 
 for my $script (sort keys %types) {
     my $out = qx{$Bin/../script/$script --help 2>&1};
-    my $rc  = $?;
+    my $rc = $?;
     is($rc, 0, "Calling '$script --help' returns exit code 0")
       or diag "Output: $out";
     next if $script eq 'openqa-worker-cacheservice-minion';    # unfortunately ignores invalid arguments
     $out = qx{$Bin/../script/$script invalid-command --invalid-flag 2>&1};
-    $rc  = $?;
+    $rc = $?;
     isnt($rc, 0, "Calling '$script invalid-command --invalid-flag' returns non-zero exit code")
       or diag "Output: $out";
 }

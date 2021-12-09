@@ -1,17 +1,5 @@
-# Copyright © 2014-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Schema;
 
@@ -39,7 +27,7 @@ __PACKAGE__->load_namespaces;
 my $SINGLETON;
 
 sub connect_db {
-    my %args         = @_;
+    my %args = @_;
     my $check_deploy = $args{deploy};
     $check_deploy //= 1;
 
@@ -51,7 +39,7 @@ sub connect_db {
         }
         else {
             my %ini;
-            my $cfgpath       = $ENV{OPENQA_CONFIG} || "$Bin/../etc/openqa";
+            my $cfgpath = $ENV{OPENQA_CONFIG} || "$Bin/../etc/openqa";
             my $database_file = $cfgpath . '/database.ini';
             tie %ini, 'Config::IniFiles', (-file => $database_file);
             die 'Could not find database section \'' . $mode . '\' in ' . $database_file unless $ini{$mode};
@@ -86,7 +74,7 @@ sub deploy {
 
     # LOCK_EX works most reliably if the file is open with write intent
     open($dblock, '>>', $dblockfile) or die "Can't open database lock file ${dblockfile}!";
-    flock($dblock, LOCK_EX)          or die "Can't lock database lock file ${dblockfile}!";
+    flock($dblock, LOCK_EX) or die "Can't lock database lock file ${dblockfile}!";
     $force_overwrite //= 0;
     my $dir = $FindBin::Bin;
     while (abs_path($dir) ne '/') {
@@ -98,11 +86,11 @@ sub deploy {
 
     my $dh = DBIx::Class::DeploymentHandler->new(
         {
-            schema              => $self,
-            script_directory    => $dir,
-            databases           => ['PostgreSQL'],
+            schema => $self,
+            script_directory => $dir,
+            databases => ['PostgreSQL'],
             sql_translator_args => {add_drop_table => 0},
-            force_overwrite     => $force_overwrite
+            force_overwrite => $force_overwrite
         });
     my $ret = 0;
     $ret = 2 if _try_deploy_db($dh);
@@ -162,7 +150,7 @@ sub create_system_user {
     $self->resultset('Users')->create(
         {
             username => 'system',
-            email    => 'noemail@open.qa',
+            email => 'noemail@open.qa',
             fullname => 'openQA system user',
             nickname => 'system'
         });

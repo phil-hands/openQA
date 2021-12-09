@@ -64,7 +64,7 @@ requires 'Mojo::RabbitMQ::Client', '>= v0.2';
 requires 'Mojo::SQLite';
 requires 'Mojo::URL';
 requires 'Mojo::Util';
-requires 'Mojolicious', '>= 9.11';
+requires 'Mojolicious', '>= 9.20';
 requires 'Mojolicious::Commands';
 requires 'Mojolicious::Plugin';
 requires 'Mojolicious::Plugin::AssetPack', '>= 1.36';
@@ -80,6 +80,7 @@ requires 'Storable';
 requires 'Test::More';
 requires 'Text::Diff';
 requires 'Time::HiRes';
+requires 'Time::Moment';
 requires 'Time::ParseDate';
 requires 'Time::Piece';
 requires 'Time::Seconds';
@@ -117,7 +118,7 @@ on 'test' => sub {
 on 'devel' => sub {
     requires 'Devel::Cover';
     requires 'Devel::Cover::Report::Codecovbash';
-    requires 'Perl::Tidy', '== 20210717';
+    requires 'Perl::Tidy', '== 20211029';
 
 };
 

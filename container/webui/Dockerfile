@@ -1,11 +1,11 @@
 #!BuildTag: openqa_webui
-FROM opensuse/leap:15.2
+FROM opensuse/leap:15.3
 LABEL maintainer Jan Sedlak <jsedlak@redhat.com>, Josef Skladanka <jskladan@redhat.com>, wnereiz <wnereiz@eienteiland.org>, Sergio Lindo Mansilla <slindomansilla@suse.com>
 LABEL version="0.3"
 
 # hadolint ignore=DL3037
-RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/openSUSE_Leap_15.2 devel_openQA && \
-    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.2/openSUSE_Leap_15.2 devel_openQA_Leap && \
+RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/openSUSE_Leap_15.3 devel_openQA && \
+    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.3/openSUSE_Leap_15.3 devel_openQA_Leap && \
     zypper --gpg-auto-import-keys ref && \
     # openQA might need rubygem:sass to compile assets in this context due to
     # unknown reasons even though the package should use the precompiled
@@ -29,7 +29,7 @@ COPY run_openqa.sh /root/
 RUN rm -rf /etc/openqa/openqa.ini /etc/openqa/client.conf \
       /etc/openqa/database.ini \
       /var/lib/openqa/share/factory /var/lib/openqa/share/tests \
-      /var/lib/openqa/testresults && \
+      /var/lib/openqa/testresults /var/lib/openqa/images && \
     chmod +x /root/run_openqa.sh && \
     mkdir -p /var/lib/openqa/pool && \
     ln -s /data/conf/openqa.ini /etc/openqa/openqa.ini && \
@@ -38,6 +38,7 @@ RUN rm -rf /etc/openqa/openqa.ini /etc/openqa/client.conf \
     ln -s /data/factory /var/lib/openqa/share/factory && \
     ln -s /data/tests /var/lib/openqa/share/tests && \
     ln -s /data/testresults /var/lib/openqa/testresults && \
+    ln -s /data/images /var/lib/openqa/images && \
     chown -R geekotest /usr/share/openqa /var/lib/openqa /var/log/openqa && \
     chmod ug+rw /usr/share/openqa /var/lib/openqa /var/log/openqa && \
     find /usr/share/openqa /var/lib/openqa /var/log/openqa -type d -exec chmod ug+x {} \;

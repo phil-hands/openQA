@@ -1,17 +1,5 @@
-# Copyright (C) 2018-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Task::Asset::Download;
 use Mojo::Base 'Mojolicious::Plugin';
@@ -43,7 +31,7 @@ sub _create_symlinks {
 sub _download {
     my ($job, $url, $assetpaths, $do_extract) = @_;
 
-    my $app    = $job->app;
+    my $app = $job->app;
     my $job_id = $job->id;
 
     # deal with one download task has many destinations
@@ -51,7 +39,7 @@ sub _download {
     my @other_destinations;
     if (ref($assetpaths) eq 'ARRAY') {
         @other_destinations = @$assetpaths;
-        $assetpath          = shift @other_destinations;
+        $assetpath = shift @other_destinations;
     }
     else {
         $assetpaths = [$assetpaths];
@@ -89,12 +77,12 @@ sub _download {
         return $job->fail($msg);
     }
 
-    if   ($do_extract) { $ctx->debug(qq{Downloading and uncompressing "$url" to "$assetpath"}) }
-    else               { $ctx->debug(qq{Downloading "$url" to "$assetpath"}) }
+    if ($do_extract) { $ctx->debug(qq{Downloading and uncompressing "$url" to "$assetpath"}) }
+    else { $ctx->debug(qq{Downloading "$url" to "$assetpath"}) }
 
     my $downloader = OpenQA::Downloader->new(log => $ctx, tmpdir => $ENV{MOJO_TMPDIR});
-    my $options    = {
-        extract    => $do_extract,
+    my $options = {
+        extract => $do_extract,
         on_success => sub {
             chmod 0644, $assetpath;
             $ctx->debug(qq{Download of "$assetpath" successful});

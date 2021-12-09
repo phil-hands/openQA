@@ -1,17 +1,5 @@
-# Copyright (C) 2014-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -45,20 +33,21 @@ subtest 'Test configuration default modes' => sub {
     is(length($config->{_openid_secret}), 16, "config has openid_secret");
     my $test_config = {
         global => {
-            appname                     => 'openQA',
-            branding                    => 'openSUSE',
-            hsts                        => 365,
-            audit_enabled               => 1,
-            max_rss_limit               => 0,
-            profiling_enabled           => 0,
-            monitoring_enabled          => 0,
-            hide_asset_types            => 'repo',
-            recognized_referers         => [],
-            changelog_file              => '/usr/share/openqa/public/Changelog',
-            job_investigate_ignore      => '"(JOBTOKEN|NAME)"',
+            appname => 'openQA',
+            branding => 'openSUSE',
+            hsts => 365,
+            audit_enabled => 1,
+            max_rss_limit => 0,
+            profiling_enabled => 0,
+            monitoring_enabled => 0,
+            hide_asset_types => 'repo',
+            recognized_referers => [],
+            changelog_file => '/usr/share/openqa/public/Changelog',
+            job_investigate_ignore => '"(JOBTOKEN|NAME)"',
             job_investigate_git_timeout => 20,
-            search_results_limit        => 50000,
-            worker_timeout              => DEFAULT_WORKER_TIMEOUT,
+            search_results_limit => 50000,
+            worker_timeout => DEFAULT_WORKER_TIMEOUT,
+            force_result_regex => '',
         },
         rate_limits => {
             search => 5,
@@ -69,27 +58,30 @@ subtest 'Test configuration default modes' => sub {
         'scm git' => {
             update_remote => '',
             update_branch => '',
-            do_push       => 'no',
+            do_push => 'no',
+        },
+        'scheduler' => {
+            max_job_scheduled_time => 7,
         },
         openid => {
-            provider  => 'https://www.opensuse.org/openid/user/',
+            provider => 'https://www.opensuse.org/openid/user/',
             httpsonly => 1,
         },
         oauth2 => {
-            provider      => '',
-            key           => '',
-            secret        => '',
+            provider => '',
+            key => '',
+            secret => '',
             authorize_url => '',
-            token_url     => '',
-            user_url      => '',
-            token_scope   => '',
-            token_label   => '',
+            token_url => '',
+            user_url => '',
+            token_scope => '',
+            token_label => '',
             nickname_from => '',
-            unique_name   => '',
+            unique_name => '',
         },
         hypnotoad => {
             listen => ['http://localhost:9526/'],
-            proxy  => 1,
+            proxy => 1,
         },
         audit => {
             blacklist => '',
@@ -97,40 +89,46 @@ subtest 'Test configuration default modes' => sub {
         },
         plugin_links => {
             operator => {},
-            admin    => {}
+            admin => {}
         },
         amqp => {
             reconnect_timeout => 5,
-            url               => 'amqp://guest:guest@localhost:5672/',
-            exchange          => 'pubsub',
-            topic_prefix      => 'suse',
+            publish_attempts => 10,
+            publish_retry_delay => 1,
+            publish_retry_delay_factor => 1.75,
+            url => 'amqp://guest:guest@localhost:5672/',
+            exchange => 'pubsub',
+            topic_prefix => 'suse',
+            cacertfile => '',
+            certfile => '',
+            keyfile => ''
         },
         obs_rsync => {
-            home               => '',
-            retry_interval     => 60,
-            retry_max_count    => 1400,
-            queue_limit        => 200,
-            concurrency        => 2,
+            home => '',
+            retry_interval => 60,
+            retry_max_count => 1400,
+            queue_limit => 200,
+            concurrency => 2,
             project_status_url => '',
         },
         cleanup => {
             concurrent => 0,
         },
         default_group_limits => {
-            asset_size_limit                  => OpenQA::JobGroupDefaults::SIZE_LIMIT_GB,
-            log_storage_duration              => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
-            important_log_storage_duration    => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
-            result_storage_duration           => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
+            asset_size_limit => OpenQA::JobGroupDefaults::SIZE_LIMIT_GB,
+            log_storage_duration => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
+            important_log_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
+            result_storage_duration => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
             important_result_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_RESULTS_IN_DAYS,
         },
         minion_task_triggers => {
             on_job_done => [],
         },
         misc_limits => {
-            untracked_assets_storage_duration         => 14,
-            result_cleanup_max_free_percentage        => 100,
-            asset_cleanup_max_free_percentage         => 100,
-            screenshot_cleanup_batch_size             => OpenQA::Task::Job::Limit::DEFAULT_SCREENSHOTS_PER_BATCH,
+            untracked_assets_storage_duration => 14,
+            result_cleanup_max_free_percentage => 100,
+            asset_cleanup_max_free_percentage => 100,
+            screenshot_cleanup_batch_size => OpenQA::Task::Job::Limit::DEFAULT_SCREENSHOTS_PER_BATCH,
             screenshot_cleanup_batches_per_minion_job => OpenQA::Task::Job::Limit::DEFAULT_BATCHES_PER_MINION_JOB,
         },
         archiving => {
@@ -138,7 +136,7 @@ subtest 'Test configuration default modes' => sub {
         },
         job_settings_ui => {
             keys_to_render_as_links => '',
-            default_data_dir        => 'data',
+            default_data_dir => 'data',
         },
         influxdb => {
             ignored_failed_minion_jobs => '',
@@ -162,7 +160,7 @@ subtest 'Test configuration default modes' => sub {
     # Test configuration generation with an unknown mode (should fallback to default)
     $app = Mojolicious->new();
     $app->mode("foo_bar");
-    $config                        = read_config($app, 'reading config from default with mode foo_bar');
+    $config = read_config($app, 'reading config from default with mode foo_bar');
     $test_config->{_openid_secret} = $config->{_openid_secret};
     $test_config->{auth}->{method} = "OpenID";
     delete $config->{global}->{auto_clone_regex};
@@ -173,7 +171,7 @@ subtest 'Test configuration default modes' => sub {
 subtest 'Test configuration override from file' => sub {
     my $t_dir = tempdir;
     local $ENV{OPENQA_CONFIG} = $t_dir;
-    my $app  = Mojolicious->new();
+    my $app = Mojolicious->new();
     my @data = (
         "[global]\n",
         "suse_mirror=http://blah/\n",
@@ -192,7 +190,7 @@ subtest 'Test configuration override from file' => sub {
     combined_like sub { OpenQA::Setup::read_config($app) }, qr/Deprecated.*blacklist/, 'notice about deprecated key';
 
     ok -e $t_dir->child("openqa.ini");
-    ok $app->config->{global}->{suse_mirror} eq 'http://blah/',   'suse mirror';
+    ok $app->config->{global}->{suse_mirror} eq 'http://blah/', 'suse mirror';
     ok $app->config->{audit}->{blocklist} eq 'job_grab job_done', 'audit blocklist migrated from deprecated key name';
     is $app->config->{'assets/storage_duration'}->{'-CURRENT'}, 40, 'assets/storage_duration';
 
@@ -213,7 +211,7 @@ subtest 'Test configuration override from file' => sub {
 subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
     my $t_dir = tempdir;
     local $ENV{OPENQA_CONFIG} = $t_dir;
-    my $app  = Mojolicious->new();
+    my $app = Mojolicious->new();
     my $data = '
         [global]
         appname =  openQA  
@@ -222,7 +220,7 @@ subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
     ';
     $t_dir->child('openqa.ini')->spurt($data);
     OpenQA::Setup::read_config($app);
-    ok($app->config->{global}->{appname} eq 'openQA',            'appname');
+    ok($app->config->{global}->{appname} eq 'openQA', 'appname');
     ok($app->config->{global}->{hide_asset_types} eq 'repo iso', 'hide_asset_types');
     is_deeply(
         $app->config->{global}->{recognized_referers},
@@ -232,7 +230,7 @@ subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
 };
 
 subtest 'Validation of worker timeout' => sub {
-    my $app                = Mojolicious->new(config => {global => {worker_timeout => undef}});
+    my $app = Mojolicious->new(config => {global => {worker_timeout => undef}});
     my $configured_timeout = \$app->config->{global}->{worker_timeout};
     subtest 'too low worker_timeout' => sub {
         $$configured_timeout = MAX_TIMER - 1;

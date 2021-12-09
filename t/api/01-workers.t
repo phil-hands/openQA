@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2014-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -31,19 +19,19 @@ use OpenQA::Jobs::Constants;
 use Date::Format 'time2str';
 
 my $test_case = OpenQA::Test::Case->new;
-my $schema    = $test_case->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
-my $jobs      = $schema->resultset('Jobs');
-my $workers   = $schema->resultset('Workers');
+my $schema = $test_case->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
+my $jobs = $schema->resultset('Jobs');
+my $workers = $schema->resultset('Workers');
 
 # assume all workers are online
 $workers->update({t_seen => time2str('%Y-%m-%d %H:%M:%S', time + 60, 'UTC')});
 
 embed_server_for_testing(
     server_name => 'OpenQA::WebSockets',
-    client      => OpenQA::WebSockets::Client->singleton,
+    client => OpenQA::WebSockets::Client->singleton,
 );
 
-my $t   = Test::Mojo->new('OpenQA::WebAPI');
+my $t = Test::Mojo->new('OpenQA::WebAPI');
 my $app = $t->app;
 $t->ua(OpenQA::Client->new->ioloop(Mojo::IOLoop->singleton));
 $t->app($app);
@@ -51,7 +39,7 @@ $t->app($app);
 $t->post_ok('/api/v1/workers', form => {host => 'localhost', instance => 1, backend => 'qemu'})
   ->status_is(403, 'register worker without API key fails (403)')->json_is(
     '' => {
-        error        => 'no api key',
+        error => 'no api key',
         error_status => 403,
     },
     'register worker without API key fails (error message)'
@@ -62,30 +50,30 @@ $t->app($app);
 
 my @workers = (
     {
-        id         => 1,
-        instance   => 1,
-        connected  => 1,                              # deprecated
-        websocket  => 1,                              # deprecated
-        error      => undef,
-        alive      => 1,
-        jobid      => 99963,
-        host       => 'localhost',
+        id => 1,
+        instance => 1,
+        connected => 1,    # deprecated
+        websocket => 1,    # deprecated
+        error => undef,
+        alive => 1,
+        jobid => 99963,
+        host => 'localhost',
         properties => {'JOBTOKEN' => 'token99963'},
-        status     => 'running'
+        status => 'running'
     },
     {
-        jobid      => 99961,
+        jobid => 99961,
         properties => {
             JOBTOKEN => 'token99961'
         },
-        id        => 2,
-        connected => 1,              # deprecated
-        websocket => 1,              # deprecated
-        error     => undef,
-        alive     => 1,
-        status    => 'running',
-        host      => 'remotehost',
-        instance  => 1
+        id => 2,
+        connected => 1,    # deprecated
+        websocket => 1,    # deprecated
+        error => undef,
+        alive => 1,
+        status => 'running',
+        host => 'remotehost',
+        instance => 1
     });
 
 $t->get_ok('/api/v1/workers?live=1')
@@ -96,7 +84,7 @@ $t->get_ok('/api/v1/workers')->json_is('' => {workers => \@workers}, "workers pr
 diag explain $t->tx->res->json unless $t->success;
 
 my %registration_params = (
-    host     => 'localhost',
+    host => 'localhost',
     instance => 1,
 );
 $t->post_ok('/api/v1/workers', form => \%registration_params)->status_is(400, 'worker with missing parameters refused')
@@ -125,8 +113,8 @@ diag explain $t->tx->res->json unless $t->success;
 is_deeply(
     OpenQA::Test::Case::find_most_recent_event($t->app->schema, 'worker_register'),
     {
-        id       => $t->tx->res->json->{id},
-        host     => 'localhost',
+        id => $t->tx->res->json->{id},
+        host => 'localhost',
         instance => 42,
     },
     'worker event was logged correctly'
@@ -135,16 +123,16 @@ is_deeply(
 subtest 'incompleting previous job on worker registration' => sub {
     # assume the worker runs some job
     my $running_job_id = 99961;
-    my $worker         = $workers->search({job_id => $running_job_id})->first;
-    my $worker_id      = $worker->id;
+    my $worker = $workers->search({job_id => $running_job_id})->first;
+    my $worker_id = $worker->id;
 
     my %registration_params = (
-        host                  => 'remotehost',
-        instance              => 1,
-        job_id                => $running_job_id,
-        cpu_arch              => 'aarch64',
-        mem_max               => 2048,
-        worker_class          => 'foo',
+        host => 'remotehost',
+        instance => 1,
+        job_id => $running_job_id,
+        cpu_arch => 'aarch64',
+        mem_max => 2048,
+        worker_class => 'foo',
         websocket_api_version => WEBSOCKET_API_VERSION,
     );
 
@@ -176,17 +164,17 @@ subtest 'delete offline worker' => sub {
     my $offline_worker_id = 9;
     $workers->create(
         {
-            id       => $offline_worker_id,
-            host     => 'offline_test',
+            id => $offline_worker_id,
+            host => 'offline_test',
             instance => 5,
-            t_seen   => time2str('%Y-%m-%d %H:%M:%S', time - DEFAULT_WORKER_TIMEOUT - DB_TIMESTAMP_ACCURACY, 'UTC'),
+            t_seen => time2str('%Y-%m-%d %H:%M:%S', time - DEFAULT_WORKER_TIMEOUT - DB_TIMESTAMP_ACCURACY, 'UTC'),
         });
     $t->delete_ok("/api/v1/workers/$offline_worker_id")->status_is(200, 'offline worker deleted');
 
     is_deeply(
         OpenQA::Test::Case::find_most_recent_event($t->app->schema, 'worker_delete'),
         {
-            id   => $offline_worker_id,
+            id => $offline_worker_id,
             name => "offline_test:5"
         },
         "Delete worker was logged correctly."

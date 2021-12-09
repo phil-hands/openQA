@@ -94,14 +94,14 @@ container engine:
 
 [source,sh]
 ----
-podman run --rm -it registry.opensuse.org/devel/openqa/containers15.2/openqa_webui:latest
+podman run --rm -it registry.opensuse.org/devel/openqa/containers15.3/openqa_webui:latest
 ----
 
 The worker container can be pulled and started with:
 
 [source,sh]
 ----
-podman run --rm -it registry.opensuse.org/devel/openqa/containers15.2/openqa_worker:latest
+podman run --rm -it registry.opensuse.org/devel/openqa/containers15.3/openqa_worker:latest
 ----
 
 Some parameters are necessary to run them properly. See the
@@ -188,6 +188,25 @@ PostgreSQL database or `openQA-single-instance` which sets up a web UI server,
 a web proxy as well as a local worker. Install `openQA-client` if you only
 want to interact with existing, external openQA instances.
 
+==== Installation from sources
+
+Installing is not required for development purposes and most components of
+openQA can be called directly from the repository checkout.
+
+To install openQA from sources make sure to install all dependencies as
+explained in <<Contributing.asciidoc#dependencies,Dependencies>>. Then one can
+call
+
+[source,sh]
+----
+make install
+----
+
+The directory prefix can be controlled with the optional environment variable
+`DESTDIR`.
+
+From then on continue with the <<basic-configuration, Basic configuration>>.
+
 
 == System requirements
 
@@ -198,7 +217,7 @@ specifications are recommended per openQA worker instance:
 * 8GB RAM
 * 40GB HDD (preferably SSD or NVMe)
 
-
+[[basic-configuration]]
 == Basic configuration
 
 For a local instance setup you can simply execute the script:
@@ -897,9 +916,14 @@ When using `apparmor` the called hook scripts must be covered by according
   /usr/share/openqa/script/client rix,
 ```
 
-Any stderr output of the hook scripts should be visible in the system logs of
-the openQA GRU service, the general status and any stdout output is visible in
-the GRU minion job dashboard on the route
+Additions should be added to `/etc/apparmor.d/local/usr.share.openqa.script.openqa`
+after which the **apparmor** service needs to be restarted for changes to take effect.
+Note that in case of symlinks the target must be specified, and the link itself is irrelevant. So
+for example `Can't exec "/bin/sh"` can occur if `/bin/sh` is a link to a path that's not allowed.
+
+Apparmor denials and stderr output of the hook scripts are visible in the system logs
+of the openQA GRU service, except for messages in "complain" mode which end up in `audit.log`.
+General status and stdout output is visible in the GRU minion job dashboard on the route
 `/minion/jobs?offset=0&task=finalize_job_results` of the openQA instance.
 
 === Automatic cloning of incomplete jobs
@@ -1007,7 +1031,7 @@ As an alternative to the systemd timer the script
 
 For older versions of openQA, you can migrate from SQLite to PostgreSQL
 according to
-<<Pitfalls.asciidoc#db-migration,DB migration from SQLite to PostgreSQL>>
+<<Pitfalls.asciidoc#db-migration,DB migration from SQLite to PostgreSQL>>.
 
 For migrating from older PostgreSQL versions read on.
 
@@ -1267,10 +1291,9 @@ https://github.com/os-autoinst/openQA/blob/master/contrib/ay-openqa-worker.xml
 
 === Tests fail quickly
 
-
 Check the log files in `/var/lib/openqa/testresults`
 
-=== KVM doesn't work
+=== KVM does not work
 
 * make sure you have a machine with kvm support
 * make sure `kvm_intel` or `kvm_amd` modules are loaded
@@ -1279,9 +1302,9 @@ Check the log files in `/var/lib/openqa/testresults`
 * make sure you are not already running other hypervisors such as VirtualBox
 * when running inside a vm make sure nested virtualization is enabled (pass nested=1 to your kvm module)
 
-=== openid login times out
+=== OpenID login times out
 
-www.opensuse.org's openid provider may have trouble with IPv6. openQA shows a message like this:
+www.opensuse.org's OpenID provider may have trouble with IPv6. openQA shows a message like this:
 
   no_identity_server: Could not determine ID provider from URL.
 
@@ -1291,3 +1314,21 @@ from trying to use IPv6 with www.opensuse.org:
 --------------------------------------------------------------------------------
 ip -6 r a to unreachable 2620:113:8044:66:130:57:66:6/128
 --------------------------------------------------------------------------------
+
+=== Performance testing
+
+If openQA is very slow and e.g. the test setup times out because the asset
+caching downloads take too long it makes sense to cross-check the networking
+performance. This can be done via `iperf3`.
+
+Launch the server via `iperf3 -s` on one host (e.g. the openQA web UI host).
+Then run a test on another host (e.g. an openQA worker host) like this:
+[source,sh]
+--------------------------------------------------------------------------------
+iperf3 -c serverhost -i 1 -t 30  # 30 second tests, giving results every second
+--------------------------------------------------------------------------------
+
+Use `-4`/`-6` to check IPv4 vs. IPv6 performance. Use `-R` to check in the other
+direction. Both can make a huge difference.
+
+More examples: https://fasterdata.es.net/performance-testing/network-troubleshooting-tools/iperf

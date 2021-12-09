@@ -1,17 +1,5 @@
-# Copyright (C) 2018 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Client::Upload;
 use Mojo::Base 'OpenQA::Client::Handler';
@@ -31,8 +19,8 @@ sub _upload_asset_fail {
 
 sub asset {
     my ($self, $job_id, $opts) = @_;
-    croak 'You need to specify a base_url'        unless $self->client->base_url;
-    croak 'Options must be a HASH ref'            unless ref $opts eq 'HASH';
+    croak 'You need to specify a base_url' unless $self->client->base_url;
+    croak 'Options must be a HASH ref' unless ref $opts eq 'HASH';
     croak 'Need a file to upload in the options!' unless $opts->{file};
 
     my $uri = "jobs/$job_id";
@@ -45,7 +33,7 @@ sub asset {
         my $res = $self->client->start(
             $self->_build_post(
                 "$uri/artefact" => {
-                    file  => {filename => $file_name, content => ''},
+                    file => {filename => $file_name, content => ''},
                     asset => $opts->{asset},
                     local => "$opts->{file}"
                 }));
@@ -54,7 +42,7 @@ sub asset {
     }
 
     my $chunk_size = $opts->{chunk_size} // 1000000;
-    my $pieces     = OpenQA::File->new(file => Mojo::File->new($opts->{file}))->split($chunk_size);
+    my $pieces = OpenQA::File->new(file => Mojo::File->new($opts->{file}))->split($chunk_size);
     $self->emit('upload_chunk.prepare' => $pieces);
 
     $self->once('upload_chunk.error' =>
@@ -86,9 +74,9 @@ sub asset {
             };
             $self->emit('upload_chunk.fail' => $res => $_) if $done == 0;
 
-            $trial--                                              if $trial > 0;
+            $trial-- if $trial > 0;
             $self->emit('upload_chunk.request_err' => $res => $@) if $@;
-            $e = $@ || $res                                       if $trial == 0 && $done == 0;
+            $e = $@ || $res if $trial == 0 && $done == 0;
         } until ($trial == 0 || $done);
 
         $failed++ if $trial == 0 && $done == 0;

@@ -1,17 +1,5 @@
-# Copyright (C) 2018-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::UserAgent;
 use Mojo::Base 'Mojo::UserAgent';
@@ -71,12 +59,12 @@ sub _add_auth_headers {
     my ($self, $ua, $tx) = @_;
 
     my $timestamp = time;
-    my %headers   = (
-        Accept            => 'application/json',
+    my %headers = (
+        Accept => 'application/json',
         'X-API-Microtime' => $timestamp,
     );
     if ($self->apisecret && $self->apikey) {
-        $headers{'X-API-Key'}  = $self->apikey;
+        $headers{'X-API-Key'} = $self->apikey;
         $headers{'X-API-Hash'} = hmac_sha1_sum($self->_path_query($tx) . $timestamp, $self->apisecret);
     }
 
@@ -88,8 +76,8 @@ sub _add_auth_headers {
 }
 
 sub _path_query {
-    my $self  = shift;
-    my $url   = shift->req->url;
+    my $self = shift;
+    my $url = shift->req->url;
     my $query = $url->query->to_string;
     # as use this for hashing, we need to make sure the query is escaping
     # space the same as the mojo url parser.

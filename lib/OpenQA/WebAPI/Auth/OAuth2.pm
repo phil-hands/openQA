@@ -1,17 +1,5 @@
-# Copyright (C) 2020-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Auth::OAuth2;
 use Mojo::Base -base, -signatures;
@@ -20,43 +8,43 @@ use Data::Dumper;
 use OpenQA::Log qw(log_debug);
 
 sub auth_setup ($server) {
-    my $app    = $server->app;
+    my $app = $server->app;
     my $config = $app->config->{oauth2};
     croak 'No OAuth2 provider selected' unless my $provider = $config->{provider};
 
     my %parameters_by_provider = (
         github => {
-            args   => [],
+            args => [],
             config => {
-                user_url      => 'https://api.github.com/user',
-                token_scope   => 'user:email',
-                token_label   => 'token',
+                user_url => 'https://api.github.com/user',
+                token_scope => 'user:email',
+                token_label => 'token',
                 nickname_from => 'login',
             },
         },
         debian_salsa => {
             args => [
                 authorize_url => 'https://salsa.debian.org/oauth/authorize?response_type=code',
-                token_url     => 'https://salsa.debian.org/oauth/token',
+                token_url => 'https://salsa.debian.org/oauth/token',
             ],
             config => {
-                user_url      => 'https://salsa.debian.org/api/v4/user',
-                token_scope   => 'read_user',
-                token_label   => 'Bearer',
+                user_url => 'https://salsa.debian.org/api/v4/user',
+                token_scope => 'read_user',
+                token_label => 'Bearer',
                 nickname_from => 'username',
             },
         },
         custom => {
             args => [
                 authorize_url => $config->{authorize_url},
-                token_url     => $config->{token_url},
+                token_url => $config->{token_url},
             ],
             config => {
-                user_url      => $config->{user_url},
-                token_scope   => $config->{token_scope},
-                token_label   => $config->{token_label},
+                user_url => $config->{user_url},
+                token_scope => $config->{token_scope},
+                token_label => $config->{token_label},
                 nickname_from => $config->{nickname_from},
-                unique_name   => $config->{unique_name},
+                unique_name => $config->{unique_name},
             },
         },
     );
@@ -72,9 +60,9 @@ sub update_user ($controller, $main_config, $provider_config, $data) {
     return undef unless $data;    # redirect to ID provider
 
     # get or update user details
-    my $ua    = Mojo::UserAgent->new;
+    my $ua = Mojo::UserAgent->new;
     my $token = $data->{access_token};
-    my $tx    = $ua->get($provider_config->{user_url}, {Authorization => "$provider_config->{token_label} $token"});
+    my $tx = $ua->get($provider_config->{user_url}, {Authorization => "$provider_config->{token_label} $token"});
     if (my $err = $tx->error) {
         my $msg = $err->{code} ? "$err->{code} response: $err->{message}" : "Connection error: $err->{message}";
         return $controller->render(text => $msg, status => 403);    # return always 403 for consistency
@@ -91,15 +79,15 @@ sub update_user ($controller, $main_config, $provider_config, $data) {
         provider => "oauth2\@$provider_name",
         nickname => $details->{$provider_config->{nickname_from}},
         fullname => $details->{name},
-        email    => $details->{email});
+        email => $details->{email});
 
     $controller->session->{user} = $user->username;
     $controller->redirect_to('index');
 }
 
 sub auth_login ($controller) {
-    croak 'Config was not parsed' unless my $main_config     = $controller->app->config->{oauth2};
-    croak 'Setup was not called'  unless my $provider_config = $main_config->{provider_config};
+    croak 'Config was not parsed' unless my $main_config = $controller->app->config->{oauth2};
+    croak 'Setup was not called' unless my $provider_config = $main_config->{provider_config};
 
     my $get_token_args = {redirect_uri => $controller->url_for('login')->userinfo(undef)->to_abs};
     $get_token_args->{scope} = $provider_config->{token_scope};

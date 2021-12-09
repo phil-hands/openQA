@@ -1,17 +1,5 @@
-# Copyright (C) 2014 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::Admin::User;
 use Mojo::Base 'Mojolicious::Controller';
@@ -25,14 +13,14 @@ sub index {
 }
 
 sub update {
-    my ($self)      = @_;
-    my $set         = $self->schema->resultset('Users');
-    my $is_admin    = 0;
+    my ($self) = @_;
+    my $set = $self->schema->resultset('Users');
+    my $is_admin = 0;
     my $is_operator = 0;
-    my $role        = $self->param('role') // 'user';
+    my $role = $self->param('role') // 'user';
 
     if ($role eq 'admin') {
-        $is_admin    = 1;
+        $is_admin = 1;
         $is_operator = 1;
     }
     elsif ($role eq 'operator') {

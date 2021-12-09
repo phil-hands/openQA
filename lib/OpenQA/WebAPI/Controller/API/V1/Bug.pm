@@ -1,17 +1,5 @@
-# Copyright (C) 2017-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2017-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::API::V1::Bug;
 use Mojo::Base 'Mojolicious::Controller';
@@ -140,8 +128,8 @@ sub create {
     return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
     my $schema = $self->schema;
-    my $bugid  = $validation->param('bugid');
-    my $bug    = $schema->resultset("Bugs")->find({bugid => $bugid});
+    my $bugid = $validation->param('bugid');
+    my $bug = $schema->resultset("Bugs")->find({bugid => $bugid});
     return $self->render(json => {error => 1}) if $bug;
 
     $bug = $schema->resultset("Bugs")->create({bugid => $bugid, %{$self->get_bug_values}});
@@ -240,16 +228,16 @@ sub get_bug_values {
 
     my $validation = $self->validation;
     return {
-        title      => $validation->param('title'),
-        priority   => $validation->param('priority'),
-        assigned   => $validation->param('assigned') ? 1 : 0,
-        assignee   => $validation->param('assignee'),
-        open       => $validation->param('open') ? 1 : 0,
-        status     => $validation->param('status'),
+        title => $validation->param('title'),
+        priority => $validation->param('priority'),
+        assigned => $validation->param('assigned') ? 1 : 0,
+        assignee => $validation->param('assignee'),
+        open => $validation->param('open') ? 1 : 0,
+        status => $validation->param('status'),
         resolution => $validation->param('resolution'),
-        existing   => $validation->param('existing') ? 1 : 0,
-        t_updated  => time2str('%Y-%m-%d %H:%M:%S', time, 'UTC'),
-        refreshed  => 1
+        existing => $validation->param('existing') ? 1 : 0,
+        t_updated => time2str('%Y-%m-%d %H:%M:%S', time, 'UTC'),
+        refreshed => 1
     };
 }
 

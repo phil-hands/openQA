@@ -1,13 +1,5 @@
-
-# ------------------------------------------------------------------
-#
-#    Copyright (C) 2014-2016 SUSE LLC
-#
-#    This program is free software; you can redistribute it and/or
-#    modify it under the terms of version 2 of the GNU General Public
-#    License published by the Free Software Foundation.
-#
-# ------------------------------------------------------------------
+# Copyright 2014-2016 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 #include <tunables/global>
 
@@ -126,7 +118,7 @@
   /usr/share/openqa/script/openqa-cli px,
   /usr/share/openqa/script/openqa-clone-job mrix,
   /usr/share/openqa/script/openqa-clone-job r,
-  /bin/bash mrix,
+  /{usr/,}bin/{b,d}ash rix,
   /usr/bin/cat rix,
   /usr/bin/curl rix,
   /usr/bin/date mrix,
@@ -136,6 +128,7 @@
   /usr/bin/gawk mrix,
   /usr/bin/grep mrix,
   /usr/bin/head mrix,
+  /usr/bin/hxselect mrix,
   /usr/bin/jq rix,
   /usr/bin/mv ix,
   /usr/bin/mktemp rix,

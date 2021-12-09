@@ -1,16 +1,5 @@
-# Copyright (C) 2019-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
+# Copyright 2019-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::JobSettings;
 
@@ -54,7 +43,7 @@ sub generate_settings {
 
     # add properties from dedicated database columns to settings
     if (my $job_template = $params->{job_template}) {
-        $settings->{TEST}            = $job_template->name || $job_template->test_suite->name;
+        $settings->{TEST} = $job_template->name || $job_template->test_suite->name;
         $settings->{TEST_SUITE_NAME} = $job_template->test_suite->name;
         $settings->{JOB_DESCRIPTION} = $job_template->description if length $job_template->description;
     }
@@ -125,7 +114,7 @@ sub parse_url_settings {
         # As this comes in from an API call, URL will be URI-encoded
         # This obviously creates a vuln if untrusted users can POST
         $settings->{$setting} = url_unescape($settings->{$setting});
-        my $url      = $settings->{$setting};
+        my $url = $settings->{$setting};
         my $filename = Mojo::URL->new($url)->path->parts->[-1];
         if ($do_extract) {
             # if user wants to extract downloaded file, final filename

@@ -1,17 +1,5 @@
-# Copyright (C) 2020-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::CLI::api;
 use Mojo::Base 'OpenQA::Command';
@@ -21,7 +9,7 @@ use Mojo::JSON qw(decode_json);
 use Mojo::Util qw(getopt);
 
 has description => 'Issue an arbitrary request to the API';
-has usage       => sub { shift->extract_usage };
+has usage => sub { shift->extract_usage };
 
 sub command {
     my ($self, @args) = @_;
@@ -30,22 +18,23 @@ sub command {
 
     die $self->usage
       unless getopt \@args,
-      'a|header=s'    => \my @headers,
+      'a|header=s' => \my @headers,
       'D|data-file=s' => \my $data_file,
-      'd|data=s'      => \$data,
-      'f|form'        => \my $form,
-      'j|json'        => \my $json,
-      'param-file=s'  => \my @param_file,
-      'p|pretty'      => \my $pretty,
-      'q|quiet'       => \my $quiet,
-      'X|method=s'    => \(my $method = 'GET'),
-      'v|verbose'     => \my $verbose;
+      'd|data=s' => \$data,
+      'f|form' => \my $form,
+      'j|json' => \my $json,
+      'param-file=s' => \my @param_file,
+      'p|pretty' => \my $pretty,
+      'q|quiet' => \my $quiet,
+      'r|retries=i' => \my $retries,
+      'X|method=s' => \(my $method = 'GET'),
+      'v|verbose' => \my $verbose;
 
     @args = $self->decode_args(@args);
     die $self->usage unless my $path = shift @args;
 
     $data = path($data_file)->slurp if $data_file;
-    my @data   = ($data);
+    my @data = ($data);
     my $params = $form ? decode_json($data) : $self->parse_params(\@args, \@param_file);
     @data = (form => $params) if keys %$params;
 
@@ -53,11 +42,21 @@ sub command {
     $headers->{Accept} //= 'application/json';
     $headers->{'Content-Type'} = 'application/json' if $json;
 
-    my $url    = $self->url_for($path);
+    my $url = $self->url_for($path);
     my $client = $self->client($url);
-    my $tx     = $client->build_tx($method, $url, $headers, @data);
-    $tx = $client->start($tx);
-    return $self->handle_result($tx, {pretty => $pretty, quiet => $quiet, verbose => $verbose});
+    my $tx = $client->build_tx($method, $url, $headers, @data);
+    my $ret;
+    $retries //= $ENV{OPENQA_CLI_RETRIES} // 0;
+    do {
+        $tx = $client->start($tx);
+        my $res_code = $tx->res->code;
+        return $self->handle_result($tx, {pretty => $pretty, quiet => $quiet, verbose => $verbose})
+          unless $res_code =~ /50[23]/ && $retries > 0;
+        print "Request failed, hit error $res_code, retrying up to $retries more times after waiting ...\n";
+        sleep($ENV{OPENQA_CLI_RETRY_SLEEP_TIME_S} // 3);
+        $retries--;
+    } while ($retries > 0);
+    return 1;
 }
 
 1;
@@ -137,6 +136,12 @@ sub command {
                                   multiple times
     -p, --pretty                  Pretty print JSON content
     -q, --quiet                   Do not print error messages to STDERR
+    -r, --retries <retries>       Retry up to the specified value on some
+                                  errors. Retries can also be set by the
+                                  environment variable 'OPENQA_CLI_RETRIES',
+                                  defaults to no retry.
+                                  Set 'OPENQA_CLI_RETRY_SLEEP_TIME_S' to
+                                  configure the sleep time between retries.
     -X, --method <method>         HTTP method to use, defaults to GET
     -v, --verbose                 Print HTTP response headers
 

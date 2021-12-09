@@ -1,17 +1,5 @@
-# Copyright (C) 2016-2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::API::V1::JobGroup;
 use Mojo::Base 'Mojolicious::Controller';
@@ -242,7 +230,7 @@ sub create {
     my $check = $self->check_top_level_group;
     if ($check != 0) {
         return $self->render(
-            json   => {error => 'Unable to create group with existing name ' . $validation->param('name')},
+            json => {error => 'Unable to create group with existing name ' . $validation->param('name')},
             status => 500
         );
     }
@@ -285,7 +273,7 @@ sub update {
     my $check = $self->check_top_level_group($group->id);
     if ($check != 0) {
         return $self->render(
-            json   => {error => 'Unable to update group due to not allow duplicated job group on top level'},
+            json => {error => 'Unable to update group due to not allow duplicated job group on top level'},
             status => 500
         );
     }

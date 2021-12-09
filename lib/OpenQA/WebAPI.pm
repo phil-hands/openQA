@@ -1,17 +1,5 @@
-# Copyright (C) 2015-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI;
 use Mojo::Base 'Mojolicious', -signatures;
@@ -65,12 +53,12 @@ sub startup ($self) {
 
     # register basic routes
     my $logged_in = $r->under('/')->to("session#ensure_user");
-    my $auth      = $r->under('/')->to("session#ensure_operator");
+    my $auth = $r->under('/')->to("session#ensure_operator");
 
     # Routes used by plugins (UI and API)
-    my $admin      = $r->any('/admin');
+    my $admin = $r->any('/admin');
     my $admin_auth = $admin->under('/')->to('session#ensure_admin')->name('ensure_admin');
-    my $op_auth    = $admin->under('/')->to('session#ensure_operator')->name('ensure_operator');
+    my $op_auth = $admin->under('/')->to('session#ensure_operator')->name('ensure_operator');
     my $api_public = $r->any('/api/v1')->name('api_public');
     my $api_auth_operator
       = $api_public->under('/')->to('Auth#auth_operator')->name('api_ensure_operator');
@@ -84,7 +72,7 @@ sub startup ($self) {
     OpenQA::Setup::set_secure_flag_on_cookies_of_https_connection($self);
     OpenQA::Setup::prepare_settings_ui_keys($self);
 
-  # setup asset pack
+    # setup asset pack
   # -> in case the following line is moved in another location, tools/generate-packed-assets needs to be adapted as well
     $self->plugin(AssetPack => {pipes => [qw(Sass Css JavaScript Fetch Combine)]});
     # -> read assets/assetpack.def
@@ -108,9 +96,9 @@ sub startup ($self) {
         });
 
     # placeholder types
-    $r->add_type(step    => qr/[1-9]\d*/);
+    $r->add_type(step => qr/[1-9]\d*/);
     $r->add_type(barrier => qr/[0-9a-zA-Z_]+/);
-    $r->add_type(str     => qr/[A-Za-z]+/);
+    $r->add_type(str => qr/[A-Za-z]+/);
 
     # register routes
     $r->post('/session')->to('session#create');
@@ -178,7 +166,7 @@ sub startup ($self) {
     $test_r->get('/images/thumb/#filename')->name('test_thumbnail')->to('file#test_thumbnail');
     $test_r->get('/file/#filename')->name('test_file')->to('file#test_file');
     $test_r->get('/settings/:dir/*link_path')->name('filesrc')->to('test#show_filesrc');
-    $test_r->get('/video'   => sub ($c) { $c->render('test/video') })->name('video');
+    $test_r->get('/video' => sub ($c) { $c->render('test/video') })->name('video');
     $test_r->get('/logfile' => sub ($c) { $c->render('test/logfile') })->name('logfile');
     # adding assetid => qr/\d+/ doesn't work here. wtf?
     $test_r->get('/asset/#assetid')->name('test_asset_id')->to('file#test_asset');
@@ -188,7 +176,7 @@ sub startup ($self) {
     my $developer_auth = $test_r->under('/developer')->to('session#ensure_admin');
     $developer_auth->get('/ws-console')->name('developer_ws_console')->to('developer#ws_console');
 
-    my $step_r    = $test_r->any('/modules/:moduleid/steps/<stepid:step>')->to(controller => 'step');
+    my $step_r = $test_r->any('/modules/:moduleid/steps/<stepid:step>')->to(controller => 'step');
     my $step_auth = $test_auth->any('/modules/:moduleid/steps/<stepid:step>');
     $step_r->get('/view')->to(action => 'view');
     $step_r->get('/edit')->name('edit_step')->to(action => 'edit');
@@ -222,7 +210,7 @@ sub startup ($self) {
 
     # Favicon
     $r->get('/favicon.ico' => sub ($c) { $c->render_static('favicon.ico') });
-    $r->get('/index'       => sub ($c) { $c->render('main/index') });
+    $r->get('/index' => sub ($c) { $c->render('main/index') });
     if ($Mojolicious::VERSION > 9.10) {
         $r->get('/dashboard_build_results' => [format => ['json', 'html']])->name('dashboard_build_results')
           ->to('main#dashboard_build_results', format => undef);
@@ -249,8 +237,8 @@ sub startup ($self) {
     ## Admin area starts here
     ###
     my %api_description;
-    my $admin_r     = $admin_auth->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::Admin');
-    my $op_r        = $op_auth->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::Admin');
+    my $admin_r = $admin_auth->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::Admin');
+    my $op_r = $op_auth->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::Admin');
     my $pub_admin_r = $admin->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::Admin');
 
     # operators accessible tables
@@ -313,21 +301,21 @@ sub startup ($self) {
     ## JSON API starts here
     ###
     # Array to store new API routes' references, so they can all be checked to get API description from POD
-    my @api_routes   = ();
-    my $api_ru       = $api_auth_any_user->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
-    my $api_ro       = $api_auth_operator->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
-    my $api_ra       = $api_auth_admin->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
+    my @api_routes = ();
+    my $api_ru = $api_auth_any_user->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
+    my $api_ro = $api_auth_operator->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
+    my $api_ra = $api_auth_admin->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
     my $api_public_r = $api_public->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
     push @api_routes, $api_ru, $api_ro, $api_ra, $api_public_r;
     # this is fallback redirect if one does not use apache
     $api_public_r->websocket(
         '/ws/<workerid:num>' => sub ($c) {
             my $workerid = $c->param('workerid');
-            my $port     = service_port('websocket');
+            my $port = service_port('websocket');
             $c->redirect_to("http://localhost:$port/ws/$workerid");
         });
     my $api_job_auth = $api_public->under('/')->to(controller => 'API::V1', action => 'auth_jobtoken');
-    my $api_r_job    = $api_job_auth->any('/')->to(namespace  => 'OpenQA::WebAPI::Controller::API::V1');
+    my $api_r_job = $api_job_auth->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
     push @api_routes, $api_job_auth, $api_r_job;
     $api_r_job->get('/whoami')->name('apiv1_jobauth_whoami')->to('job#whoami');    # primarily for tests
 

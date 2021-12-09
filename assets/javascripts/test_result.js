@@ -72,6 +72,9 @@ const tabConfiguration = {
   next_previous: {}
 };
 
+const DISPLAY_LOG_LIMIT = 5;
+const DISPLAY_LINE_LIMIT = 10;
+
 function checkPreviewVisible(stepPreviewContainer, preview) {
   // scroll the element to the top if the preview is not in view
   if (stepPreviewContainer.offset().top + preview.height() > $(window).scrollTop() + $(window).height()) {
@@ -217,7 +220,17 @@ function setCurrentPreview(stepPreviewContainer, force) {
 
   // show preview for other/regular results
   var link = stepPreviewContainer.find('a');
-  if (!link || !link.data('url')) {
+  if (!link) {
+    return;
+  }
+  if (link.data('text')) {
+    stepPreviewContainer.addClass('current_preview');
+    setPageHashAccordingToCurrentTab(link.attr('href'), true);
+    const text = unescape(link.data('text'));
+    previewSuccess(stepPreviewContainer, text, force);
+    return;
+  }
+  if (!link.data('url')) {
     return;
   }
   stepPreviewContainer.addClass('current_preview');
@@ -586,6 +599,20 @@ function setCurrentPreviewFromStepLinkIfPossible(stepLink) {
   }
 }
 
+function githashToLink(value, repo) {
+  var hashes_regex = /(\b[0-9a-f]{9}\b)/gms;
+  var githashes = value.match(hashes_regex);
+  var oneLineStatRegex = /\<a[^]+/gms;
+  var statRegex = /(\<a.+?)(?=(\<a))/gms;
+  if (!Array.isArray(githashes)) return;
+  for (let i = 0; i < githashes.length; i++) {
+    value = value.replace(githashes[i], githashes[i].link(repo + githashes[i]));
+    if (githashes.length == 1) return value.match(oneLineStatRegex);
+  }
+
+  return value.match(statRegex);
+}
+
 function renderTestModules(response) {
   this.hasContents = true;
   renderModuleTable(this.panelElement, response);
@@ -759,11 +786,17 @@ function renderCommentsTab(response) {
 }
 
 function renderInvestigationTab(response) {
-  const tabPanelElement = this.panelElement;
   if (typeof response !== 'object') {
     tabPanelElement.innerHTML = 'Investigation info returned by server is invalid.';
     return;
   }
+  const tabPanelElement = this.panelElement;
+  const testgiturl = response.testgiturl;
+  const needlegiturl = response.needlegiturl;
+  delete response.testgiturl;
+  delete response.needlegiturl;
+  document.getElementById('investigation').setAttribute('data-testgiturl', testgiturl);
+  document.getElementById('investigation').setAttribute('data-needlegiturl', needlegiturl);
 
   var theadElement = document.createElement('thead');
   var headTrElement = document.createElement('tr');
@@ -811,22 +844,65 @@ function renderInvestigationTab(response) {
         valueElement.appendChild(html);
       }
     } else {
-      var textLines = typeof value === 'string' ? value.split('\n') : [value];
-      var textLinesRest;
+      var preElement = document.createElement('pre');
+      var preElementMore = document.createElement('pre');
+      var enable_more = false;
+      var repoUrl = getInvestigationDataAttr(key);
+      if (repoUrl) {
+        var gitstats = githashToLink(value, repoUrl);
+        // assume string 'No test changes..'
+        if (gitstats == null) {
+          preElement.appendChild(document.createTextNode(value));
+        } else {
+          for (let i = 0; i < gitstats.length; i++) {
+            var statItem = document.createElement('div');
+            var collapseSign = document.createElement('a');
+            collapseSign.className = 'collapsed';
+            collapseSign.setAttribute('href', '#collapse' + key + i);
+            collapseSign.setAttribute('data-toggle', 'collapse');
+            collapseSign.setAttribute('aria-expanded', 'false');
+            collapseSign.setAttribute('aria-controls', 'collapseEntry');
+            collapseSign.innerHTML = '+ ';
+            collapseSign.setAttribute('onclick', 'toggleSign(this)');
+            var spanElem = document.createElement('span');
+            var logDetailsDiv = document.createElement('div');
+            logDetailsDiv.id = 'collapse' + key + i;
+            logDetailsDiv.className = 'collapse';
+            stats = gitstats[i].split('\n')[0];
+            spanElem.innerHTML = stats;
+            logDetailsDiv.innerHTML = gitstats[i]
+              .split('\n')
+              .slice(1, gitstats[0].length - 1)
+              .join('\n');
+            statItem.append(collapseSign, spanElem, logDetailsDiv);
 
-      var lineLimit = 10;
-      if (textLines.length > lineLimit) {
-        textLinesRest = textLines.slice(lineLimit, textLines.length);
-        textLines = textLines.slice(0, lineLimit);
+            if (i < DISPLAY_LOG_LIMIT) {
+              preElement.appendChild(statItem);
+            } else {
+              enable_more = true;
+              preElementMore.appendChild(statItem);
+            }
+          }
+        }
+      } else {
+        var textLines = typeof value === 'string' ? value.split('\n') : [value];
+        var textLinesRest;
+
+        if (textLines.length > DISPLAY_LINE_LIMIT) {
+          textLinesRest = textLines.slice(DISPLAY_LINE_LIMIT, textLines.length);
+          textLines = textLines.slice(0, DISPLAY_LINE_LIMIT);
+        }
+        preElement.appendChild(document.createTextNode(textLines.join('\n')));
       }
 
-      var preElement = document.createElement('pre');
-      preElement.appendChild(document.createTextNode(textLines.join('\n')));
       valueElement.appendChild(preElement);
 
       if (textLinesRest) {
-        var preElementMore = document.createElement('pre');
+        enable_more = true;
+        preElementMore = document.createElement('pre');
         preElementMore.appendChild(document.createTextNode(textLinesRest.join('\n')));
+      }
+      if (enable_more) {
         preElementMore.style = 'display: none';
 
         var moreLink = document.createElement('a');
@@ -859,6 +935,15 @@ function renderInvestigationTab(response) {
   }
   tabPanelElement.appendChild(tableElement);
   tabPanelElement.dataset.initialized = true;
+}
+
+function toggleSign(elem) {
+  elem.innerHTML = elem.className === 'collapsed' && elem.innerHTML === '+ ' ? '- ' : '+ ';
+}
+
+function getInvestigationDataAttr(key) {
+  var attrs = {test_log: 'data-testgiturl', needles_log: 'data-needlegiturl'};
+  return document.getElementById('investigation').getAttribute(attrs[key]);
 }
 
 function renderDependencyTab(response) {

@@ -1,20 +1,8 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2015 Red Hat
-# Copyright (C) 2015-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015 Red Hat
+# Copyright 2015-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use strict;
 use warnings;
@@ -27,12 +15,12 @@ use OpenQA::Schema;
 use OpenQA::Utils 'random_hex';
 use Getopt::Long;
 
-my $email    = 'admin@example.com';
+my $email = 'admin@example.com';
 my $nickname = 'admin';
 my $fullname = 'Administrator';
-my $key      = "";
-my $secret   = "";
-my $user     = $ARGV[0];
+my $key = "";
+my $secret = "";
+my $user = $ARGV[0];
 my $help;
 
 sub usage {
@@ -51,12 +39,12 @@ sub usage {
 my $numargs = scalar @ARGV;
 
 my $result = GetOptions(
-    "email=s"    => \$email,
+    "email=s" => \$email,
     "nickname=s" => \$nickname,
     "fullname=s" => \$fullname,
-    "key=s"      => \$key,
-    "secret=s"   => \$secret,
-    "help"       => \$help,
+    "key=s" => \$key,
+    "secret=s" => \$secret,
+    "help" => \$help,
 );
 
 usage 0 if $help;
@@ -69,21 +57,21 @@ if (($key || $secret)
 }
 
 unless ($key) {
-    $key    = random_hex();
+    $key = random_hex();
     $secret = random_hex();
     print "Key: $key\n";
     print "Secret: $secret\n";
 }
 
 my $schema = OpenQA::Schema->singleton;
-my $users  = $schema->resultset('Users')->find({is_admin => 1});
+my $users = $schema->resultset('Users')->find({is_admin => 1});
 if ($users != 0) {
     warn "An admin user already exists! Use client or web UI to create further users.\n";
     exit 1;
 }
 my $account = $schema->resultset('Users')->create_user(
     $user,
-    email    => $email,
+    email => $email,
     nickname => $nickname,
     fullname => $fullname,
     is_admin => 1

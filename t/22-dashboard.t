@@ -1,17 +1,5 @@
-# Copyright (C) 2016-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 # see also t/ui/14-dashboard.t and t/ui/14-dashboard-parents.t for Selenium test
 
@@ -30,17 +18,17 @@ use Mojo::File qw(tempfile);
 # init test case
 my $test_case = OpenQA::Test::Case->new;
 $test_case->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 05-job_modules.pl');
-my $t    = Test::Mojo->new('OpenQA::WebAPI');
+my $t = Test::Mojo->new('OpenQA::WebAPI');
 my $auth = {'X-CSRF-Token' => $t->ua->get('/tests')->res->dom->at('meta[name=csrf-token]')->attr('content')};
 $test_case->login($t, 'percival');
-my $job_groups    = $t->app->schema->resultset('JobGroups');
+my $job_groups = $t->app->schema->resultset('JobGroups');
 my $parent_groups = $t->app->schema->resultset('JobGroupParents');
-my $jobs          = $t->app->schema->resultset('Jobs');
+my $jobs = $t->app->schema->resultset('Jobs');
 
 subtest 'MIME types' => sub {
     is $t->app->types->type('yaml'), 'text/yaml;charset=UTF-8', 'right type';
-    is $t->app->types->type('bz2'),  'application/x-bzip2',     'right type';
-    is $t->app->types->type('xz'),   'application/x-xz',        'right type';
+    is $t->app->types->type('bz2'), 'application/x-bzip2', 'right type';
+    is $t->app->types->type('xz'), 'application/x-xz', 'right type';
 };
 
 # regular job groups shown
@@ -195,7 +183,7 @@ sub check_test_parent {
     );
 
     $t->element_count_is("div.children-$default_expanded .badge-all-passed", 1, 'badge shown on parent-level');
-    $t->element_count_is("div.children-$default_expanded .h4 span i.tag",    0, 'no tags shown yet');
+    $t->element_count_is("div.children-$default_expanded .h4 span i.tag", 0, 'no tags shown yet');
 }
 check_test_parent('collapsed');
 
@@ -262,25 +250,25 @@ is_deeply(\@h4, ['opensuse', 'opensuse test'], 'both groups shown, though');
 # temporarily create failed job with build 0048@0815 in opensuse test to verify that review badge is only shown
 # if all combined builds are reviewed
 my $job_hash = {
-    BUILD    => '0048@0815',
-    DISTRI   => 'opensuse',
-    VERSION  => 'Factory',
-    FLAVOR   => 'tape',
-    ARCH     => 'x86_64',
-    MACHINE  => 'xxx',
-    TEST     => 'dummy',
-    state    => OpenQA::Jobs::Constants::DONE,
-    result   => OpenQA::Jobs::Constants::FAILED,
+    BUILD => '0048@0815',
+    DISTRI => 'opensuse',
+    VERSION => 'Factory',
+    FLAVOR => 'tape',
+    ARCH => 'x86_64',
+    MACHINE => 'xxx',
+    TEST => 'dummy',
+    state => OpenQA::Jobs::Constants::DONE,
+    result => OpenQA::Jobs::Constants::FAILED,
     group_id => $opensuse_test_group->id
 };
 my $not_reviewed_job = $jobs->create($job_hash);
 $t->app->schema->resultset('JobModules')->create(
     {
-        script   => 'tests/x11/failing_module.pm',
-        job_id   => $not_reviewed_job->id,
+        script => 'tests/x11/failing_module.pm',
+        job_id => $not_reviewed_job->id,
         category => 'x11',
-        name     => 'failing_module',
-        result   => 'failed'
+        name => 'failing_module',
+        result => 'failed'
     });
 
 my $review_build_id = '-Factory-0048_0815';
@@ -314,8 +302,8 @@ sub check_badge ($reviewed_count, $msg, $build = undef, $commented_count = 0) {
     $build //= 'Factory-0048';
     $t->get_ok('/dashboard_build_results?limit_builds=20')->status_is(200);
     my $id = $test_parent->id;
-    $t->element_count_is("#review-$id-$build",          $reviewed_count,  "$msg (review badges, parent-level)");
-    $t->element_count_is("#child-review-$id-$build",    $reviewed_count,  "$msg (review badges, child-level)");
+    $t->element_count_is("#review-$id-$build", $reviewed_count, "$msg (review badges, parent-level)");
+    $t->element_count_is("#child-review-$id-$build", $reviewed_count, "$msg (review badges, child-level)");
     $t->element_count_is("#badge-commented-$id-$build", $commented_count, "$msg (commented badges, parent-level)");
     $t->element_count_is("#child-badge-commented-$id-$build", $commented_count, "$msg (commented badges, child-level)");
 }
@@ -323,11 +311,11 @@ sub check_badge ($reviewed_count, $msg, $build = undef, $commented_count = 0) {
 # make one of the softfailed jobs a failed because of failed not-important modules
 $t->app->schema->resultset('JobModules')->create(
     {
-        script   => 'tests/x11/failing_module.pm',
-        job_id   => 99936,
+        script => 'tests/x11/failing_module.pm',
+        job_id => 99936,
         category => 'x11',
-        name     => 'failing_module',
-        result   => 'failed'
+        name => 'failing_module',
+        result => 'failed'
     });
 
 # failed:                             not reviewed
@@ -416,11 +404,11 @@ is(
 subtest 'build which has jobs with different DISTRIs links to overview with all DISTRIs' => sub {
     my $job_with_different_distri = $opensuse_group->jobs->create(
         {
-            ARCH    => 'x86_64',
-            BUILD   => '87.5011',
-            DISTRI  => 'opensuse',
-            FLAVOR  => 'staging_e',
-            TEST    => 'minimaly',
+            ARCH => 'x86_64',
+            BUILD => '87.5011',
+            DISTRI => 'opensuse',
+            FLAVOR => 'staging_e',
+            TEST => 'minimaly',
             VERSION => '14.2',
             MACHINE => '32bit',
         });
@@ -439,8 +427,8 @@ subtest 'build which has jobs with different DISTRIs links to overview with all 
 # helper sub used by next two subtests
 sub check_builds {
     my ($build_names, $group, $msg, $parent) = @_;
-    my $route     = $parent ? 'parent_group_overview' : 'group_overview';
-    my $div_class = $parent ? 'children-expanded'     : 'no-children';
+    my $route = $parent ? 'parent_group_overview' : 'group_overview';
+    my $div_class = $parent ? 'children-expanded' : 'no-children';
     $t->get_ok("/$route/" . $group->id . '?limit_builds=100')->status_is(200);
     my @h4 = $t->tx->res->dom->find("div.$div_class .h4 a")->map('text')->each;
     is_deeply(\@h4, $build_names, $msg) || diag explain @h4;
@@ -449,7 +437,7 @@ sub check_builds {
 subtest 'proper build sorting for dotted build number' => sub {
     my $group = $job_groups->create({name => 'dotted version group'});
     $job_hash->{group_id} = $group->id;
-    $job_hash->{VERSION}  = '42.1';
+    $job_hash->{VERSION} = '42.1';
     my @builds = qw(
       CURRENT
       :TW.1181 :TW.1180 :TW.1179
@@ -482,7 +470,7 @@ subtest 'job groups with multiple version and builds' => sub {
     sub create_job_version_build {
         my ($version, $build) = @_;
         $job_hash->{VERSION} = $version;
-        $job_hash->{BUILD}   = $build;
+        $job_hash->{BUILD} = $build;
         $jobs->create($job_hash);
     }
 
@@ -514,7 +502,7 @@ subtest 'job parent groups with multiple version and builds' => sub {
     check_builds(\@build_names, $test_parent, 'parent group builds shown sorted by dotted versions',
         'parent_group_overview');
 
-    my @entire_build_url_list  = $t->tx->res->dom->find('.h4 a:first-child')->each();
+    my @entire_build_url_list = $t->tx->res->dom->find('.h4 a:first-child')->each();
     my $first_entire_build_url = $entire_build_url_list[0]->attr('href');
     is(
         $first_entire_build_url,
@@ -551,10 +539,10 @@ subtest 'job parent groups with multiple version and builds' => sub {
 subtest 'extra plugin links' => sub {
     $t->app->config->{plugin_links}{operator}{Test1} = 'tests_overview';
     $t->app->config->{plugin_links}{operator}{Test2} = 'latest';
-    $t->app->config->{plugin_links}{admin}{Test3}    = 'tests_export';
+    $t->app->config->{plugin_links}{admin}{Test3} = 'tests_export';
     $t->get_ok('/')->status_is(200)->element_exists('a[href*="/tests/overview"]')
       ->text_like('a[href*="/tests/overview"]', qr/Test1/)->element_exists('a[href*="/tests/latest"]')
-      ->text_like('a[href*="/tests/latest"]',   qr/Test2/)->element_exists_not('a[href*="/tests/export"]');
+      ->text_like('a[href*="/tests/latest"]', qr/Test2/)->element_exists_not('a[href*="/tests/export"]');
     $t->app->schema->resultset('Users')->search({username => 'percival'})->next->update({is_admin => 1});
     $t->get_ok('/')->status_is(200)->element_exists('a[href*="/tests/overview"]')
       ->element_exists('a[href*="/tests/latest"]')->element_exists('a[href*="/tests/export"]')

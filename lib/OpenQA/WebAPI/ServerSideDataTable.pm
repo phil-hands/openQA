@@ -1,17 +1,5 @@
-# Copyright (C) 2017-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2017-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::ServerSideDataTable;
 
@@ -21,14 +9,14 @@ use warnings;
 sub render_response {
     my (%args) = @_;
     # mandatory parameter
-    my $controller            = $args{controller};
-    my $resultset_name        = $args{resultset};
-    my $columns               = $args{columns};
+    my $controller = $args{controller};
+    my $resultset_name = $args{resultset};
+    my $columns = $args{columns};
     my $prepare_data_function = $args{prepare_data_function};
     # optional parameter
     my $initial_conds = $args{initial_conds} // [];
-    my $filter_conds  = $args{filter_conds};
-    my $params        = $args{additional_params} // {};
+    my $filter_conds = $args{filter_conds};
+    my $params = $args{additional_params} // {};
 
     my $resultset = $controller->schema->resultset($resultset_name);
 
@@ -45,7 +33,7 @@ sub render_response {
         $filtered_count = $resultset->search({-and => $filter_conds}, $params)->count;
     }
     else {
-        $filter_conds   = $initial_conds;
+        $filter_conds = $initial_conds;
         $filtered_count = $total_count;
     }
 
@@ -70,13 +58,13 @@ sub render_response {
     # get results and compute data for JSON serialization using
     # provided function
     my $results = $resultset->search({-and => $filter_conds}, $params);
-    my $data    = $prepare_data_function->($results);
+    my $data = $prepare_data_function->($results);
 
     $controller->render(
         json => {
-            recordsTotal    => $total_count,
+            recordsTotal => $total_count,
             recordsFiltered => $filtered_count,
-            data            => $data,
+            data => $data,
         });
 }
 

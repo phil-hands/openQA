@@ -1,17 +1,5 @@
-# Copyright (C) 2014-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Test::Case;
 use Mojo::Base -base;
@@ -46,10 +34,10 @@ sub init_data {
 sub login {
     my ($self, $test, $username) = @_;
 
-    my $app      = $test->app;
+    my $app = $test->app;
     my $sessions = $app->sessions;
-    my $c        = $app->build_controller;
-    my $name     = $sessions->cookie_name;
+    my $c = $app->build_controller;
+    my $name = $sessions->cookie_name;
     return 0 unless my $cookie = (grep { $_->name eq $name } @{$test->ua->cookie_jar->all})[0];
 
     # Hack the existing session cookie and add a user to pretend we logged in

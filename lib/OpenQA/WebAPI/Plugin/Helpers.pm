@@ -1,17 +1,5 @@
-# Copyright (C) 2015-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Plugin::Helpers;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
@@ -20,6 +8,7 @@ use Mojo::ByteStream;
 use OpenQA::Schema;
 use OpenQA::Utils qw(bugurl human_readable_size render_escaped_refs href_to_bugref);
 use OpenQA::Events;
+use OpenQA::Jobs::Constants qw(EXECUTION_STATES PRE_EXECUTION_STATES);
 
 sub register ($self, $app, $config) {
     $app->helper(
@@ -96,9 +85,9 @@ sub register ($self, $app, $config) {
     $app->helper(
         stepvideolink_for => sub {
             my ($c, $testid, $file_name, $frametime) = @_;
-            my $t     = sprintf('&t=%s,%s', $frametime->[0], $frametime->[1]);
-            my $url   = $c->url_for('video', testid => $testid)->query(filename => $file_name) . $t;
-            my $icon  = $c->t(i => (class => 'step_action fa fa-file-video-o fa-lg'));
+            my $t = sprintf('&t=%s,%s', $frametime->[0], $frametime->[1]);
+            my $url = $c->url_for('video', testid => $testid)->query(filename => $file_name) . $t;
+            my $icon = $c->t(i => (class => 'step_action fa fa-file-video-o fa-lg'));
             my $class = 'step_action fa fa-file-video-o fa-lg';
             return $c->link_to($url => (title => 'Jump to video', class => $class) => sub { '' });
         });
@@ -113,10 +102,10 @@ sub register ($self, $app, $config) {
         current_job_group => sub {
             my ($c) = @_;
 
-            my $job      = $c->stash('job') or return;
-            my $distri   = $c->stash('distri');
-            my $build    = $c->stash('build');
-            my $version  = $c->stash('version');
+            my $job = $c->stash('job') or return;
+            my $distri = $c->stash('distri');
+            my $build = $c->stash('build');
+            my $version = $c->stash('version');
             my $group_id = $job->group_id;
             if (!$group_id && !($distri && $build && $version)) {
                 return;
@@ -150,7 +139,7 @@ sub register ($self, $app, $config) {
     $app->helper(current_job => sub { shift->stash('job') });
 
     $app->helper(is_operator_js => sub { Mojo::ByteStream->new(shift->helpers->is_operator ? 'true' : 'false') });
-    $app->helper(is_admin_js    => sub { Mojo::ByteStream->new(shift->helpers->is_admin    ? 'true' : 'false') });
+    $app->helper(is_admin_js => sub { Mojo::ByteStream->new(shift->helpers->is_admin ? 'true' : 'false') });
 
     $app->helper(
         # Just like 'include', but includes the template with the given
@@ -160,7 +149,7 @@ sub register ($self, $app, $config) {
         include_branding => sub {
             my ($c, $name, %args) = @_;
             my $path = "branding/" . $c->app->config->{global}->{branding} . "/$name";
-            my $ret  = $c->render_to_string($path, %args);
+            my $ret = $c->render_to_string($path, %args);
             if (defined($ret)) {
                 return $ret;
             }
@@ -220,21 +209,24 @@ sub register ($self, $app, $config) {
             return $c->tag('span', title => $text, $text);
         });
 
+    my @unfinished_states = (EXECUTION_STATES, PRE_EXECUTION_STATES);
     $app->helper(
-        build_progress_bar_section => sub {
-            my ($c, $key, $res, $max, $class) = @_;
-
-            $class //= '';
-            if ($res) {
-                return $c->tag(
-                    'div',
-                    class => 'progress-bar progress-bar-' . $key . ' ' . $class,
-                    style => 'width: ' . ($res * 100 / $max) . '%;',
-                    sub {
-                        $res . ' ' . $key;
-                    });
-            }
-            return '';
+        build_progress_bar_section => sub ($c, $key, $res, $max, $params, $class = '') {
+            return '' unless $res;
+            my $url = $params->{url};
+            my $text = "$res $key";
+            my $link_or_text = $url
+              ? sub {
+                $url->query($key eq 'unfinished' ? (state => \@unfinished_states) : (result => $key));
+                $c->tag('a', href => $url->query($params->{query_params}), $text);
+              }
+              : $text;
+            return $c->tag(
+                'div',
+                class => "progress-bar progress-bar-$key $class",
+                style => 'width: ' . ($res * 100 / $max) . '%;',
+                $link_or_text
+            );
         });
 
     $app->helper(
@@ -275,12 +267,12 @@ sub register ($self, $app, $config) {
             my ($c, $title, $error_message) = @_;
 
             $c->stash(
-                title         => $title,
+                title => $title,
                 error_message => $error_message,
             );
             return $c->render(
                 template => 'main/specific_not_found',
-                status   => 404,
+                status => 404,
             );
         });
 
@@ -288,7 +280,7 @@ sub register ($self, $app, $config) {
         populate_hash_with_needle_timestamps_and_urls => sub {
             my ($c, $needle, $hash) = @_;
 
-            $hash->{last_seen}  = $needle ? $needle->last_seen_time    || 'never' : 'unknown';
+            $hash->{last_seen} = $needle ? $needle->last_seen_time || 'never' : 'unknown';
             $hash->{last_match} = $needle ? $needle->last_matched_time || 'never' : 'unknown';
             return $hash unless $needle;
             if (my $last_seen_module_id = $needle->last_seen_module_id) {
@@ -335,7 +327,7 @@ sub register ($self, $app, $config) {
     $app->helper('reply.validation_error' => \&_validation_error);
 
     $app->helper(compose_job_overview_search_args => \&_compose_job_overview_search_args);
-    $app->helper(param_hash                       => \&_param_hash);
+    $app->helper(param_hash => \&_param_hash);
     $app->helper(
         link_key_exists => sub {
             my ($c, $value) = @_;
@@ -348,23 +340,23 @@ sub _compose_job_overview_search_args ($c) {
     my %search_args;
 
     my $v = $c->validation;
-    $v->optional('distri',         'not_empty');
-    $v->optional('version',        'not_empty');
-    $v->optional('flavor',         'not_empty');
-    $v->optional('build',          'not_empty');
-    $v->optional('test',           'not_empty');
-    $v->optional('modules',        'comma_separated', 'not_empty');
+    $v->optional('distri', 'not_empty');
+    $v->optional('version', 'not_empty');
+    $v->optional('flavor', 'not_empty');
+    $v->optional('build', 'not_empty');
+    $v->optional('test', 'not_empty');
+    $v->optional('modules', 'comma_separated', 'not_empty');
     $v->optional('modules_result', 'not_empty');
-    $v->optional('module_re',      'not_empty');
-    $v->optional('group',          'not_empty');
-    $v->optional('groupid',        'not_empty');
-    $v->optional('id',             'not_empty');
-    $v->optional('limit',          'not_empty')->num(0, undef);
+    $v->optional('module_re', 'not_empty');
+    $v->optional('group', 'not_empty');
+    $v->optional('groupid', 'not_empty');
+    $v->optional('id', 'not_empty');
+    $v->optional('limit', 'not_empty')->num(0, undef);
 
     # add simple query params to search args
     for my $arg (qw(distri version flavor test limit)) {
         next unless $v->is_valid($arg);
-        my $params      = $v->every_param($arg);
+        my $params = $v->every_param($arg);
         my $param_count = scalar @$params;
         if ($param_count == 1) {
             $search_args{$arg} = $params->[0];
@@ -394,9 +386,9 @@ sub _compose_job_overview_search_args ($c) {
     my $schema = $c->schema;
     my @groups;
     if ($v->is_valid('groupid') || $v->is_valid('group')) {
-        my @group_id_search   = map { {id   => $_} } @{$v->every_param('groupid')};
+        my @group_id_search = map { {id => $_} } @{$v->every_param('groupid')};
         my @group_name_search = map { {name => $_} } @{$v->every_param('group')};
-        my @search_terms      = (@group_id_search, @group_name_search);
+        my @search_terms = (@group_id_search, @group_name_search);
         @groups = $schema->resultset('JobGroups')->search(\@search_terms)->all;
     }
 
@@ -471,9 +463,9 @@ sub _validation_error {
         }
     }
     my $failed = join ', ', @errors;
-    my $error  = "Erroneous parameters ($failed)";
+    my $error = "Erroneous parameters ($failed)";
     return $c->render(json => {error => $error}, status => 400) if $format eq 'json';
-    return $c->render(text => $error,            status => 400);
+    return $c->render(text => $error, status => 400);
 }
 
 1;

@@ -1,17 +1,5 @@
-# Copyright (C) 2019-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Worker::WebUIConnection;
 use Mojo::Base 'Mojo::EventEmitter', -signatures;
@@ -23,14 +11,14 @@ use OpenQA::Worker::CommandHandler;
 
 use Mojo::IOLoop;
 
-has 'webui_host';         # hostname:port of the web UI to connect to
-has 'url';                # URL of the web UI to connect to - initially deduced from webui_host (Mojo::URL instance)
-has 'ua';                 # the OpenQA::Client used to do connections
-has 'status';             # the status of the connection: new, registering, establishing_ws, connected, failed, disabled
-has 'worker';             # the worker this client belongs to
-has 'worker_id';          # the ID the web UI uses to track this worker (populated on registration)
+has 'webui_host';    # hostname:port of the web UI to connect to
+has 'url';    # URL of the web UI to connect to - initially deduced from webui_host (Mojo::URL instance)
+has 'ua';    # the OpenQA::Client used to do connections
+has 'status';    # the status of the connection: new, registering, establishing_ws, connected, failed, disabled
+has 'worker';    # the worker this client belongs to
+has 'worker_id';    # the ID the web UI uses to track this worker (populated on registration)
 has 'testpool_server';    # testpool server for this web UI host
-has 'working_directory';  # share directory for this web UI host
+has 'working_directory';    # share directory for this web UI host
 has 'cache_directory';    # cache directory for this web UI host
 
 # the websocket connection to receive commands from the web UI and send the status (Mojo::Transaction::WebSockets instance)
@@ -42,12 +30,11 @@ has 'webui_host_population';
 # interval for overall worker status updates; automatically set when needed (unless set manually)
 has 'send_status_interval';
 
-sub new {
-    my ($class, $webui_host, $cli_options) = @_;
+sub new ($class, $webui_host, $cli_options) {
     my $url = $webui_host !~ '/' ? Mojo::URL->new->scheme('http')->host_port($webui_host) : Mojo::URL->new($webui_host);
-    my $ua  = OpenQA::Client->new(
-        api       => $url->host,
-        apikey    => $cli_options->{apikey},
+    my $ua = OpenQA::Client->new(
+        api => $url->host,
+        apikey => $cli_options->{apikey},
         apisecret => $cli_options->{apisecret},
     );
     $ua->base_url($url);
@@ -64,30 +51,24 @@ sub new {
 
     return $class->SUPER::new(
         webui_host => $webui_host,
-        url        => $url,
-        ua         => $ua,
-        status     => 'new',
+        url => $url,
+        ua => $ua,
+        status => 'new',
     );
 }
 
-sub DESTROY {
-    my ($self) = @_;
+sub DESTROY ($self) {
     return if ${^GLOBAL_PHASE} eq 'DESTRUCT';
-
     $self->_remove_timer;
 }
 
-sub _remove_timer {
-    my ($self) = @_;
-
+sub _remove_timer ($self) {
     if (my $timer_id = delete $self->{_send_status_timer}) {
         Mojo::IOLoop->remove($timer_id);
     }
 }
 
-sub _set_status {
-    my ($self, $status, $event_data) = @_;
-
+sub _set_status ($self, $status, $event_data) {
     $event_data->{client} = $self;
     $event_data->{status} = $status;
     $self->status($status);
@@ -95,19 +76,17 @@ sub _set_status {
 }
 
 # registers the worker in the web UI and establishes the websocket connection
-sub register {
-    my ($self) = @_;
-
+sub register ($self) {
     $self->_set_status(registering => {});
 
     # get required parameter
-    my $worker          = $self->worker or die 'client has no worker assigned';
-    my $webui_host      = $self->webui_host;
+    my $worker = $self->worker or die 'client has no worker assigned';
+    my $webui_host = $self->webui_host;
     my $worker_hostname = $worker->worker_hostname;
-    my $capabilities    = $worker->capabilities;
-    my $working_dir     = $self->working_directory;
-    my $ua              = $self->ua;
-    my $url             = $self->url->clone;
+    my $capabilities = $worker->capabilities;
+    my $working_dir = $self->working_directory;
+    my $ua = $self->ua;
+    my $url = $self->url->clone;
     die 'client not correctly initialized before registration' unless ($webui_host && $working_dir && $ua && $url);
 
     # finish any existing websocket connection
@@ -116,10 +95,10 @@ sub register {
     # register via REST API
     $url->path('workers');
     $url->query($capabilities);
-    my $tx       = $ua->post($url, json => $capabilities);
+    my $tx = $ua->post($url, json => $capabilities);
     my $json_res = $tx->res->json;
     if (my $error = $tx->error) {
-        my $error_code  = $error->{code};
+        my $error_code = $error->{code};
         my $error_class = $error_code ? "$error_code response" : 'connection error';
         my $error_message;
         $error_message = $json_res->{error} if ref($json_res) eq 'HASH';
@@ -143,15 +122,13 @@ sub register {
     $self->_setup_websocket_connection();
 }
 
-sub _setup_websocket_connection {
-    my ($self, $websocket_url) = @_;
-
+sub _setup_websocket_connection ($self, $websocket_url = undef) {
     # prevent messing around when there's still an active websocket connection
     return undef if $self->websocket_connection;
 
    # make URL for websocket connection unless specified as argument (which would be the case when following redirection)
     if (!$websocket_url) {
-        my $worker_id  = $self->worker_id;
+        my $worker_id = $self->worker_id;
         my $webui_host = $self->webui_host;
         if (!$worker_id) {
             $self->_set_status(
@@ -181,7 +158,7 @@ sub _setup_websocket_connection {
             if (!$tx->is_websocket) {
                 $self->websocket_connection(undef);
 
-                my $error         = $tx->error;
+                my $error = $tx->error;
                 my $error_message = "Unable to upgrade to ws connection via $websocket_url";
                 $error_message .= ", code $error->{code}" if ($error && $error->{code});
                 $self->_set_status(failed => {error_message => $error_message});
@@ -194,9 +171,11 @@ sub _setup_websocket_connection {
                     $command_handler->handle_command(@_);
                 });
             $tx->on(
+                # uncoverable statement
                 finish => sub ($tx, $code, $reason = undef) {
-                    # uncoverable subroutine
                     # https://progress.opensuse.org/issues/55364
+                    # uncoverable subroutine
+                    # uncoverable statement
                     $reason //= 'no reason';
 
                     # Subprocesses reset the event loop (which triggers this event),
@@ -226,9 +205,7 @@ sub _setup_websocket_connection {
         });
 }
 
-sub finish_websocket_connection {
-    my ($self) = @_;
-
+sub finish_websocket_connection ($self) {
     if (my $websocket_connection = $self->websocket_connection) {
         $self->websocket_connection(undef);
         $websocket_connection->finish();
@@ -240,8 +217,8 @@ sub finish_websocket_connection {
 my %BUSY_ERROR_CODES = map { $_ => 1 } 408, 425, 502, 503, 504, 598;
 
 sub _retry_delay ($self, $is_webui_busy) {
-    my $key                    = $is_webui_busy ? 'RETRY_DELAY_IF_WEBUI_BUSY' : 'RETRY_DELAY';
-    my $settings               = $self->worker->settings;
+    my $key = $is_webui_busy ? 'RETRY_DELAY_IF_WEBUI_BUSY' : 'RETRY_DELAY';
+    my $settings = $self->worker->settings;
     my $host_specific_settings = $settings->webui_host_specific_settings->{$self->webui_host} // {};
     return $host_specific_settings->{$key} // $settings->global_settings->{$key};
 }
@@ -263,7 +240,7 @@ sub evaluate_error ($self, $tx, $remaining_tries) {
         }
     }
     else {
-        $msg           = "Connection error: $msg";
+        $msg = "Connection error: $msg";
         $is_webui_busy = 1 if $error->{message} =~ qr/timeout/i;
     }
     $retry_delay = $self->_retry_delay($is_webui_busy) if $$remaining_tries > 0;
@@ -277,14 +254,12 @@ sub configured_retries ($self) {
 # sends a command to the web UI via its REST API
 # note: This function may be called when the websocket connection has been interrupted as long as we still have a
 #       worker ID. If the websocket connection is down that should not affect any of the REST API calls.
-sub send {
-    my ($self, $method, $path, %args) = @_;
-
-    my $host      = $self->webui_host;
-    my $params    = $args{params};
+sub send ($self, $method, $path, %args) {
+    my $host = $self->webui_host;
+    my $params = $args{params};
     my $json_data = $args{json};
-    my $callback  = $args{callback} // sub { };
-    my $tries     = $args{tries}    // $self->configured_retries;
+    my $callback = $args{callback} // sub { };
+    my $tries = $args{tries} // $self->configured_retries;
 
     # if set ignore errors completely and don't retry
     my $ignore_errors = $args{ignore_errors} // 0;
@@ -297,7 +272,7 @@ sub send {
     # build URL
     $method = uc $method;
     my $ua_url = $self->url->clone;
-    my $ua     = $self->ua;
+    my $ua = $self->ua;
     $ua_url->path($path);
     $ua_url->query($params) if $params;
 
@@ -324,14 +299,14 @@ sub send {
         # check for errors
         my ($error_msg, $retry_delay) = $self->evaluate_error($tx, \$tries);
         return $callback->($tx->res->json) if !$error_msg && $tx->res->json;
-        return $callback->()               if $ignore_errors;
+        return $callback->() if $ignore_errors;
         $self->{_last_error} = $error_msg;
         log_error("REST-API error ($method $ua_url): $error_msg (remaining tries: $tries)");
 
         # handle critical error when no more attempts remain
         if ($tries <= 0 && !$non_critical) {
             # abort the current job, we're in trouble - but keep running to grab the next
-            my $worker             = $self->worker;
+            my $worker = $self->worker;
             my $current_webui_host = $worker->current_webui_host;
             if ($current_webui_host && $current_webui_host eq $self->webui_host) {
                 $worker->stop_current_job(WORKER_SR_API_FAILURE);
@@ -360,30 +335,27 @@ sub send {
     $ua->start($tx => sub { $cb->(@_, $tries) });
 }
 
-sub last_error { shift->{_last_error} }
+sub last_error ($self) { $self->{_last_error} }
 
-sub reset_last_error { delete shift->{_last_error} }
+sub reset_last_error ($self) { delete $self->{_last_error} }
 
-sub add_context_to_last_error {
-    my ($self, $context) = @_;
+sub add_context_to_last_error ($self, $context) {
     my $last_error = $self->{_last_error};
     $self->{_last_error} = "$last_error on $context" if $last_error;
 }
 
-sub _calculate_status_update_interval {
-    my ($self) = @_;
-
+sub _calculate_status_update_interval ($self) {
     my $status_update_interval = $self->send_status_interval;
     return $status_update_interval if ($status_update_interval);
 
     # do dubious calculations to balance the load on the websocket server
     # (see https://github.com/os-autoinst/openQA/pull/1486 and https://progress.opensuse.org/issues/25960)
-    my $i            = $self->worker_id // $self->worker->instance_number;
-    my $imax         = $self->webui_host_population || 1;
+    my $i = $self->worker_id // $self->worker->instance_number;
+    my $imax = $self->webui_host_population || 1;
     my $scale_factor = $imax;
-    my $steps        = 215;
-    my $r            = 3.81199961;
-    my $population   = feature_scaling($i, $imax, 0, 1);
+    my $steps = 215;
+    my $r = 3.81199961;
+    my $population = feature_scaling($i, $imax, 0, 1);
     my $status_timer
       = abs(feature_scaling(logistic_map_steps($steps, $r, $population) * $scale_factor, $imax, MIN_TIMER, MAX_TIMER));
     $status_timer = $status_timer > MIN_TIMER
@@ -394,9 +366,7 @@ sub _calculate_status_update_interval {
 }
 
 # sends the overall worker status
-sub send_status {
-    my ($self) = @_;
-
+sub send_status ($self) {
     # ensure an ongoing timer is cancelled in case send_status has been called manually
     if (my $send_status_timer = delete $self->{_send_status_timer}) {
         Mojo::IOLoop->remove($send_status_timer);
@@ -415,7 +385,7 @@ sub send_status {
             return undef unless $self->websocket_connection;
 
             my $status_update_interval = $self->_calculate_status_update_interval;
-            my $webui_host             = $self->webui_host;
+            my $webui_host = $self->webui_host;
             log_warning "$status->{reason} - checking again for web UI '$webui_host' in $status_update_interval s"
               if $status->{reason};
             $self->{_send_status_timer} = Mojo::IOLoop->timer($status_update_interval, sub { $self->send_status });
@@ -424,9 +394,7 @@ sub send_status {
 
 # send "quit" message when intentionally "going offline" so the worker is immediately considered
 # offline by the web UI and not just after the timeout
-sub quit {
-    my ($self, $callback) = @_;
-
+sub quit ($self, $callback) {
     # ensure we're not sending any further status updates (which would let the web UI consider the
     # worker online again)
     if (my $send_status_timer = delete $self->{_send_status_timer}) {
@@ -444,9 +412,7 @@ sub quit {
 }
 
 # send "rejected" message when refusing to take one or more jobs assigned by the web UI
-sub reject_jobs {
-    my ($self, $job_ids, $reason, $callback) = @_;
-
+sub reject_jobs ($self, $job_ids, $reason, $callback = undef) {
     # send rejection message via web sockets if connected
     my $websocket_connection = $self->websocket_connection;
     return $websocket_connection->send({json => {type => 'rejected', job_ids => $job_ids, reason => $reason}},

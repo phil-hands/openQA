@@ -1,16 +1,5 @@
-# Copyright (C) 2012-2018 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
+# Copyright 2012-2018 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Description;
 
@@ -23,7 +12,7 @@ use Pod::POM;
 use Exporter 'import';
 
 our $VERSION = sprintf "%d.%03d", q$Revision: 0.01 $ =~ /(\d+)/g;
-our @EXPORT  = qw(
+our @EXPORT = qw(
   get_pod_from_controllers
   set_api_desc
 );
@@ -41,7 +30,7 @@ sub get_pod_from_controllers {
     my $tree;
     my %controllers;
     # Path where openQA is installed
-    my $app       = shift;
+    my $app = shift;
     my $code_base = $app->home;
     my $ctrlrpath = path($code_base)->child('lib', 'OpenQA', 'WebAPI', 'Controller', 'API', 'V1');
 
@@ -81,7 +70,7 @@ sub get_pod_from_controllers {
 
 sub set_api_desc {
     my $api_description = shift;
-    my $api_route       = shift;
+    my $api_route = shift;
 
     if (ref($api_description) ne 'HASH') {
         log_warning("set_api_desc: expected HASH ref for api_descriptions. Got: " . ref($api_description));
@@ -111,16 +100,16 @@ sub _itemize {
     }
     my $controller = shift;
     my $methodname = '';
-    my $desc       = '';
+    my $desc = '';
 
     foreach my $s ($node->content()) {
         my $type = $s->type();
         if ($type eq 'item') {
             $methodname = $s->title;
-            $desc       = $s->text;
+            $desc = $s->text;
             $methodname =~ s/\s+//g;
             $methodname =~ s/\(\)//;
-            $desc       =~ s/[\r\n]/ /g;
+            $desc =~ s/[\r\n]/ /g;
             my $key = $controller . '#' . $methodname;
             $methods_description{$key} = $desc;
         }

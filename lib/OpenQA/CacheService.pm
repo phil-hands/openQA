@@ -1,17 +1,5 @@
-# Copyright (C) 2018-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::CacheService;
 use Mojo::Base 'Mojolicious';
@@ -23,6 +11,12 @@ use OpenQA::CacheService::Model::Cache;
 use OpenQA::CacheService::Model::Downloads;
 
 use constant DEFAULT_MINION_WORKERS => 5;
+
+# Default to 10 minutes
+use constant SQLITE_BUSY_TIMEOUT => $ENV{OPENQA_SQLITE_BUSY_TIMEOUT} // 600000;
+
+# Defaults to 1 minute
+use constant SQLITE_SLOW_QUERY => $ENV{OPENQA_SQLITE_SLOW_QUERY} // 60000;
 
 has exit_code => undef;
 
@@ -53,10 +47,10 @@ sub startup {
 
     # Worker settings
     my $global_settings = OpenQA::Worker::Settings->new->global_settings;
-    my $location        = $ENV{OPENQA_CACHE_DIR} || $global_settings->{CACHEDIRECTORY};
+    my $location = $ENV{OPENQA_CACHE_DIR} || $global_settings->{CACHEDIRECTORY};
     die "Cache directory unspecified. Set environment variable 'OPENQA_CACHE_DIR' or config variable 'CACHEDIRECTORY'\n"
       unless defined $location;
-    my $limit               = $global_settings->{CACHELIMIT};
+    my $limit = $global_settings->{CACHELIMIT};
     my $min_free_percentage = $global_settings->{CACHE_MIN_FREE_PERCENTAGE};
 
     # commands
@@ -73,7 +67,7 @@ sub startup {
 
     # Increase busy timeout to 5 minutes
     my $db_file = path($location, 'cache.sqlite');
-    my $sqlite  = Mojo::SQLite->new->from_string("file://$db_file?no_wal=1");
+    my $sqlite = Mojo::SQLite->new->from_string("file://$db_file?no_wal=1");
     $sqlite->on(
         connection => sub {
             my ($sqlite, $dbh) = @_;
@@ -82,13 +76,20 @@ sub startup {
             my $sqlite_mode = uc($ENV{OPENQA_CACHE_SERVICE_SQLITE_JOURNAL_MODE} || 'DELETE');
             $dbh->do("pragma journal_mode=$sqlite_mode");
             $dbh->do('pragma synchronous=NORMAL') if $sqlite_mode eq 'WAL';
-            $dbh->sqlite_busy_timeout(360000);
+            $dbh->sqlite_busy_timeout(SQLITE_BUSY_TIMEOUT);
+
+            # Log slow queries
+            $dbh->sqlite_profile(
+                sub {
+                    my ($statement, $elapsed) = @_;
+                    $log->info(qq{Slow SQLite query: "$statement" -> ${elapsed}ms}) if $elapsed > SQLITE_SLOW_QUERY;
+                });
         });
     $sqlite->migrations->name('cache_service')->from_data;
 
     my @cache_params = (sqlite => $sqlite, log => $self->log, location => $location);
-    push @cache_params, limit               => int($limit) * (1024**3) if defined $limit;
-    push @cache_params, min_free_percentage => $min_free_percentage    if defined $min_free_percentage;
+    push @cache_params, limit => int($limit) * (1024**3) if defined $limit;
+    push @cache_params, min_free_percentage => $min_free_percentage if defined $min_free_percentage;
     $self->helper(cache => sub { state $cache = OpenQA::CacheService::Model::Cache->new(@cache_params) });
     my $cache = $self->cache;
     $self->helper(downloads => sub { state $dl = OpenQA::CacheService::Model::Downloads->new(cache => $cache) });
@@ -218,3 +219,6 @@ DROP TABLE downloads;
 
 -- 3 up
 ALTER TABLE assets ADD COLUMN `pending` INTEGER DEFAULT 1;
+
+--4 up
+CREATE INDEX IF NOT EXISTS assets_pending on assets (pending);

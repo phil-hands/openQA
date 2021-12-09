@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2020-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -27,7 +15,7 @@ use Test::MockModule;
 my $signal_timeout = OpenQA::Test::TimeLimit::scale_timeout 7;
 
 subtest 'warnings in sub processes are fatal test failures' => sub {
-    my $test_utils_mock        = Test::MockModule->new('OpenQA::Test::Utils');
+    my $test_utils_mock = Test::MockModule->new('OpenQA::Test::Utils');
     my $test_would_have_failed = 0;
     $test_utils_mock->redefine(
         _fail_and_exit => sub {
@@ -39,7 +27,7 @@ subtest 'warnings in sub processes are fatal test failures' => sub {
         # start a sub process like the test helper do and simulate a Perl warning
         OpenQA::Test::Utils::_setup_sigchld_handler 'test-process-1', start sub {
             # Give Utils.pm a chance to install $SIG{CHLD}
-            sleep 1;                                                     # uncoverable statement
+            sleep 1;    # uncoverable statement
             OpenQA::Test::Utils::_setup_sub_process 'test-process-1';    # uncoverable statement
             '' . undef;    # uncoverable statement: provoke Perl warning "Use of uninitialized value in concatenation …"
         };
@@ -58,10 +46,10 @@ subtest 'warnings in sub processes are fatal test failures' => sub {
         OpenQA::Test::Utils::_setup_sub_process 'test-process-2';    # uncoverable statement
                                                                      # uncoverable statement
         note "waiting at most $signal_timeout seconds for SIGTERM (sleep is supposed to be interrupted by SIGTERM)";
-        Devel::Cover::report() if Devel::Cover->can('report');       # uncoverable statement
-        sleep $signal_timeout;                                       # uncoverable statement
-        note 'timeout for receiving SIGTERM exceeded';               # uncoverable statement
-        exit -1;                                                     # uncoverable statement
+        Devel::Cover::report() if Devel::Cover->can('report');    # uncoverable statement
+        sleep $signal_timeout;    # uncoverable statement
+        note 'timeout for receiving SIGTERM exceeded';    # uncoverable statement
+        exit -1;    # uncoverable statement
     };
     stop_service($ipc_run_harness);
     is($test_would_have_failed, 0, 'manual termination via stop_service does not trigger _fail_and_exit');

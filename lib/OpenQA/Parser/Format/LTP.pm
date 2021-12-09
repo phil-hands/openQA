@@ -1,17 +1,5 @@
-# Copyright (C) 2017-2018 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2017-2018 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Parser::Format::LTP;
 use Mojo::Base 'OpenQA::Parser::Format::JUnit';
@@ -55,25 +43,25 @@ sub parse {
         my $text_fn = "LTP-$t_name.txt";
         my $content = $res->{test}->{log};
 
-        $details->{text}  = $text_fn;
+        $details->{text} = $text_fn;
         $details->{title} = $t_name;
 
         push @{$result->{details}}, $details;
 
         $self->_add_output(
             {
-                file    => $text_fn,
+                file => $text_fn,
                 content => $content
             });
 
         my $t = OpenQA::Parser::Result::LTP::SubTest->new(
-            flags    => {},
+            flags => {},
             category => 'LTP',
-            name     => $t_name,
-            log      => $res->{test}->{log},
+            name => $t_name,
+            log => $res->{test}->{log},
             duration => $res->{test}->{duration},
-            script   => undef,
-            result   => $res->{test}->{result});
+            script => undef,
+            result => $res->{test}->{result});
         $self->tests->add($t);
         $result->{test} = $t if $self->include_results();
         $self->_add_single_result($result);
@@ -88,7 +76,7 @@ sub parse {
     use Mojo::Base 'OpenQA::Parser::Result::OpenQA';
 
     has environment => sub { OpenQA::Parser::Result::LTP::Environment->new() };
-    has test        => sub { OpenQA::Parser::Result::LTP::SubTest->new() };
+    has test => sub { OpenQA::Parser::Result::LTP::SubTest->new() };
     has [qw(status test_fqn)];
 }
 

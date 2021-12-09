@@ -1,16 +1,5 @@
-# Copyright (C) 2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
+# Copyright 2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Git;
 
@@ -98,8 +87,8 @@ sub commit {
 
     # commit changes
     my $message = $args->{message};
-    my $author  = sprintf('--author=%s <%s>', $self->user->fullname, $self->user->email);
-    my $res     = run_cmd_with_log_return_error([@git, 'commit', '-q', '-m', $message, $author, @files]);
+    my $author = sprintf('--author=%s <%s>', $self->user->fullname, $self->user->email);
+    my $res = run_cmd_with_log_return_error([@git, 'commit', '-q', '-m', $message, $author, @files]);
     return _format_git_error($res, 'Unable to commit via Git') unless $res->{status};
 
     # push changes

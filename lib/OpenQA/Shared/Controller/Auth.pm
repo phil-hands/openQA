@@ -1,23 +1,11 @@
-# Copyright (C) 2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Shared::Controller::Auth;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use OpenQA::Schema;
-use OpenQA::Log qw(log_debug);
+use OpenQA::Log qw(log_trace);
 use Mojo::Util qw(hmac_sha1_sum secure_compare);
 
 sub check ($self) {
@@ -25,15 +13,15 @@ sub check ($self) {
         return 1 if $self->is_local_request;
     }
 
-    my $req       = $self->req;
-    my $headers   = $req->headers;
-    my $key       = $headers->header('X-API-Key');
-    my $hash      = $headers->header('X-API-Hash');
+    my $req = $self->req;
+    my $headers = $req->headers;
+    my $key = $headers->header('X-API-Key');
+    my $hash = $headers->header('X-API-Hash');
     my $timestamp = $headers->header('X-API-Microtime');
     my $user;
-    log_debug($key ? "API key from client: *$key*" : 'No API key from client');
+    log_trace($key ? "API key from client: *$key*" : 'No API key from client');
 
-    my $schema  = OpenQA::Schema->singleton;
+    my $schema = OpenQA::Schema->singleton;
     my $api_key = $schema->resultset('ApiKeys')->find({key => $key});
     if ($api_key) {
         if (time - $timestamp <= 300) {
@@ -43,7 +31,7 @@ sub check ($self) {
                 if (my $secret = $api_key->secret) {
                     my $sum = hmac_sha1_sum($self->req->url->to_string . $timestamp, $secret);
                     $user = $api_key->user;
-                    log_debug(sprintf "API auth by user: %s, operator: %d", $user->username, $user->is_operator);
+                    log_trace(sprintf "API auth by user: %s, operator: %d", $user->username, $user->is_operator);
                 }
             }
         }
@@ -76,13 +64,13 @@ sub auth ($self) {
             ($user, $reason) = $self->_key_auth($reason, $key);
         }
         else {
-            $log->debug('No API key from client');
+            $log->trace('No API key from client');
             $reason = 'no api key';
         }
     }
 
     if ($user) {
-        $log->debug(sprintf "API auth by user: %s, operator: %d", $user->username, $user->is_operator);
+        $log->trace(sprintf "API auth by user: %s, operator: %d", $user->username, $user->is_operator);
         $self->stash(current_user => {user => $user});
         return 1;
     }
@@ -125,9 +113,9 @@ sub _token_auth ($self, $reason, $userinfo) {
     $reason = 'invalid personal access token';
     if ($userinfo =~ /^([^:]+):([^:]+):([^:]+)$/) {
         my ($username, $key, $secret) = ($1, $2, $3);
-        $log->debug(qq{Personal access token for user "$username"});
+        $log->trace(qq{Personal access token for user "$username"});
         if ($self->is_local_request || $self->req->is_secure) {
-            my $ip         = $self->tx->remote_address;
+            my $ip = $self->tx->remote_address;
             my $reject_msg = qq{Rejecting personal access token for user "$username" with ip "$ip"};
             if (my $api_key = $self->schema->resultset('ApiKeys')->find({key => $key})) {
                 my $user = $api_key->user;
@@ -153,16 +141,16 @@ sub _token_auth ($self, $reason, $userinfo) {
 sub _key_auth ($self, $reason, $key) {
     my $log = $self->app->log;
 
-    $log->debug("API key from client: *$key*");
+    $log->trace("API key from client: *$key*");
     if (my $api_key = $self->schema->resultset('ApiKeys')->find({key => $key})) {
-        $log->debug(sprintf 'Key is for user "%s"', $api_key->user->username);
+        $log->trace(sprintf 'Key is for user "%s"', $api_key->user->username);
 
-        my $msg                = $self->req->url->to_string;
-        my $headers            = $self->req->headers;
-        my $hash               = $headers->header('X-API-Hash');
-        my $timestamp          = $headers->header('X-API-Microtime');
+        my $msg = $self->req->url->to_string;
+        my $headers = $self->req->headers;
+        my $hash = $headers->header('X-API-Hash');
+        my $timestamp = $headers->header('X-API-Microtime');
         my $build_tx_timestamp = $headers->header('X-Build-Tx-Time');
-        my $username           = $api_key->user->username;
+        my $username = $api_key->user->username;
 
         return ($api_key->user, $reason) if $self->_valid_hmac($hash, $msg, $build_tx_timestamp, $timestamp, $api_key);
 

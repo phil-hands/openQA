@@ -1,33 +1,19 @@
-# Copyright (C) 2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Worker::Settings;
-use Mojo::Base -base;
+use Mojo::Base -base, -signatures;
 
 use Mojo::Util 'trim';
 use Config::IniFiles;
+use Time::Seconds;
 use OpenQA::Log 'setup_log';
 
 has 'global_settings';
 has 'webui_hosts';
 has 'webui_host_specific_settings';
 
-sub new {
-    my ($class, $instance_number, $cli_options) = @_;
-    $cli_options //= {};
-
+sub new ($class, $instance_number = undef, $cli_options = {}) {
     my $settings_file = ($ENV{OPENQA_CONFIG} || '/etc/openqa') . '/workers.ini';
     my $cfg;
     my @parse_errors;
@@ -80,34 +66,32 @@ sub new {
     # TODO: This should be sent to the scheduler to be included in the worker's table.
     if (defined $instance_number) {
         $ENV{QEMUPORT} = $instance_number * 10 + 20002;
-        $ENV{VNC}      = $instance_number + 90;
+        $ENV{VNC} = $instance_number + 90;
     }
 
     # assign default retry-delay for web UI connection
-    $global_settings{RETRY_DELAY}               //= 5;
-    $global_settings{RETRY_DELAY_IF_WEBUI_BUSY} //= 60;
+    $global_settings{RETRY_DELAY} //= 5;
+    $global_settings{RETRY_DELAY_IF_WEBUI_BUSY} //= ONE_MINUTE;
 
     my $self = $class->SUPER::new(
-        global_settings              => \%global_settings,
-        webui_hosts                  => \@hosts,
+        global_settings => \%global_settings,
+        webui_hosts => \@hosts,
         webui_host_specific_settings => \%webui_host_specific_settings,
     );
-    $self->{_file_path}    = $settings_file;
+    $self->{_file_path} = $settings_file;
     $self->{_parse_errors} = \@parse_errors;
     return $self;
 }
 
-sub apply_to_app {
-    my ($self, $app) = @_;
-
+sub apply_to_app ($self, $app) {
     my $global_settings = $self->global_settings;
     $app->log_dir($global_settings->{LOG_DIR});
     $app->level($global_settings->{LOG_LEVEL}) if $global_settings->{LOG_LEVEL};
     setup_log($app, undef, $app->log_dir, $app->level);
 }
 
-sub file_path { shift->{_file_path} }
+sub file_path ($self) { $self->{_file_path} }
 
-sub parse_errors { shift->{_parse_errors} }
+sub parse_errors ($self) { $self->{_parse_errors} }
 
 1;

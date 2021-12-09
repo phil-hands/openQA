@@ -1,17 +1,5 @@
-# Copyright (C) 2015 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::Admin::JobGroup;
 use Mojo::Base 'Mojolicious::Controller';
@@ -27,8 +15,8 @@ sub index {
     my $for_editor = $schema->resultset('JobGroupParents')->job_groups_and_parents;
 
     $self->stash('job_groups_and_parents_for_editor', $for_editor);
-    $self->stash('parent_groups',                     $parent_groups);
-    $self->stash('groups',                            $groups);
+    $self->stash('parent_groups', $parent_groups);
+    $self->stash('groups', $groups);
     $self->render('admin/group/index');
 }
 
@@ -41,8 +29,8 @@ sub group_page {
     my $group = $self->schema->resultset($resultset)->find($group_id);
     return $self->reply->not_found unless $group;
 
-    $self->stash('group',     $group);
-    $self->stash('index',     $group->sort_order);
+    $self->stash('group', $group);
+    $self->stash('index', $group->sort_order);
     $self->stash('parent_id', $group->can('parent_id') && $group->parent_id // 'none');
     $self->render($template);
 }
@@ -81,17 +69,17 @@ sub save_connect {
     my ($self) = @_;
 
     my $schema = $self->schema;
-    my $group  = $schema->resultset("JobGroups")->find($self->param('groupid'));
+    my $group = $schema->resultset("JobGroups")->find($self->param('groupid'));
     if (!$group) {
         $self->flash(error => 'Specified group ID ' . $self->param('groupid') . 'doesn\'t exist.');
         return $self->redirect_to('admin_groups');
     }
 
     my $values = {
-        prio          => $self->param('prio') // $group->default_priority,
-        product_id    => $self->param('medium'),
-        machine_id    => $self->param('machine'),
-        group_id      => $group->id,
+        prio => $self->param('prio') // $group->default_priority,
+        product_id => $self->param('medium'),
+        machine_id => $self->param('machine'),
+        group_id => $group->id,
         test_suite_id => $self->param('test')};
     eval { $schema->resultset("JobTemplates")->create($values)->id };
     if ($@) {
