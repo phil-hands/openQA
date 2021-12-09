@@ -1,17 +1,5 @@
-# Copyright (C) 2020-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Downloader;
 use Mojo::Base -base;
@@ -27,8 +15,8 @@ use Time::HiRes 'sleep';
 has attempts => 5;
 has [qw(log tmpdir)];
 has sleep_time => 5;
-has ua         => sub { Mojo::UserAgent->new(max_redirects => 5, max_response_size => 0) };
-has res        => undef;
+has ua => sub { Mojo::UserAgent->new(max_redirects => 5, max_response_size => 0) };
+has res => undef;
 
 sub download {
     my ($self, $url, $target, $options) = (shift, shift, shift, shift // {});
@@ -65,14 +53,14 @@ sub download {
 sub _get {
     my ($self, $url, $target, $options) = @_;
 
-    my $ua  = $self->ua;
+    my $ua = $self->ua;
     my $log = $self->log;
 
     my $file = path($target)->basename;
     $log->info(qq{Downloading "$file" from "$url"});
 
     # Assets might be deleted by a sysadmin
-    my $tx   = $ua->build_tx(GET => $url);
+    my $tx = $ua->build_tx(GET => $url);
     my $etag = $options->{etag};
     $tx->req->headers->header('If-None-Match' => $etag) if $etag && -e $target;
     $tx = $ua->start($tx);
@@ -82,12 +70,12 @@ sub _get {
     my $code = $res->code // 521;    # Used by cloudflare to indicate web server is down.
     if ($code eq 304) {
         $options->{on_unchanged}->() if $options->{on_unchanged};
-        return (520,   "Unknown error") unless -e $target;    # Avoid race condition between check and removal
+        return (520, "Unknown error") unless -e $target;    # Avoid race condition between check and removal
         return (undef, undef);
     }
 
     if (!$res->is_success) {
-        my $error   = $res->error;
+        my $error = $res->error;
         my $message = ref $error eq 'HASH' ? " $error->{message}" : '';
         my $log_err = qq{Download of "$target" failed: $code$message};
         $log->info($log_err);
@@ -97,8 +85,8 @@ sub _get {
     unlink $target;
     $options->{on_downloaded}->() if $options->{on_downloaded};
 
-    my $asset   = $res->content->asset;
-    my $size    = $asset->size;
+    my $asset = $res->content->asset;
+    my $size = $asset->size;
     my $headers = $res->headers;
     my $ret;
     my $err;

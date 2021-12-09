@@ -16,6 +16,7 @@ our @EXPORT = qw(driver_missing check_driver_modules enable_timeout
   wait_until wait_until_element_gone wait_for_element
   element_prop element_prop_by_selector map_elements);
 
+use Carp;
 use Data::Dump 'pp';
 use IPC::Run qw(start);
 use Mojo::IOLoop::Server;
@@ -35,9 +36,9 @@ our $startingpid = 0;
 
 sub _start_app {
     my ($args) = @_;
-    $mojoport    = $ENV{OPENQA_BASE_PORT} = $args->{mojoport} // $ENV{MOJO_PORT} // Mojo::IOLoop::Server->generate_port;
+    $mojoport = $ENV{OPENQA_BASE_PORT} = $args->{mojoport} // $ENV{MOJO_PORT} // Mojo::IOLoop::Server->generate_port;
     $startingpid = $$;
-    $webapi      = OpenQA::Test::Utils::create_webapi($mojoport);
+    $webapi = OpenQA::Test::Utils::create_webapi($mojoport);
     return $mojoport;
 }
 
@@ -65,9 +66,9 @@ sub start_driver {
         my @chrome_option_keys = (qw(chromeOptions goog:chromeOptions));
 
         my %opts = (
-            base_url           => "http://localhost:$mojoport/",
-            default_finder     => 'css',
-            webelement_class   => 'Test::Selenium::Remote::WebElement',
+            base_url => "http://localhost:$mojoport/",
+            default_finder => 'css',
+            webelement_class => 'Test::Selenium::Remote::WebElement',
             extra_capabilities => {
                 loggingPrefs => {browser => 'ALL'},
                 map { $_ => {args => []} } @chrome_option_keys,
@@ -76,9 +77,12 @@ sub start_driver {
                 # generate Test::Most failure instead of croaking to preserve
                 # context but bail out to not have repeated entries for the
                 # same problem exceeded console scrollback buffers easily
-                my ($driver, $exception, $args) = @_;                   # uncoverable statement
+                my ($driver, $exception, $args) = @_;    # uncoverable statement
                 my $err = (split /\n/, $exception)[0] =~ s/Error while executing command: //r;   # uncoverable statement
-                BAIL_OUT($err . ' at ' . __FILE__ . ':' . __LINE__);                             # uncoverable statement
+                $err .= ' at ' . __FILE__ . ':' . __LINE__;    # uncoverable statement
+
+                # prevent aborting the complete test when interactively debugging
+                $INC{'perl5db.pl'} ? fail $err : confess($err);    # uncoverable statement
             },
         );
 
@@ -95,7 +99,7 @@ sub start_driver {
               for @chrome_option_keys;
         }
         my $startup_timeout = $ENV{OPENQA_SELENIUM_TEST_STARTUP_TIMEOUT} // 10;
-        $_driver           = Test::Selenium::Chrome->new(%opts, startup_timeout => $startup_timeout);
+        $_driver = Test::Selenium::Chrome->new(%opts, startup_timeout => $startup_timeout);
         $_driver->{is_wd3} = 0;    # ensure the Selenium::Remote::Driver instance uses JSON Wire protocol
         enable_timeout;
         # Scripts are considered stuck after this timeout
@@ -133,7 +137,7 @@ sub check_driver_modules {
     use Module::Load::Conditional qw(can_load);
     return can_load(
         modules => {
-            'Test::Selenium::Chrome'   => '1.20',
+            'Test::Selenium::Chrome' => '1.20',
             'Selenium::Remote::Driver' => undef,
         });
 }
@@ -151,16 +155,16 @@ sub _default_check_interval {
 }
 
 sub wait_for_ajax {
-    my (%args)         = @_;
+    my (%args) = @_;
     my $check_interval = _default_check_interval($args{interval});
-    my $timeout        = 60 * 5;
-    my $slept          = 0;
-    my $msg            = $args{msg} ? (': ' . $args{msg}) : '';
+    my $timeout = 60 * 5;
+    my $slept = 0;
+    my $msg = $args{msg} ? (': ' . $args{msg}) : '';
 
     while (!$_driver->execute_script('return window.jQuery && jQuery.active === 0')) {
         if ($timeout <= 0) {
             fail("Wait for jQuery timed out$msg");    # uncoverable statement
-            return undef;                             # uncoverable statement
+            return undef;    # uncoverable statement
         }
 
         $args{with_minion}->perform_jobs_in_foreground if $args{with_minion};
@@ -169,7 +173,7 @@ sub wait_for_ajax {
         sleep $check_interval;
         $slept = 1;
     }
-    pass("Wait for jQuery successful$msg");
+    note "Wait for jQuery successful$msg";
     return $slept;
 }
 
@@ -202,40 +206,34 @@ sub javascript_console_has_no_warnings_or_errors {
         }
 
         my $source = $log_entry->{source};
-        my $msg    = $log_entry->{message};
-        if ($source eq 'network') {
-            # ignore errors when gravatar not found
-            next if ($msg =~ qr/gravatar/);    # uncoverable statement
+        my $msg = $log_entry->{message};
+        # ignore when the proxied ws connection is closed; connection errors are tracked via the devel console
+        # anyways and when the test execution is over this kind of error is expected
+        next if ($msg =~ qr/ws\-proxy.*Close received/);
 
-            # ignore that needle editor in 33-developer_mode.t is not instantly available
-            next if ($msg =~ qr/tests\/1\/edit.*404/);    # uncoverable statement
+        # ignore "connection establishment" ws errors in ws_console.js; the ws server might just not be running yet
+        # and ws_console.js will retry
+        next if ($msg =~ qr/ws_console.*Error in connection establishment/);    # uncoverable statement
 
-            # FIXME: loading thumbs during live run causes 404. ignore for now
-            # (',' is a quotation mark here and '/' part of expression to match)
-            next if ($msg =~ qr,/thumb/, || $msg =~ qr,/.thumbs/,);    # uncoverable statement
+        # ignore errors when gravatar not found
+        next if ($msg =~ qr/gravatar/);    # uncoverable statement
 
-            # ignore error responses in 13-admin.t testing YAML errors
-            next if ($msg =~ qr/api\/v1\/exp.*\/job_templates_scheduling\/1003 - Failed.*/);    # uncoverable statement
-        }
-        elsif ($source eq 'javascript') {
-            # ignore when the proxied ws connection is closed; connection errors are tracked via the devel console
-            # anyways and when the test execution is over this kind of error is expected
-            next if ($msg =~ qr/ws\-proxy.*Close received/);
+        # ignore that needle editor in 33-developer_mode.t is not instantly available
+        next if ($msg =~ qr/tests\/1\/edit.*404/);    # uncoverable statement
 
-            # ignore "connection establishment" ws errors in ws_console.js; the ws server might just not be running yet
-            # and ws_console.js will retry
-            next if ($msg =~ qr/ws_console.*Error in connection establishment/);    # uncoverable statement
+        # FIXME: loading thumbs during live run causes 404. ignore for now
+        # (',' is a quotation mark here and '/' part of expression to match)
+        next if ($msg =~ qr,/thumb/, || $msg =~ qr,/.thumbs/,);    # uncoverable statement
 
+        # ignore error responses in 13-admin.t testing YAML errors
+        next if ($msg =~ qr/api\/v1\/exp.*\/job_templates_scheduling\/1003 - Failed.*/);    # uncoverable statement
             # FIXME: find the reason why Chromium says we are trying to send something over an already closed
             # WebSocket connection
-            next if ($msg =~ qr/Data frame received after close/);    # uncoverable statement
-        }
+        next if ($msg =~ qr/Data frame received after close/);    # uncoverable statement
         push(@errors, $log_entry);
     }
 
-    if (@errors) {
-        diag('javascript console output' . $test_name_suffix . ': ' . pp(\@errors));
-    }
+    diag "Unexpected Javascript console errors$test_name_suffix: " . pp(\@errors) if @errors;
     return scalar @errors eq 0;
 }
 
@@ -258,7 +256,7 @@ sub element_visible {
     is(scalar @elements, 1, $selector . ' present exactly once');
 
     my $element = $elements[0];
-    ok($element,                 $selector . ' exists') or return;
+    ok($element, $selector . ' exists') or return;
     ok($element->is_displayed(), $selector . ' visible');
 
     # assert the element's text
@@ -314,7 +312,7 @@ sub map_elements ($selector, $mapping) {
 
 sub wait_until {
     my ($check_function, $check_description, $timeout, $check_interval) = @_;
-    $timeout        //= 100;
+    $timeout //= 100;
     $check_interval //= .1;
 
     while (1) {
@@ -324,7 +322,7 @@ sub wait_until {
         }
         if ($timeout <= 0) {
             fail($check_description);    # uncoverable statement
-            return 0;                    # uncoverable statement
+            return 0;    # uncoverable statement
         }
         $timeout -= $check_interval;
         wait_for_ajax(msg => $check_description) or sleep $check_interval;
@@ -344,8 +342,8 @@ sub wait_until_element_gone {
 }
 
 sub wait_for_element {
-    my (%args)                = @_;
-    my $selector              = $args{selector};
+    my (%args) = @_;
+    my $selector = $args{selector};
     my $expected_is_displayed = $args{is_displayed};
 
     my $element;

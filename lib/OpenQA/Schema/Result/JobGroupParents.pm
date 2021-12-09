@@ -1,17 +1,5 @@
-# Copyright (C) 2016-2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Schema::Result::JobGroupParents;
 
@@ -31,56 +19,56 @@ __PACKAGE__->load_components(qw(Timestamps));
 
 __PACKAGE__->add_columns(
     id => {
-        data_type         => 'integer',
+        data_type => 'integer',
         is_auto_increment => 1,
     },
     name => {
-        data_type   => 'text',
+        data_type => 'text',
         is_nullable => 0,
     },
     size_limit_gb => {
-        data_type   => 'integer',
+        data_type => 'integer',
         is_nullable => 1,
     },
     exclusively_kept_asset_size => {
-        data_type   => 'bigint',
+        data_type => 'bigint',
         is_nullable => 1,
     },
     default_keep_logs_in_days => {
-        data_type   => 'integer',
+        data_type => 'integer',
         is_nullable => 1,
     },
     default_keep_important_logs_in_days => {
-        data_type   => 'integer',
+        data_type => 'integer',
         is_nullable => 1,
     },
     default_keep_results_in_days => {
-        data_type   => 'integer',
+        data_type => 'integer',
         is_nullable => 1,
     },
     default_keep_important_results_in_days => {
-        data_type   => 'integer',
+        data_type => 'integer',
         is_nullable => 1,
     },
     default_priority => {
-        data_type   => 'integer',
+        data_type => 'integer',
         is_nullable => 1,
     },
     sort_order => {
-        data_type   => 'integer',
+        data_type => 'integer',
         is_nullable => 1,
     },
     description => {
-        data_type   => 'text',
+        data_type => 'text',
         is_nullable => 1,
     },
     build_version_sort => {
-        data_type     => 'boolean',
+        data_type => 'boolean',
         default_value => 1,
-        is_nullable   => 0,
+        is_nullable => 0,
     },
     carry_over_bugrefs => {
-        data_type   => 'boolean',
+        data_type => 'boolean',
         is_nullable => 1,
     });
 

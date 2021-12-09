@@ -1,19 +1,7 @@
 #!/usr/bin/env perl
-# Copyright (C) 2014-2021 SUSE LLC
-# Copyright (C) 2016 Red Hat
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2021 SUSE LLC
+# Copyright 2016 Red Hat
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -32,9 +20,9 @@ OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 04-p
 
 my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
 
-my $gru_tasks        = $t->app->schema->resultset('GruTasks');
+my $gru_tasks = $t->app->schema->resultset('GruTasks');
 my $gru_dependencies = $t->app->schema->resultset('GruDependencies');
-my $test_suites      = $t->app->schema->resultset('TestSuites');
+my $test_suites = $t->app->schema->resultset('TestSuites');
 
 sub schedule_iso {
     my ($args, $status, $query_params) = @_;
@@ -135,7 +123,7 @@ $rsp = schedule_iso(
     {
         %params,
         KERNEL_DECOMPRESS_URL => 'http://localhost/nonexistvmlinuz',
-        KERNEL                => 'callitvmlinuz'
+        KERNEL => 'callitvmlinuz'
     });
 is($rsp->json->{count}, $expected_job_count, 'a regular ISO post creates the expected number of jobs');
 check_download_asset('non-existent kernel (with uncompression, custom name',
@@ -239,9 +227,9 @@ subtest 'create many download tasks when many test suites have different _URL' =
     my $gru_task_ids = get_gru_tasks($rsp->json->{ids});
     is scalar(keys %$gru_task_ids), 3, 'three download tasks were created';
     my $expected_download_tasks = {
-        'http://localhost/test.qcow2'          => [locate_asset('hdd', 'test.qcow2',          mustexist => 0)],
+        'http://localhost/test.qcow2' => [locate_asset('hdd', 'test.qcow2', mustexist => 0)],
         'http://localhost/test_textmode.qcow2' => [locate_asset('hdd', 'test_textmode.qcow2', mustexist => 0)],
-        'http://localhost/test_server.qcow2'   => [locate_asset('hdd', 'test_server.qcow2',   mustexist => 0)],
+        'http://localhost/test_server.qcow2' => [locate_asset('hdd', 'test_server.qcow2', mustexist => 0)],
     };
     is scalar(@$_), 1, 'the download task only blocks the related job' for (values %$gru_task_ids);
     my %created_download_tasks;
@@ -259,7 +247,7 @@ subtest 'create one download task when test suites have different destinations' 
     $rsp = schedule_iso({%iso, HDD_1_URL => 'http://localhost/test.qcow2'}, 200);
     is $rsp->json->{count}, $expected_job_count, 'ten job was scheduled';
     my $gru_dep_tasks = get_gru_tasks($rsp->json->{ids});
-    my @gru_task_ids  = keys %$gru_dep_tasks;
+    my @gru_task_ids = keys %$gru_dep_tasks;
     is scalar(@gru_task_ids), 1, 'only one download task was created';
     my $gru_task_id = $gru_task_ids[0];
     is scalar(@{$gru_dep_tasks->{$gru_task_id}}), 10, 'all jobs are blocked when specifying HDD_1_URL in command line';
@@ -268,9 +256,9 @@ subtest 'create one download task when test suites have different destinations' 
     my @destinations = sort @{$args->[1]};
     is_deeply \@destinations,
       [
-        locate_asset('hdd', 'test.qcow2',          mustexist => 0),
-        locate_asset('hdd', 'test_kde.qcow2',      mustexist => 0),
-        locate_asset('hdd', 'test_server.qcow2',   mustexist => 0),
+        locate_asset('hdd', 'test.qcow2', mustexist => 0),
+        locate_asset('hdd', 'test_kde.qcow2', mustexist => 0),
+        locate_asset('hdd', 'test_server.qcow2', mustexist => 0),
         locate_asset('hdd', 'test_textmode.qcow2', mustexist => 0)
       ],
       'one download task has 4 destinations';
@@ -283,7 +271,7 @@ subtest 'download task only blocks the related job when test suites have differe
     $rsp = schedule_iso({%iso, MACHINE => '64bit'}, 200);
     is $rsp->json->{count}, 6, 'six jobs have been scheduled';
     my $gru_dep_tasks = get_gru_tasks($rsp->json->{ids});
-    my @gru_task_ids  = keys %$gru_dep_tasks;
+    my @gru_task_ids = keys %$gru_dep_tasks;
     is scalar(@gru_task_ids), 1, 'only one download task was created';
     is scalar(@{$gru_dep_tasks->{$gru_task_ids[0]}}), 3, 'one download task was created and it blocked 3 jobs';
 };

@@ -1,17 +1,5 @@
-# Copyright (C) 2018 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Parser::Format::TAP;
 use Mojo::Base 'OpenQA::Parser::Format::Base';
@@ -29,9 +17,9 @@ sub parse {
     my $tap = TAP::Parser->new({tap => $TAP});
     confess "Failed " . $tap->parse_errors if $tap->parse_errors;
     my $test = {
-        flags    => {},
+        flags => {},
         category => "TAP",
-        name     => 'Extra test from TAP',
+        name => 'Extra test from TAP',
     };
     my $details;
 
@@ -39,8 +27,8 @@ sub parse {
         OpenQA::Parser::Result->new(
             {
                 details => [],
-                dents   => 0,
-                result  => 'passed'
+                dents => 0,
+                result => 'passed'
             }));
     my $m = 0;
     while (my $res = $tap->next) {
@@ -65,12 +53,12 @@ sub parse {
         next if $result->type eq 'plan';    # Skip plans for now
         next if $result->type ne 'test';
 
-        my $t_filename    = "TAP-@{[$test->{name}]}-$m.txt";
+        my $t_filename = "TAP-@{[$test->{name}]}-$m.txt";
         my $t_description = $result->description;
         $t_description =~ s/^- //;
         $details = {
-            text   => $t_filename,
-            title  => $t_description,
+            text => $t_filename,
+            title => $t_description,
             result => ($result->is_actual_ok) ? 'ok' : 'fail',
         };
         $self->steps->{result} = 'fail' if !$result->is_actual_ok;    #Mark the suite as failed if it was not ok.
@@ -81,7 +69,7 @@ sub parse {
         push @{$self->steps->{details}}, $data;
         $self->_add_output(
             {
-                file    => $t_filename,
+                file => $t_filename,
                 content => $res->raw
             });
         ++$m;

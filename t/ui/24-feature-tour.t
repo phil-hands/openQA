@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2015-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -24,11 +12,11 @@ use OpenQA::Test::TimeLimit '12';
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 
-my $test_case   = OpenQA::Test::Case->new;
+my $test_case = OpenQA::Test::Case->new;
 my $schema_name = OpenQA::Test::Database->generate_schema_name;
-my $schema      = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '03-users.pl');
-my $t           = Test::Mojo->new('OpenQA::WebAPI');
-my $users       = $schema->resultset('Users');
+my $schema = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '03-users.pl');
+my $t = Test::Mojo->new('OpenQA::WebAPI');
+my $users = $schema->resultset('Users');
 
 driver_missing unless my $driver = call_driver;
 disable_timeout;
@@ -60,7 +48,7 @@ subtest 'tour can be completely dismissed' => sub {
     $driver->find_element_by_id('dont-notify')->click();
     $driver->find_element_by_id('tour-end')->click();
     wait_for_ajax(msg => 'dismissal submitted');
-    is(scalar(@{$driver->find_elements('#step-0')}),                  0, 'tour gone');
+    is(scalar(@{$driver->find_elements('#step-0')}), 0, 'tour gone');
     is($users->find({nickname => 'otherdeveloper'})->feature_version, 0, 'feature version set to 0');
     $driver->refresh();
     is(scalar(@{$driver->find_elements('#step-0')}), 0, 'tour not shown again');

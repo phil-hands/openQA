@@ -1,17 +1,5 @@
-# Copyright (C) 2014-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Auth::OpenID;
 use Mojo::Base -base;
@@ -29,8 +17,8 @@ sub auth_login {
     $url =~ s,^http://,https://, if $self->app->config->{openid}->{httpsonly};
 
     my $csr = Net::OpenID::Consumer->new(
-        ua              => LWP::UserAgent->new,
-        required_root   => $url,
+        ua => LWP::UserAgent->new,
+        required_root => $url,
         consumer_secret => $self->app->config->{_openid_secret},
     );
 
@@ -49,13 +37,13 @@ sub auth_login {
     $claimed_id->set_extension_args(
         'http://openid.net/srv/ax/1.0',
         {
-            mode             => 'fetch_request',
-            required         => 'email,fullname,nickname,firstname,lastname',
-            'type.email'     => "http://schema.openid.net/contact/email",
-            'type.fullname'  => "http://axschema.org/namePerson",
-            'type.nickname'  => "http://axschema.org/namePerson/friendly",
+            mode => 'fetch_request',
+            required => 'email,fullname,nickname,firstname,lastname',
+            'type.email' => "http://schema.openid.net/contact/email",
+            'type.fullname' => "http://axschema.org/namePerson",
+            'type.nickname' => "http://axschema.org/namePerson/friendly",
             'type.firstname' => 'http://axschema.org/namePerson/first',
-            'type.lastname'  => 'http://axschema.org/namePerson/last',
+            'type.lastname' => 'http://axschema.org/namePerson/last',
         },
     );
 
@@ -69,28 +57,28 @@ sub auth_login {
     }
     my $check_url = $claimed_id->check_url(
         delayed_return => 1,
-        return_to      => $return_url,
-        trust_root     => qq{$url/},
+        return_to => $return_url,
+        trust_root => qq{$url/},
     );
     return (redirect => $check_url, error => 0) if $check_url;
-    return (error    => $csr->err);
+    return (error => $csr->err);
 }
 
 sub auth_response {
     my ($self) = @_;
 
     my %params = @{$self->req->params->pairs};
-    my $url    = $self->app->config->{global}->{base_url} || $self->req->url->base;
+    my $url = $self->app->config->{global}->{base_url} || $self->req->url->base;
     return (error => 'Got response on http but https is forced. MOJO_REVERSE_PROXY not set?')
       if ($self->app->config->{openid}->{httpsonly} && $url !~ /^https:\/\//);
     %params = map { $_ => URI::Escape::uri_unescape($params{$_}) } keys %params;
 
     my $csr = Net::OpenID::Consumer->new(
-        debug           => sub { $self->app->log->debug("Net::OpenID::Consumer: " . join(' ', @_)); },
-        ua              => LWP::UserAgent->new,
-        required_root   => $url,
+        debug => sub { $self->app->log->debug("Net::OpenID::Consumer: " . join(' ', @_)); },
+        ua => LWP::UserAgent->new,
+        required_root => $url,
         consumer_secret => $self->app->config->{_openid_secret},
-        args            => \%params,
+        args => \%params,
     );
 
     my $err_handler = sub {
@@ -114,12 +102,12 @@ sub auth_response {
             return (redirect => $setup_url, error => 0);
         },
         cancelled => sub { },    # Do something appropriate when the user hits "cancel" at the OP
-        verified  => sub {
+        verified => sub {
             my $vident = shift;
-            my $sreg   = $vident->signed_extension_fields('http://openid.net/extensions/sreg/1.1');
-            my $ax     = $vident->signed_extension_fields('http://openid.net/srv/ax/1.0');
+            my $sreg = $vident->signed_extension_fields('http://openid.net/extensions/sreg/1.1');
+            my $ax = $vident->signed_extension_fields('http://openid.net/srv/ax/1.0');
 
-            my $email    = $sreg->{email}    || $ax->{'value.email'}    || 'nobody@example.com';
+            my $email = $sreg->{email} || $ax->{'value.email'} || 'nobody@example.com';
             my $nickname = $sreg->{nickname} || $ax->{'value.nickname'} || $ax->{'value.firstname'};
             unless ($nickname) {
                 my @a = split(/\/([^\/]+)$/, $vident->{identity});
@@ -140,7 +128,7 @@ sub auth_response {
 
             my $user = $self->schema->resultset('Users')->create_user(
                 $vident->{identity},
-                email    => $email,
+                email => $email,
                 nickname => $nickname,
                 fullname => $fullname
             );

@@ -1,17 +1,5 @@
-# Copyright (C) 2019-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -26,7 +14,7 @@ my ($t, $tempdir, $home, $params) = setup_obs_rsync_test;
 sub _el {
     my ($project, $run, $file) = @_;
     return qq{a[href="/admin/obs_rsync/$project/runs/$run/download/$file"]} if $file;
-    return qq{a[href="/admin/obs_rsync/$project/runs/$run"]}                if $run;
+    return qq{a[href="/admin/obs_rsync/$project/runs/$run"]} if $run;
     return qq{a[href="/admin/obs_rsync/$project"]};
 }
 
@@ -40,10 +28,10 @@ sub test_project {
     $t->get_ok('/admin/obs_rsync')->status_is(200, 'index status')->element_exists(_el($project))
       ->content_unlike(qr/script\<\/a\>/);
 
-    my $alias  = $project;
+    my $alias = $project;
     my $alias1 = $project;
     if ($batch) {
-        $alias  = "$project|$batch";
+        $alias = "$project|$batch";
         $alias1 = $project . '%7C' . $batch;
         $t->get_ok("/admin/obs_rsync/$project")->status_is(200, 'parent project status')
           ->element_exists_not(_el1($project, 'rsync_iso.cmd'))->element_exists_not(_el1($project, 'rsync_repo.cmd'))

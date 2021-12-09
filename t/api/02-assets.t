@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2014-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -55,20 +43,20 @@ touch_isos [$iso1, $iso2];
 
 my $listing = [
     {
-        name            => $iso1,
-        type            => "iso",
-        size            => undef,
-        checksum        => undef,
+        name => $iso1,
+        type => "iso",
+        size => undef,
+        checksum => undef,
         last_use_job_id => undef,
-        fixed           => 0,
+        fixed => 0,
     },
     {
-        name            => $iso2,
-        type            => "iso",
-        size            => undef,
-        checksum        => undef,
+        name => $iso2,
+        type => "iso",
+        size => undef,
+        checksum => undef,
         last_use_job_id => undef,
-        fixed           => 0,
+        fixed => 0,
     },
 ];
 
@@ -137,11 +125,11 @@ $t->get_ok('/api/v1/assets/iso')->status_is(404, 'getting asset without name is 
 $t->delete_ok('/api/v1/assets/iso')->status_is(404, 'deleting without name is an error');
 
 # trigger cleanup task
-my $gru       = $t->app->gru;
+my $gru = $t->app->gru;
 my $gru_tasks = $t->app->schema->resultset('GruTasks');
 $t->app->minion->reset;    # be sure no 'limit_assets' tasks have already been enqueued
 is($gru->count_jobs(limit_assets => ['inactive']), 0, 'is_task_active returns 0 if not tasks enqueued');
-is($gru_tasks->count,                              0, 'no gru tasks present so far');
+is($gru_tasks->count, 0, 'no gru tasks present so far');
 $t->post_ok('/api/v1/assets/cleanup')->status_is(200)->json_is('/status' => 'ok', 'status ok');
 is($gru_tasks->count, 1, 'gru task added')
   and is($gru_tasks->first->taskname, 'limit_assets', 'right gru task added');
@@ -157,7 +145,7 @@ client($t);
 $t->delete_ok('/api/v1/assets/' . ($listing->[1]->{id} + 1))->status_is(403, 'asset deletion forbidden for operator');
 $t->delete_ok('/api/v1/assets/iso/' . $iso1)->status_is(403, 'asset deletion forbidden for operator');
 $t->get_ok('/api/v1/assets/' . ($listing->[1]->{id} + 1))->status_is(200, 'asset is still there');
-ok(-e iso_path($iso1),      'iso file 1 is still there');
+ok(-e iso_path($iso1), 'iso file 1 is still there');
 ok(unlink(iso_path($iso1)), 'remove iso file 1 manually');
 
 done_testing();

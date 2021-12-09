@@ -1,44 +1,34 @@
-# Copyright (C) 2016-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Plugin::AMQP;
-use Mojo::Base 'Mojolicious::Plugin';
+use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
-use Mojo::IOLoop;
-use OpenQA::Log 'log_debug';
+use OpenQA::Log qw(log_debug log_error);
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Events;
+use Mojo::IOLoop;
 use Mojo::RabbitMQ::Client::Publisher;
+use Mojo::URL;
+use Scalar::Util qw(looks_like_number);
 
-my @job_events     = qw(job_create job_delete job_cancel job_restart job_update_result job_done);
+my @job_events = qw(job_create job_delete job_cancel job_restart job_update_result job_done);
 my @comment_events = qw(comment_create comment_update comment_delete);
 
 sub new {
     my $class = shift;
-    my $self  = $class->SUPER::new(@_);
-    $self->{app}     = undef;
-    $self->{config}  = undef;
-    $self->{client}  = undef;
+    my $self = $class->SUPER::new(@_);
+    $self->{app} = undef;
+    $self->{config} = undef;
+    $self->{client} = undef;
     $self->{channel} = undef;
     return $self;
 }
 
 sub register {
     my $self = shift;
-    $self->{app}    = shift;
+    $self->{app} = shift;
     $self->{config} = $self->{app}->config;
     Mojo::IOLoop->singleton->next_tick(
         sub {
@@ -60,30 +50,35 @@ sub log_event {
     $event =~ s/_/\./;
 
     my $prefix = $self->{config}->{amqp}{topic_prefix};
-    my $topic  = $prefix ? $prefix . '.' . $event : $event;
-
-    # separate function for tests
-    $self->publish_amqp($topic, $event_data);
+    $self->publish_amqp($prefix ? "$prefix.$event" : $event, $event_data);
 }
 
-sub publish_amqp {
-    my ($self, $topic, $event_data, $headers) = @_;
-    $headers //= {};
-    die "publish_amqp headers must be a hashref!" unless (ref($headers) eq 'HASH');
+sub publish_amqp ($self, $topic, $event_data, $headers = {}, $remaining_attempts = undef, $retry_delay = undef) {
+    return log_error "Publishing $topic failed: headers are not a hashref" unless ref $headers eq 'HASH';
 
+    # create publisher and keep reference to avoid early destruction
     log_debug("Sending AMQP event: $topic");
-    my $publisher = Mojo::RabbitMQ::Client::Publisher->new(
-        url => $self->{config}->{amqp}{url} . "?exchange=" . $self->{config}->{amqp}{exchange});
+    my $config = $self->{config}->{amqp};
+    my $url = Mojo::URL->new($config->{url});
+    $url->query({exchange => $config->{exchange}});
+    # append optional parameters
+    $url->query([cacertfile => $config->{cacertfile}]) if ($config->{cacertfile});
+    $url->query([certfile => $config->{certfile}]) if ($config->{certfile});
+    $url->query([keyfile => $config->{keyfile}]) if ($config->{keyfile});
+    $url = $url->to_unsafe_string;
+    my $publisher = Mojo::RabbitMQ::Client::Publisher->new(url => $url);
+    log_debug("AMQP URL: $url");
 
-    # A hard reference to the publisher object needs to be kept until the event
-    # has been published asynchronously, or it gets destroyed too early
-    $publisher->publish_p($event_data, $headers, routing_key => $topic)->then(
-        sub {
-            log_debug "$topic published";
-        }
-    )->catch(
-        sub {
-            die "Publishing $topic failed";
+    $remaining_attempts //= $config->{publish_attempts};
+    $retry_delay //= $config->{publish_retry_delay};
+    $publisher->publish_p($event_data, $headers, routing_key => $topic)->then(sub { log_debug "$topic published" })
+      ->catch(
+        sub ($error) {
+            my $left = looks_like_number $remaining_attempts && $remaining_attempts > 1 ? $remaining_attempts - 1 : 0;
+            my $delay = $retry_delay * $config->{publish_retry_delay_factor};
+            log_error "Publishing $topic failed: $error ($left attempts left)";
+            my $retry_function = sub ($loop) { $self->publish_amqp($topic, $event_data, $headers, $left, $delay) };
+            Mojo::IOLoop->timer($retry_delay => $retry_function) if $left;
         })->finally(sub { undef $publisher });
 }
 
@@ -92,13 +87,13 @@ sub on_job_event {
 
     my ($user_id, $connection_id, $event, $event_data) = @$args;
     my $jobs = $self->{app}->schema->resultset('Jobs');
-    my $job  = $jobs->find({id => $event_data->{id}});
+    my $job = $jobs->find({id => $event_data->{id}});
 
     # find count of pending jobs for the same build to know whether all tests for a build are done
     $event_data->{remaining} = $jobs->search(
         {
             'me.BUILD' => $job->BUILD,
-            state      => [OpenQA::Jobs::Constants::PENDING_STATES],
+            state => [OpenQA::Jobs::Constants::PENDING_STATES],
         })->count;
 
     # add various useful properties for consumers if not there already
@@ -130,9 +125,9 @@ sub on_comment_event {
     # just send the hash already used for JSON representation
     my $hash = $comment->hash;
     # also include comment id, job_id, and group_id
-    $hash->{id}              = $comment->id;
-    $hash->{job_id}          = $comment->job_id;
-    $hash->{group_id}        = $comment->group_id;
+    $hash->{id} = $comment->id;
+    $hash->{job_id} = $comment->job_id;
+    $hash->{group_id} = $comment->group_id;
     $hash->{parent_group_id} = $comment->parent_group_id;
 
     $self->log_event($event, $hash);

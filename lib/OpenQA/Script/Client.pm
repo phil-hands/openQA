@@ -1,16 +1,5 @@
-# Copyright (C) 2018-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
+# Copyright 2018-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Script::Client;
 
@@ -44,8 +33,8 @@ sub handle_result ($options, $res) {
     if ($rescode >= 200 && $rescode <= 299) {
         printf(STDERR "%s - %s\n", $rescode, $message) if $rescode > 200;
         my $content_type = $res->headers->content_type;
-        my $json         = $res->json;
-        my $body         = $res->body;
+        my $json = $res->json;
+        my $body = $res->body;
         if ($options->{'json-output'}) {
             if ($content_type =~ m{text/yaml}) {
                 my $yaml = load_yaml(string => $body);
@@ -100,7 +89,7 @@ sub url_from_host ($host) {
 sub run ($options, $operation, @args) {
     $options->{host} ||= 'localhost';
     $apibase = $options->{apibase} if $options->{apibase};
-    my $path   = prepend_api_base($operation);
+    my $path = prepend_api_base($operation);
     my $method = 'get';
     my %params;
 
@@ -160,9 +149,9 @@ sub run ($options, $operation, @args) {
     # the rest api directly.
     if ($options->{archive}) {
         my $res;
-        $options->{path}    = $path;
-        $options->{url}     = $url;
-        $options->{params}  = \%params;
+        $options->{path} = $path;
+        $options->{url} = $url;
+        $options->{params} = \%params;
         $options->{params2} = @ARGV;
         eval { $res = $client->archive->run($options) };
         die "ERROR: $@ \n", $@ if $@;
@@ -171,7 +160,7 @@ sub run ($options, $operation, @args) {
     elsif ($operation eq 'jobs/overview/restart') {
         $url->path(prepend_api_base('jobs/overview'));
         my $relevant_jobs = handle_result($options, $client->get($url)->res);
-        my @job_ids       = map { $_->{id} } @$relevant_jobs;
+        my @job_ids = map { $_->{id} } @$relevant_jobs;
         $url->path(prepend_api_base('jobs/restart'));
         $url->query(Mojo::Parameters->new);
         $url->query(jobs => \@job_ids);

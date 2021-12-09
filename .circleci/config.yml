@@ -3,20 +3,20 @@ version: 2
 aliases:
   - &restore_cache
     keys:
-      - v1-{{ checksum ".circleci/ci-packages.txt" }}-{{ checksum ".circleci/build_cache.sh" }}
+      - v1-{{ checksum "tools/ci/ci-packages.txt" }}-{{ checksum "tools/ci/build_cache.sh" }}
 
   - &save_cache
-    key: v1-{{ checksum ".circleci/ci-packages.txt" }}-{{ checksum ".circleci/build_cache.sh" }}
+    key: v1-{{ checksum "tools/ci/ci-packages.txt" }}-{{ checksum "tools/ci/build_cache.sh" }}
     paths:
       - "/var/cache/zypp/packages"
       - "~/project/assets/cache"
 
   - &restore_fullstack_cache
     keys:
-      - v1-{{ checksum ".circleci/autoinst.sha" }}-{{ checksum ".circleci/build_autoinst.sh" }}
+      - v1-{{ checksum "tools/ci/autoinst.sha" }}-{{ checksum "tools/ci/build_autoinst.sh" }}
 
   - &save_fullstack_cache
-    key: v1-{{ checksum ".circleci/autoinst.sha" }}-{{ checksum ".circleci/build_autoinst.sh" }}
+    key: v1-{{ checksum "tools/ci/autoinst.sha" }}-{{ checksum "tools/ci/build_autoinst.sh" }}
     paths:
       - "/var/cache/autoinst"
 
@@ -46,13 +46,7 @@ aliases:
 
   - &install_cached_packages
     name: Install cached packages
-    command: .circleci/build_or_install_from_cache.sh
-
-  - &test_junit
-    name: "Enabling JUnit output for Perl tests"
-    command: |
-      mkdir -p test-results/junit
-      echo 'export JUNIT_OUTPUT_FILE=test-results/junit/${CIRCLE_JOB}.xml' >> $BASH_ENV
+    command: tools/ci/build_or_install_from_cache.sh
 
   - &store_test_results
     path: test-results/junit
@@ -73,19 +67,12 @@ aliases:
         sudo cp -r /var/cache/autoinst ../os-autoinst
         sudo chown -R 1000 ../os-autoinst/t/data
       else # only in local run
-         [ -d ../os-autoinst ] || { sudo mkdir ../os-autoinst && sudo chown -R 1000 ../os-autoinst; }
-         bash .circleci/build_autoinst.sh ../os-autoinst $(cat .circleci/autoinst.sha)
+         tools/ci/build_autoinst.sh
        fi
 
   - &make_test
     name: "Running unit tests"
-    command: |
-      export COVERAGE=1
-      export COVERDB_SUFFIX="_${CIRCLE_JOB}"
-      # circleCI can be particularly slow sometimes since some time around 2021-06
-      export OPENQA_TEST_TIMEOUT_SCALE_CI=3
-      export EXTRA_PROVE_ARGS="-v"
-      make test-$CIRCLE_JOB
+    command: tools/ci/run_unit_tests.sh $CIRCLE_JOB
     no_output_timeout: 50m
 
   - &git_token_authentication
@@ -99,15 +86,6 @@ images:
   - &docker_config
     user: squamata
     environment:
-      JUNIT_PACKAGE: openQA
-      JUNIT_NAME_MANGLE: perl
-      # Be aware that this option saves all verbose output caught by "prove"
-      # into test artifact files whereas the error output is still shows up
-      # where prove is executed to show initial context in case of failed
-      # tests or other problems. The "--merge" option of prove would loose
-      # that context in the prove calling context.
-      PERL_TEST_HARNESS_DUMP_TAP: test-results
-      HARNESS: --harness TAP::Harness::JUnit --timer
       COMMIT_AUTHOR_EMAIL: skynet@open.qa
       # Exclude container specific tests needing a container runtime
       # environment, using github actions instead
@@ -132,12 +110,12 @@ jobs:
           name: "Setup git"
           command: |
             git config user.email "${COMMIT_AUTHOR_EMAIL}"
-            git config user.name "Dependency bot circleci"
+            git config user.name "Dependency bot CI"
             git config core.autocrlf true
       - run: *git_token_authentication
       - run:
           name: "Prepare dependency PR"
-          command: .circleci/prepare_dependency_pr.sh
+          command: tools/ci/prepare_dependency_pr.sh
 
   cache:
     docker:
@@ -145,7 +123,7 @@ jobs:
     steps:
       - checkout
       - run: ls -la && pwd
-      - run: cat .circleci/ci-packages.txt
+      - run: cat tools/ci/ci-packages.txt
       - run: *chown_hack_for_cache
       - restore_cache: *restore_cache
       - run: *check_cache
@@ -154,7 +132,7 @@ jobs:
           name: "Generate packaged assets"
           command: |
             if [ ! -d /var/cache/zypp/packages/openQA ]; then
-              bash -x .circleci/build_cache.sh
+              bash -x tools/ci/build_cache.sh
               tools/generate-packed-assets
             fi
       - save_cache: *save_cache
@@ -174,7 +152,7 @@ jobs:
           name: "Build os-autoinst if not cached"
           command: |
             if [ ! -d /var/cache/autoinst/t ]; then
-              bash -x .circleci/build_autoinst.sh "/var/cache/autoinst" $(cat .circleci/autoinst.sha)
+              bash -x tools/ci/build_autoinst.sh "/var/cache/autoinst"
             fi
       - save_cache: *save_fullstack_cache
 
@@ -188,7 +166,6 @@ jobs:
       - run: *check_cache
       - store_artifacts: *store_logs
       - run: *install_cached_packages
-      - run: *test_junit
       - run: *make_test
       - persist_to_workspace:
           root: .
@@ -210,7 +187,6 @@ jobs:
       - store_artifacts: *store_logs
       - run: *install_cached_packages
       - run: *build_autoinst
-      - run: *test_junit
       - run: *make_test
       - persist_to_workspace:
           root: .
@@ -256,7 +232,7 @@ jobs:
       - run: make coverage-report-html
       - store_artifacts: *store_cover_db
       - run: make coverage-report-codecov
-      - run: bash <(curl -s https://codecov.io/bash)
+      - run: curl -O https://uploader.codecov.io/latest/linux/codecov && chmod +x codecov && ./codecov
 
   build-docs: &docs-template
     name: "Generating docs"
@@ -270,7 +246,7 @@ jobs:
       - store_artifacts: *store_logs
       - run: *install_cached_packages
       - run: *git_token_authentication
-      - run: tools/build-docs-ci
+      - run: tools/ci/build-docs
 
   build-docs-nightly:
     <<: *docs-template

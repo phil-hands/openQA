@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2016-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -94,7 +82,7 @@ $search->clear;
 $search->send_keys('older:today');
 wait_for_data_table;
 @entries = $driver->find_child_elements($table, 'tbody/tr/td', 'xpath');
-is(scalar @entries,                     1,                  'one element when filtered by yesterday time');
+is(scalar @entries, 1, 'one element when filtered by yesterday time');
 is($entries[0]->get_attribute('class'), 'dataTables_empty', 'but datatables are empty');
 $search->clear;
 
@@ -107,14 +95,14 @@ is(scalar @entries, 2, 'elements when filtered by combination');
 subtest 'clickable events' => sub {
     # Populate database via the API to add events without hard-coding the format here
     my $auth = {'X-CSRF-Token' => $t->ua->get($url . '/tests')->res->dom->at('meta[name=csrf-token]')->attr('content')};
-    $t->post_ok($url . '/api/v1/machines',    $auth => form => {name => 'foo', backend => 'qemu'})->status_is(200);
+    $t->post_ok($url . '/api/v1/machines', $auth => form => {name => 'foo', backend => 'qemu'})->status_is(200);
     $t->post_ok($url . '/api/v1/test_suites', $auth => form => {name => 'testsuite'})->status_is(200);
     $t->post_ok(
         $url . '/api/v1/products',
         $auth => form => {
-            arch    => 'x86_64',
-            distri  => 'opensuse',
-            flavor  => 'DVD',
+            arch => 'x86_64',
+            distri => 'opensuse',
+            flavor => 'DVD',
             version => '13.2',
         })->status_is(200);
     ok OpenQA::Test::Case::find_most_recent_event($t->app->schema, 'table_create'), 'event emitted';
@@ -124,7 +112,7 @@ subtest 'clickable events' => sub {
     $search = $driver->find_element('#audit_log_table_filter input.form-control');
     $search->send_keys('event:table_create');
     wait_for_data_table;
-    $table   = $driver->find_element_by_id('audit_log_table');
+    $table = $driver->find_element_by_id('audit_log_table');
     @entries = $driver->find_child_elements($table, 'tbody/tr', 'xpath');
     is(scalar @entries, 3, 'three elements') or return diag $_->get_text for @entries;
     ok($entries[0]->child('.audit_event_details'), 'event detail link present');

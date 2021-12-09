@@ -1,17 +1,5 @@
-# Copyright (c) 2015-2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::API::V1::Locks;
 use Mojo::Base 'Mojolicious::Controller';
@@ -48,7 +36,7 @@ code of 200 on success, 410 on error and 409 on mutex unavailable.
 sub mutex_action {
     my ($self) = @_;
 
-    my $name  = $self->stash('name');
+    my $name = $self->stash('name');
     my $jobid = $self->stash('job_id');
 
     my $validation = $self->validation;
@@ -57,12 +45,12 @@ sub mutex_action {
     return $self->reply->validation_error if $validation->has_error;
 
     my $action = $validation->param('action');
-    my $where  = $validation->param('where') // '';
+    my $where = $validation->param('where') // '';
     my $res;
     if ($action eq 'lock') { $res = OpenQA::Resource::Locks::lock($name, $jobid, $where) }
-    else                   { $res = OpenQA::Resource::Locks::unlock($name, $jobid, $where) }
+    else { $res = OpenQA::Resource::Locks::unlock($name, $jobid, $where) }
 
-    return $self->render(text => 'ack',  status => 200) if $res > 0;
+    return $self->render(text => 'ack', status => 200) if $res > 0;
     return $self->render(text => 'nack', status => 410) if $res < 0;
     return $self->render(text => 'nack', status => 409);
 }
@@ -90,7 +78,7 @@ sub mutex_create {
     my $name = $validation->param('name');
 
     my $res = OpenQA::Resource::Locks::create($name, $jobid);
-    return $self->render(text => 'ack',  status => 200) if $res;
+    return $self->render(text => 'ack', status => 200) if $res;
     return $self->render(text => 'nack', status => 409);
 }
 
@@ -110,19 +98,19 @@ sub barrier_wait {
     my ($self) = @_;
 
     my $jobid = $self->stash('job_id');
-    my $name  = $self->stash('name');
+    my $name = $self->stash('name');
 
     my $validation = $self->validation;
     $validation->optional('where')->like(qr/^[0-9]+$/);
     $validation->optional('check_dead_job')->like(qr/^[0-9]+$/);
     return $self->reply->validation_error if $validation->has_error;
 
-    my $where          = $validation->param('where')          // '';
+    my $where = $validation->param('where') // '';
     my $check_dead_job = $validation->param('check_dead_job') // 0;
 
     my $res = OpenQA::Resource::Locks::barrier_wait($name, $jobid, $where, $check_dead_job);
 
-    return $self->render(text => 'ack',  status => 200) if $res > 0;
+    return $self->render(text => 'ack', status => 200) if $res > 0;
     return $self->render(text => 'nack', status => 410) if $res < 0;
     return $self->render(text => 'nack', status => 409);
 }
@@ -149,10 +137,10 @@ sub barrier_create {
     return $self->reply->validation_error if $validation->has_error;
 
     my $tasks = $validation->param('tasks');
-    my $name  = $validation->param('name');
+    my $name = $validation->param('name');
 
     my $res = OpenQA::Resource::Locks::barrier_create($name, $jobid, $tasks);
-    return $self->render(text => 'ack',  status => 200) if $res;
+    return $self->render(text => 'ack', status => 200) if $res;
     return $self->render(text => 'nack', status => 409);
 }
 
@@ -170,14 +158,14 @@ sub barrier_destroy {
     my ($self) = @_;
 
     my $jobid = $self->stash('job_id');
-    my $name  = $self->stash('name');
+    my $name = $self->stash('name');
 
     my $validation = $self->validation;
     $validation->optional('where')->like(qr/^[0-9]+$/);
     return $self->reply->validation_error if $validation->has_error;
 
     my $where = $validation->param('where') // '';
-    my $res   = OpenQA::Resource::Locks::barrier_destroy($name, $jobid, $where);
+    my $res = OpenQA::Resource::Locks::barrier_destroy($name, $jobid, $where);
 
     return $self->render(text => 'ack', status => 200);
 }

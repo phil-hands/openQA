@@ -1,17 +1,5 @@
-# Copyright (C) 2020-2021 LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020-2021 LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Schema::ResultSet::Comments;
 
@@ -37,7 +25,7 @@ sub referenced_bugs {
     my ($self) = @_;
 
     my $comments = $self->search({-not => {job_id => undef}});
-    my %bugrefs  = map { $_ => 1 } map { @{find_bugrefs($_->text)} } $comments->all;
+    my %bugrefs = map { $_ => 1 } map { @{find_bugrefs($_->text)} } $comments->all;
     return \%bugrefs;
 }
 
@@ -58,9 +46,9 @@ if you need the Bug objects themselves.
 =cut
 
 sub comment_data_for_jobs ($self, $jobs, $args = {}) {
-    my @job_ids  = map { $_->id } ref $jobs eq 'ARRAY' ? @$jobs : $jobs->all;
+    my @job_ids = map { $_->id } ref $jobs eq 'ARRAY' ? @$jobs : $jobs->all;
     my $comments = $self->search({job_id => {in => \@job_ids}}, {order_by => 'me.id', select => [qw(text job_id)]});
-    my $bugs     = $self->result_source->schema->resultset('Bugs');
+    my $bugs = $self->result_source->schema->resultset('Bugs');
 
     my (%res, %bugdetails);
     while (my $comment = $comments->next) {
@@ -72,10 +60,10 @@ sub comment_data_for_jobs ($self, $jobs, $args = {}) {
                 $bugs_of_job->{$bug} = 1;
             }
             $res->{bugdetails} = \%bugdetails;
-            $res->{reviewed}   = 1;
+            $res->{reviewed} = 1;
         }
         elsif (my $label = $comment->label) {
-            $res->{label}    = $label;
+            $res->{label} = $label;
             $res->{reviewed} = 1;
         }
         else {

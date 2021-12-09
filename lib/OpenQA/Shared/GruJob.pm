@@ -1,17 +1,5 @@
-# Copyright (C) 2018-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Shared::GruJob;
 use Mojo::Base 'Minion::Job';
@@ -22,12 +10,12 @@ sub execute {
     my $self = shift;
 
     my $gru_id = $self->info->{notes}{gru_id};
-    my $err    = $self->SUPER::execute;
+    my $err = $self->SUPER::execute;
 
     # Non-Gru tasks
     return $err unless $gru_id;
 
-    my $info  = $self->info;
+    my $info = $self->info;
     my $state = $info->{state};
     if ($state eq 'failed' || defined $err) {
         $err //= $info->{result};

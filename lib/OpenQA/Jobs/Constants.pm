@@ -1,20 +1,8 @@
-# Copyright (C) 2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Jobs::Constants;
-use Mojo::Base -base;
+use Mojo::Base -base, -signatures;
 
 use Exporter 'import';
 
@@ -49,33 +37,34 @@ use constant STATES => (SCHEDULED, ASSIGNED, SETUP, RUNNING, UPLOADING, DONE, CA
 # That is usually the case for jobs SKIPPED due to failed chained dependencies (*not* directly chained dependencies).
 
 # "meta" states
-use constant PENDING_STATES       => (SCHEDULED, ASSIGNED, SETUP,   RUNNING, UPLOADING);
-use constant EXECUTION_STATES     => (ASSIGNED,  SETUP,    RUNNING, UPLOADING);
+use constant PENDING_STATES => (SCHEDULED, ASSIGNED, SETUP, RUNNING, UPLOADING);
+use constant EXECUTION_STATES => (ASSIGNED, SETUP, RUNNING, UPLOADING);
 use constant PRE_EXECUTION_STATES => (SCHEDULED);
-use constant PRISTINE_STATES      => (SCHEDULED, ASSIGNED);    # no worker reported any updates/results so far
-use constant FINAL_STATES         => (DONE,      CANCELLED);
+use constant PRISTINE_STATES => (SCHEDULED, ASSIGNED);    # no worker reported any updates/results so far
+use constant FINAL_STATES => (DONE, CANCELLED);
 use constant {
     PRE_EXECUTION => 'pre_execution',
-    EXECUTION     => 'execution',
-    FINAL         => 'final',
+    EXECUTION => 'execution',
+    FINAL => 'final',
 };
 
 # results for the overall job
 use constant {
-    NONE               => 'none',            # there's no overall result yet (job is not yet in one of the FINAL_STATES)
-    PASSED             => 'passed',          # the test has been concluded suggessfully with a positive result
-    SOFTFAILED         => 'softfailed',      # the test has been concluded suggessfully with a positive result
-    FAILED             => 'failed',          # the test has been concluded suggessfully with a negative result
-    INCOMPLETE         => 'incomplete',      # worker died or reported some problem
-    SKIPPED            => 'skipped',         # (directly) chained dependencies failed before starting this job
-    OBSOLETED          => 'obsoleted',       # new iso was posted so the job has been cancelled by openQA
-    PARALLEL_FAILED    => 'parallel_failed', # parallel job failed, this job can't continue
+    NONE => 'none',    # there's no overall result yet (job is not yet in one of the FINAL_STATES)
+    PASSED => 'passed',    # the test has been concluded suggessfully with a positive result
+    SOFTFAILED => 'softfailed',    # the test has been concluded suggessfully with a positive result
+    FAILED => 'failed',    # the test has been concluded suggessfully with a negative result
+    INCOMPLETE => 'incomplete',    # worker died or reported some problem
+    SKIPPED => 'skipped',    # (directly) chained dependencies failed before starting this job
+    OBSOLETED => 'obsoleted',    # new iso was posted so the job has been cancelled by openQA
+    PARALLEL_FAILED => 'parallel_failed',    # parallel job failed, this job can't continue
     PARALLEL_RESTARTED => 'parallel_restarted',    # parallel job was restarted, this job has to be restarted too
-    USER_CANCELLED     => 'user_cancelled',        # cancelled by user via job_cancel
-    USER_RESTARTED     => 'user_restarted',        # restarted by user via job_restart
-    TIMEOUT_EXCEEDED   => 'timeout_exceeded',      # killed by the worker after MAX_JOB_TIME has been exceeded
+    USER_CANCELLED => 'user_cancelled',    # cancelled by user via job_cancel
+    USER_RESTARTED => 'user_restarted',    # restarted by user via job_restart
+    TIMEOUT_EXCEEDED => 'timeout_exceeded',    # killed by the worker after MAX_JOB_TIME has been exceeded
 };
-use constant RESULTS => (NONE, PASSED, SOFTFAILED, FAILED, INCOMPLETE, SKIPPED,
+use constant RESULTS => (
+    NONE, PASSED, SOFTFAILED, FAILED, INCOMPLETE, SKIPPED,
     OBSOLETED, PARALLEL_FAILED, PARALLEL_RESTARTED, USER_CANCELLED, USER_RESTARTED, TIMEOUT_EXCEEDED
 );
 
@@ -83,16 +72,16 @@ use constant RESULTS => (NONE, PASSED, SOFTFAILED, FAILED, INCOMPLETE, SKIPPED,
 #       further details.
 
 # "meta" results for the overall job
-use constant COMPLETE_RESULTS     => (PASSED,     SOFTFAILED, FAILED);
-use constant OK_RESULTS           => (PASSED,     SOFTFAILED);
+use constant COMPLETE_RESULTS => (PASSED, SOFTFAILED, FAILED);
+use constant OK_RESULTS => (PASSED, SOFTFAILED);
 use constant NOT_COMPLETE_RESULTS => (INCOMPLETE, TIMEOUT_EXCEEDED);
-use constant ABORTED_RESULTS      =>
+use constant ABORTED_RESULTS =>
   (SKIPPED, OBSOLETED, PARALLEL_FAILED, PARALLEL_RESTARTED, USER_CANCELLED, USER_RESTARTED);
 use constant NOT_OK_RESULTS => (FAILED, NOT_COMPLETE_RESULTS, ABORTED_RESULTS);
 use constant {
-    COMPLETE     => 'complete',
+    COMPLETE => 'complete',
     NOT_COMPLETE => 'not_complete',
-    ABORTED      => 'aborted',
+    ABORTED => 'aborted',
 };
 
 # results for particular job modules
@@ -111,6 +100,7 @@ our @EXPORT = qw(
   FINAL_STATES
   INCOMPLETE
   NOT_COMPLETE_RESULTS
+  ABORTED
   ABORTED_RESULTS
   NONE
   NOT_OK_RESULTS
@@ -148,11 +138,5 @@ my %META_RESULT_MAPPING = (
     (map { $_ => NOT_COMPLETE } NOT_COMPLETE_RESULTS),
     (map { $_ => ABORTED } ABORTED_RESULTS),
 );
-sub meta_state {
-    my ($state) = @_;
-    return $META_STATE_MAPPING{$state} // NONE;
-}
-sub meta_result {
-    my ($result) = @_;
-    return $META_RESULT_MAPPING{$result} // NONE;
-}
+sub meta_state ($state) { $META_STATE_MAPPING{$state} // NONE }
+sub meta_result ($result) { $META_RESULT_MAPPING{$result} // NONE }

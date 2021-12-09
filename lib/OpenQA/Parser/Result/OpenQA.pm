@@ -1,17 +1,5 @@
-# Copyright (C) 2017-2018 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2017-2018 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Parser::Result::OpenQA;
 use Mojo::Base 'OpenQA::Parser::Result';
@@ -23,7 +11,7 @@ use OpenQA::Parser::Result::OpenQA::Results;
 use Mojo::File 'path';
 
 has details => sub { [] };
-has dents   => 0;
+has dents => 0;
 has [qw(result name test)];
 
 sub new { shift->SUPER::new(@_)->parsed_details }
@@ -45,8 +33,8 @@ sub search_in_details {
 sub to_openqa {
     my $self = shift;
     return {
-        result  => $self->result,
-        dents   => $self->dents,
+        result => $self->result,
+        dents => $self->dents,
         details => $self->details
     };
 }
@@ -57,8 +45,8 @@ sub TO_JSON {
 
     my @test = $test ? (test => $self->test ? $self->test->TO_JSON : undef) : ();
     return {
-        result  => $self->result,
-        dents   => $self->dents,
+        result => $self->result,
+        dents => $self->dents,
         details => $self->details,
         @test
     };

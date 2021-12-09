@@ -1,24 +1,12 @@
-# Copyright (C) 2020-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>..
+# Copyright 2020-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later.
 
+use Test::Most;
 use Mojo::Base -strict;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 
-use Test::More;
 use Capture::Tiny qw(capture capture_stdout);
 use Mojo::Server::Daemon;
 use Mojo::JSON qw(decode_json);
@@ -33,7 +21,7 @@ OpenQA::Test::Case->new->init_data(fixtures_glob => '03-users.pl');
 
 # Mock WebAPI with extra test routes
 my $daemon = Mojo::Server::Daemon->new(listen => ['http://127.0.0.1']);
-my $app    = $daemon->build_app('OpenQA::WebAPI');
+my $app = $daemon->build_app('OpenQA::WebAPI');
 $app->log->level('error');
 my $port = $daemon->start->ports->[0];
 my $host = "http://127.0.0.1:$port";
@@ -44,23 +32,23 @@ $op->get('/test/op/hello' => sub { shift->render(text => 'Hello operator!') });
 my $pub = $app->routes->find('api_public');
 $pub->any(
     '/test/pub/http' => sub {
-        my $c    = shift;
-        my $req  = $c->req;
+        my $c = shift;
+        my $req = $c->req;
         my $data = {
-            method  => $req->method,
+            method => $req->method,
             headers => $req->headers->to_hash,
-            params  => $req->params->to_hash,
-            body    => $req->body
+            params => $req->params->to_hash,
+            body => $req->body
         };
         $c->render(json => $data);
     });
 $pub->any(
     '/test/pub/error' => [format => ['json']] => {format => 'html'} => sub {
-        my $c      = shift;
+        my $c = shift;
         my $status = $c->param('status') // 500;
         $c->respond_to(
             json => {status => $status, json => {error => $status}},
-            any  => {status => $status, data => "Error: $status"});
+            any => {status => $status, data => "Error: $status"});
     });
 
 # Default options for mock server
@@ -69,6 +57,7 @@ my @host = ('--host', $host);
 # Default options for authentication tests
 my @auth = ('--apikey', 'ARTHURKEY01', '--apisecret', 'EXCALIBUR', @host);
 
+$ENV{OPENQA_CLI_RETRY_SLEEP_TIME_S} = 0;
 my $cli = OpenQA::CLI->new;
 my $api = OpenQA::CLI::api->new;
 
@@ -79,10 +68,10 @@ subtest 'Help' => sub {
 
 subtest 'Defaults' => sub {
     my $api = OpenQA::CLI::api->new;
-    is $api->apibase,   '/api/v1',          'apibase';
-    is $api->apikey,    undef,              'no apikey';
-    is $api->apisecret, undef,              'no apisecret';
-    is $api->host,      'http://localhost', 'host';
+    is $api->apibase, '/api/v1', 'apibase';
+    is $api->apikey, undef, 'no apikey';
+    is $api->apisecret, undef, 'no apisecret';
+    is $api->host, 'http://localhost', 'host';
 };
 
 subtest 'Host' => sub {
@@ -120,8 +109,8 @@ subtest 'API' => sub {
 
     eval { $api->run(@auth) };
     like $@, qr/Usage: openqa-cli api/, 'usage';
-    is $api->apikey,    'ARTHURKEY01', 'apikey';
-    is $api->apisecret, 'EXCALIBUR',   'apisecret';
+    is $api->apikey, 'ARTHURKEY01', 'apikey';
+    is $api->apisecret, 'EXCALIBUR', 'apisecret';
 };
 
 subtest 'Client' => sub {
@@ -129,7 +118,7 @@ subtest 'Client' => sub {
 };
 
 subtest 'Unknown options' => sub {
-    my $api    = OpenQA::CLI::api->new;
+    my $api = OpenQA::CLI::api->new;
     my $buffer = '';
     {
         open my $handle, '>', \$buffer;
@@ -148,28 +137,28 @@ subtest 'Simple request with authentication' => sub {
 
     ($stdout, $stderr, @result) = capture sub { $api->run(@host, '-q', 'test/op/hello') };
     is_deeply \@result, [1], 'non-zero exit code';
-    is $stderr,   '',      'quiet';
+    is $stderr, '', 'quiet';
     like $stdout, qr/403/, 'not authenticated';
 
     ($stdout, $stderr, @result) = capture sub { $api->run(@host, '--quiet', 'test/op/hello') };
     is_deeply \@result, [1], 'non-zero exit code';
-    is $stderr,   '',      'quiet';
+    is $stderr, '', 'quiet';
     like $stdout, qr/403/, 'not authenticated';
 
     ($stdout, @result) = capture_stdout sub { $api->run(@auth, 'test/op/hello') };
     is_deeply \@result, [0], 'zero exit code';
     unlike $stdout, qr/200 OK.*Content-Type:/s, 'not verbose';
-    like $stdout,   qr/Hello operator!/,        'operator response';
+    like $stdout, qr/Hello operator!/, 'operator response';
 
     ($stdout, @result) = capture_stdout sub { $api->run(@auth, '--verbose', 'test/op/hello') };
     is_deeply \@result, [0], 'zero exit code';
     like $stdout, qr/200 OK.*Content-Type:/s, 'verbose';
-    like $stdout, qr/Hello operator!/,        'operator response';
+    like $stdout, qr/Hello operator!/, 'operator response';
 
     ($stdout, @result) = capture_stdout sub { $api->run(@auth, '--v', 'test/op/hello') };
     is_deeply \@result, [0], 'zero exit code';
     like $stdout, qr/200 OK.*Content-Type:/s, 'verbose';
-    like $stdout, qr/Hello operator!/,        'operator response';
+    like $stdout, qr/Hello operator!/, 'operator response';
 };
 
 subtest 'HTTP features' => sub {
@@ -222,14 +211,14 @@ subtest 'HTTP features' => sub {
     ($stdout, @result)
       = capture_stdout sub { $api->run(@host, '-a', 'X-Test: works', '-a', 'X-Test2: works too', 'test/pub/http') };
     $data = decode_json $stdout;
-    is $data->{headers}{'X-Test'},  'works',     'X-Test header';
+    is $data->{headers}{'X-Test'}, 'works', 'X-Test header';
     is $data->{headers}{'X-Test2'}, 'works too', 'X-Test2 header';
 
     ($stdout, @result)
       = capture_stdout
       sub { $api->run(@host, '--header', 'X-Test: works', '--header', 'X-Test2: works too', 'test/pub/http') };
     $data = decode_json $stdout;
-    is $data->{headers}{'X-Test'},  'works',     'X-Test header';
+    is $data->{headers}{'X-Test'}, 'works', 'X-Test header';
     is $data->{headers}{'X-Test2'}, 'works too', 'X-Test2 header';
 
     ($stdout, @result)
@@ -308,15 +297,15 @@ subtest 'JSON' => sub {
       = capture_stdout sub { $api->run(@host, '-d', '{"foo":"bar"}', '-X', 'PUT', 'test/pub/http') };
     my $data = decode_json $stdout;
     is $data->{method}, 'PUT', 'PUT request';
-    is $data->{headers}{Accept},         'application/json', 'Accept header';
-    is $data->{headers}{'Content-Type'}, undef,              'no Content-Type header';
+    is $data->{headers}{Accept}, 'application/json', 'Accept header';
+    is $data->{headers}{'Content-Type'}, undef, 'no Content-Type header';
     is $data->{body}, '{"foo":"bar"}', 'request body';
 
     ($stdout, @result)
       = capture_stdout sub { $api->run(@host, '-j', '-d', '{"foo":"bar"}', '-X', 'PUT', 'test/pub/http') };
     $data = decode_json $stdout;
     is $data->{method}, 'PUT', 'PUT request';
-    is $data->{headers}{Accept},         'application/json', 'Accept header';
+    is $data->{headers}{Accept}, 'application/json', 'Accept header';
     is $data->{headers}{'Content-Type'}, 'application/json', 'Content-Type header';
     is $data->{body}, '{"foo":"bar"}', 'request body';
 
@@ -324,7 +313,7 @@ subtest 'JSON' => sub {
     ($stdout, @result) = capture_stdout sub { $api->run(@host, '-j', '-d', $json, '-X', 'PUT', 'test/pub/http') };
     $data = decode_json $stdout;
     is $data->{method}, 'PUT', 'PUT request';
-    is $data->{headers}{Accept},         'application/json', 'Accept header';
+    is $data->{headers}{Accept}, 'application/json', 'Accept header';
     is $data->{headers}{'Content-Type'}, 'application/json', 'Content-Type header';
     is $data->{body}, $json, 'request body';
     is_deeply decode_json($data->{body}), {foo => 'some täst'}, 'unicode roundtrip';
@@ -333,7 +322,7 @@ subtest 'JSON' => sub {
       = capture_stdout sub { $api->run(@host, '--json', '-d', '{"foo":"bar"}', '-X', 'PUT', 'test/pub/http') };
     $data = decode_json $stdout;
     is $data->{method}, 'PUT', 'PUT request';
-    is $data->{headers}{Accept},         'application/json', 'Accept header';
+    is $data->{headers}{Accept}, 'application/json', 'Accept header';
     is $data->{headers}{'Content-Type'}, 'application/json', 'Content-Type header';
     is $data->{body}, '{"foo":"bar"}', 'request body';
 
@@ -342,7 +331,7 @@ subtest 'JSON' => sub {
       sub { $api->run(@host, '-j', '-d', '{"foo":"bar"}', '-a', 'Accept: text/plain', '-X', 'PUT', 'test/pub/http') };
     $data = decode_json $stdout;
     is $data->{method}, 'PUT', 'PUT request';
-    is $data->{headers}{Accept},         'text/plain',       'Accept header';
+    is $data->{headers}{Accept}, 'text/plain', 'Accept header';
     is $data->{headers}{'Content-Type'}, 'application/json', 'Content-Type header';
     is $data->{body}, '{"foo":"bar"}', 'request body';
 };
@@ -437,25 +426,25 @@ subtest 'Content negotiation and errors' => sub {
     my ($stdout, $stderr, @result)
       = capture sub { $api->run(@host, '-a', 'Accept: */*', 'test/pub/error') };
     is_deeply \@result, [1], 'non-zero exit code';
-    like $stderr,   qr/500 Internal Server Error/, 'right error';
+    like $stderr, qr/500 Internal Server Error/, 'right error';
     unlike $stdout, qr/500 Internal Server Error/, 'not on STDOUT';
-    is $stdout,     "Error: 500\n",                'request body';
-    unlike $stderr, qr/Error: 500/,                'not on STDERR';
+    is $stdout, "Error: 500\n", 'request body';
+    unlike $stderr, qr/Error: 500/, 'not on STDERR';
 
     ($stdout, $stderr, @result)
       = capture sub { $api->run(@host, '-a', 'Accept: */*', 'test/pub/error', 'status=400') };
     is_deeply \@result, [1], 'non-zero exit code';
     like $stderr, qr/400 Bad Request/, 'right error';
-    is $stdout,   "Error: 400\n",      'request body';
+    is $stdout, "Error: 400\n", 'request body';
 
     ($stdout, $stderr, @result)
       = capture sub { $api->run(@host, '-a', 'Accept: */*', '-q', 'test/pub/error', 'status=400') };
     unlike $stderr, qr/400 Bad Request/, 'quiet';
-    is $stdout,     "Error: 400\n",      'request body';
+    is $stdout, "Error: 400\n", 'request body';
 
     ($stdout, $stderr, @result)
       = capture sub { $api->run(@host, '-a', 'Accept: */*', 'test/pub/error', 'status=200') };
-    is $stderr, '',             'no error';
+    is $stderr, '', 'no error';
     is $stdout, "Error: 200\n", 'request body';
 
     ($stdout, $stderr, @result)
@@ -464,6 +453,13 @@ subtest 'Content negotiation and errors' => sub {
     is $stdout, <<'EOF', 'request body';
 {"error":"200"}
 EOF
+    my @params = (@host, '-a', 'Accept: */*', 'test/pub/error', 'status=502');
+    ($stdout, $stderr, @result) = capture sub { $api->run(@params) };
+    like $stderr, qr/502 Bad Gateway/, 'aborts on any error, no retries by default';
+    is $stdout, "Error: 502\n", 'request body';
+
+    ($stdout, $stderr, @result) = capture sub { $api->run('--retries', '1', @params) };
+    like $stdout, qr/failed.*retrying/, 'requests are retried on error if requested';
 };
 
 subtest 'Pretty print JSON' => sub {
@@ -492,7 +488,7 @@ EOF
 
 subtest 'PIPE input' => sub {
     my $file = tempfile;
-    my $fh   = $file->spurt('Hello openQA!')->open('<');
+    my $fh = $file->spurt('Hello openQA!')->open('<');
     local *STDIN = $fh;
     my ($stdout, @result) = capture_stdout sub { $api->run(@host, 'test/pub/http') };
     my $data = decode_json $stdout;

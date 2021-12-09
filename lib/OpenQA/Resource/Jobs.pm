@@ -1,17 +1,5 @@
-# Copyright (c) 2017-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2017-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Resource::Jobs;
 
@@ -48,13 +36,13 @@ sub job_restart {
     }
 
     # duplicate all jobs that are either running or done
-    my $force            = $args{force};
+    my $force = $args{force};
     my %duplication_args = map { ($_ => $args{$_}) } qw(prio skip_parents skip_children skip_ok_result_children);
-    my $schema           = OpenQA::Schema->singleton;
+    my $schema = OpenQA::Schema->singleton;
     my $jobs = $schema->resultset('Jobs')->search({id => $jobids, state => {'not in' => [PRISTINE_STATES]}});
     $duplication_args{no_directly_chained_parent} = 1 unless $force;
     while (my $job = $jobs->next) {
-        my $job_id         = $job->id;
+        my $job_id = $job->id;
         my $missing_assets = $job->missing_assets;
         if (@$missing_assets) {
             my $message = "Job $job_id misses the following mandatory assets: " . join(', ', @$missing_assets);
@@ -89,7 +77,7 @@ sub job_restart {
     return \%res if $args{skip_aborting_jobs};
     my $running_jobs = $schema->resultset("Jobs")->search(
         {
-            id    => \@processed,
+            id => \@processed,
             state => [OpenQA::Jobs::Constants::EXECUTION_STATES],
         });
     $running_jobs->search({result => OpenQA::Jobs::Constants::NONE})

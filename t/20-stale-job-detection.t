@@ -1,19 +1,7 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2016-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -31,20 +19,20 @@ use OpenQA::Test::Utils qw(redirect_output);
 use OpenQA::Test::TimeLimit '10';
 
 my $schema = OpenQA::Test::Database->new->create(fixtures_glob => '01-jobs.pl 02-workers.pl 06-job_dependencies.pl');
-my $jobs   = $schema->resultset('Jobs');
+my $jobs = $schema->resultset('Jobs');
 $jobs->find(99963)->update({assigned_worker_id => 1});
 $jobs->find(99961)->update({assigned_worker_id => 2});
-$jobs->find(80000)->update({state              => ASSIGNED, result => NONE, assigned_worker_id => 1});
+$jobs->find(80000)->update({state => ASSIGNED, result => NONE, assigned_worker_id => 1});
 
 OpenQA::App->set_singleton(my $app = OpenQA::Scheduler->new);
 $app->setup;
 $app->log(undef);
 
 subtest 'worker with job and not updated in last 120s is considered dead' => sub {
-    my $dtf     = $schema->storage->datetime_parser;
-    my $dt      = DateTime->from_epoch(epoch => time(), time_zone => 'UTC');
+    my $dtf = $schema->storage->datetime_parser;
+    my $dt = DateTime->from_epoch(epoch => time(), time_zone => 'UTC');
     my $workers = $schema->resultset('Workers');
-    my $jobs    = $jobs;
+    my $jobs = $jobs;
     $workers->update_all({t_seen => $dtf->format_datetime($dt)});
     is($jobs->stale_ones->count, 0, 'job not considered stale if recently seen');
     $dt->subtract(seconds => DEFAULT_WORKER_TIMEOUT + DB_TIMESTAMP_ACCURACY);
@@ -58,7 +46,7 @@ subtest 'worker with job and not updated in last 120s is considered dead' => sub
 
     for my $job_id (99961, 99963) {
         my $job = $jobs->find(99963);
-        is($job->state,  DONE,       "running job $job_id is now done");
+        is($job->state, DONE, "running job $job_id is now done");
         is($job->result, INCOMPLETE, "running job $job_id has been marked as incomplete");
         isnt($job->clone_id, undef, "running job $job_id a clone");
         like(
@@ -69,10 +57,10 @@ subtest 'worker with job and not updated in last 120s is considered dead' => sub
     }
 
     my $assigned_job = $jobs->find(80000);
-    is($assigned_job->state,              SCHEDULED, 'assigned job not done');
-    is($assigned_job->result,             NONE,      'assigned job has been re-scheduled');
-    is($assigned_job->clone_id,           undef,     'assigned job has not been cloned');
-    is($assigned_job->assigned_worker_id, undef,     'assigned job has no worker assigned');
+    is($assigned_job->state, SCHEDULED, 'assigned job not done');
+    is($assigned_job->result, NONE, 'assigned job has been re-scheduled');
+    is($assigned_job->clone_id, undef, 'assigned job has not been cloned');
+    is($assigned_job->assigned_worker_id, undef, 'assigned job has no worker assigned');
 
     is($app->minion->jobs({tasks => ['finalize_job_results']})->total,
         2, 'minion job to finalize incomplete jobs enqueued');

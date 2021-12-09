@@ -1,19 +1,7 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use strict;
 use DBIx::Class::DeploymentHandler;
@@ -26,17 +14,17 @@ sub {
 
     log_info('Migrating machine separator in dependency settings form ":" to "@".');
 
-    my @affected_keys   = (qw(START_AFTER_TEST START_DIRECTLY_AFTER_TEST PARALLEL_WITH));
+    my @affected_keys = (qw(START_AFTER_TEST START_DIRECTLY_AFTER_TEST PARALLEL_WITH));
     my @affected_tables = (qw(JobSettings JobTemplateSettings MachineSettings ProductSettings TestSuiteSettings));
     my $considered_rows = 0;
-    my $changed_rows    = 0;
+    my $changed_rows = 0;
     for my $table_name (@affected_tables) {
         log_info(" - considering $table_name table");
 
-        my $table         = $schema->resultset($table_name);
+        my $table = $schema->resultset($table_name);
         my $affected_rows = $table->search({key => {-in => \@affected_keys}});
         while (my $row = $affected_rows->next) {
-            my $current_value          = $row->value;
+            my $current_value = $row->value;
             my $value_needs_conversion = 0;
             $considered_rows += 1;
 

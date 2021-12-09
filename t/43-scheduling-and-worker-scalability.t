@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2020-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -41,8 +29,8 @@ use OpenQA::Utils 'testcasedir';
 
 BEGIN {
     # set defaults
-    $ENV{SCALABILITY_TEST_JOB_COUNT}               //= 5;
-    $ENV{SCALABILITY_TEST_WORKER_COUNT}            //= 2;
+    $ENV{SCALABILITY_TEST_JOB_COUNT} //= 5;
+    $ENV{SCALABILITY_TEST_WORKER_COUNT} //= 2;
     $ENV{SCALABILITY_TEST_WITH_OFFLINE_WEBUI_HOST} //= 1;
 
     # allow the scheduler to assigns all jobs within one tick (needs to be in BEGIN block because the env variable
@@ -55,7 +43,7 @@ setup_mojo_app_with_default_worker_timeout;
 # read number of workers to spawn from environment variable; skip test entirely if variable not present
 # similar to other fullstack tests
 my $worker_count = $ENV{SCALABILITY_TEST_WORKER_COUNT};
-my $job_count    = $ENV{SCALABILITY_TEST_JOB_COUNT} // $worker_count;
+my $job_count = $ENV{SCALABILITY_TEST_JOB_COUNT} // $worker_count;
 BAIL_OUT 'invalid SCALABILITY_TEST_WORKER_COUNT/SCALABILITY_TEST_JOB_COUNT'
   unless looks_like_number($worker_count) && looks_like_number($job_count) && $worker_count > 0 && $job_count > 0;
 note("Running scalability test with $worker_count worker(s) and $job_count job(s).");
@@ -65,28 +53,28 @@ mock_service_ports;
 
 # setup basedir, config dir and database
 my $tempdir = setup_fullstack_temp_dir('scalability');
-my $schema  = OpenQA::Test::Database->new->create;
+my $schema = OpenQA::Test::Database->new->create;
 my $workers = $schema->resultset('Workers');
-my $jobs    = $schema->resultset('Jobs');
+my $jobs = $schema->resultset('Jobs');
 
 # create web UI and websocket server
 my $web_socket_server = create_websocket_server(undef, 0, 1, 1, 1);
-my $webui             = create_webapi(undef, 1);
+my $webui = create_webapi(undef, 1);
 
 # prepare spawning workers
-my $testsdir        = path($ENV{OPENQA_BASEDIR}, 'openqa', 'share', 'tests')->make_path;
-my $resultdir       = path($ENV{OPENQA_BASEDIR}, 'openqa', 'testresults')->make_path;
+my $testsdir = path($ENV{OPENQA_BASEDIR}, 'openqa', 'share', 'tests')->make_path;
+my $resultdir = path($ENV{OPENQA_BASEDIR}, 'openqa', 'testresults')->make_path;
 my $api_credentials = create_user_for_workers;
-my $api_key         = $api_credentials->key;
-my $api_secret      = $api_credentials->secret;
-my $webui_port      = service_port 'webui';
-my $webui_host      = "http://localhost:$webui_port";
-my $worker_path     = path($FindBin::Bin)->child('../script/worker');
+my $api_key = $api_credentials->key;
+my $api_secret = $api_credentials->secret;
+my $webui_port = service_port 'webui';
+my $webui_host = "http://localhost:$webui_port";
+my $worker_path = path($FindBin::Bin)->child('../script/worker');
 my $isotovideo_path = path($FindBin::Bin)->child('dummy-isotovideo.sh');
 $webui_host .= " http://localhost:12345" if $ENV{SCALABILITY_TEST_WITH_OFFLINE_WEBUI_HOST};
 my @worker_args = (
     "--apikey=$api_key", "--apisecret=$api_secret", "--host=$webui_host", "--isotovideo=$isotovideo_path",
-    '--verbose',         '--no-cleanup',
+    '--verbose', '--no-cleanup',
 );
 note("Tests dir: $testsdir");
 note("Result dir: $resultdir");
@@ -96,9 +84,9 @@ note("Spawning $worker_count workers");
 sub spawn_worker {
     my ($instance) = @_;
 
-    local $ENV{PERL5OPT} = '';                                             # uncoverable statement
-    note("Starting worker '$instance'");                                   # uncoverable statement
-    $0 = 'openqa-worker';                                                  # uncoverable statement
+    local $ENV{PERL5OPT} = '';    # uncoverable statement
+    note("Starting worker '$instance'");    # uncoverable statement
+    $0 = 'openqa-worker';    # uncoverable statement
     start ['perl', $worker_path, "--instance=$instance", @worker_args];    # uncoverable statement
 }
 my %worker_ids;
@@ -117,14 +105,14 @@ sub log_jobs {
     diag("All jobs:\n - " . join("\n - ", @job_info));
 }
 my %job_ids;
-my $distri       = 'opensuse';
-my $version      = 'Factory';
+my $distri = 'opensuse';
+my $version = 'Factory';
 my @job_settings = (
-    BUILD   => '0048@0815',
-    DISTRI  => $distri,
+    BUILD => '0048@0815',
+    DISTRI => $distri,
     VERSION => $version,
-    FLAVOR  => 'tape',
-    ARCH    => 'x86_64',
+    FLAVOR => 'tape',
+    ARCH => 'x86_64',
     MACHINE => 'xxx',
 );
 $job_ids{$jobs->create({@job_settings, TEST => "dummy-$_"})->id} = 1 for 1 .. $job_count;
@@ -134,10 +122,10 @@ my $casedir = testcasedir($distri, $version, undef);
 path($casedir)->make_path unless -d $casedir;
 
 my $seconds_to_wait_per_worker = 5.0;
-my $seconds_to_wait_per_job    = 2.5;
-my $polling_interval           = 0.1;
-my $polling_tries_workers      = $seconds_to_wait_per_worker / $polling_interval * $worker_count;
-my $polling_tries_jobs         = $seconds_to_wait_per_job / $polling_interval * $job_count;
+my $seconds_to_wait_per_job = 2.5;
+my $polling_interval = 0.1;
+my $polling_tries_workers = $seconds_to_wait_per_worker / $polling_interval * $worker_count;
+my $polling_tries_jobs = $seconds_to_wait_per_job / $polling_interval * $job_count;
 
 subtest 'wait for workers to be idle' => sub {
     my @worker_search_args = ({'properties.key' => 'WEBSOCKET_API_VERSION'}, {join => 'properties'});
@@ -160,9 +148,9 @@ subtest 'assign and run jobs' => sub {
     my $scheduler = OpenQA::Scheduler::Model::Jobs->singleton;
     my $allocated = $scheduler->schedule;
     unless (ref($allocated) eq 'ARRAY' && @$allocated > 0) {
-        diag explain 'Allocated: ', $allocated;                    # uncoverable statement
+        diag explain 'Allocated: ', $allocated;    # uncoverable statement
         diag explain 'Scheduled: ', $scheduler->scheduled_jobs;    # uncoverable statement
-        BAIL_OUT('Unable to assign jobs to (idling) workers');     # uncoverable statement
+        BAIL_OUT('Unable to assign jobs to (idling) workers');    # uncoverable statement
     }
 
     my $remaining_jobs = $job_count - $worker_count;
@@ -213,7 +201,7 @@ subtest 'assign and run jobs' => sub {
         note("Waiting until all jobs are done, try $try");
         sleep $polling_interval;
     }
-    my $done   = is($jobs->search({state  => DONE})->count,   $job_count, 'all jobs done');
+    my $done = is($jobs->search({state => DONE})->count, $job_count, 'all jobs done');
     my $passed = is($jobs->search({result => PASSED})->count, $job_count, 'all jobs passed');
     log_jobs unless $done && $passed;
 };
@@ -228,7 +216,7 @@ subtest 'stop all workers' => sub {
         }
         last unless @non_offline_workers;
         note("Waiting until all workers are offline, try $try");    # uncoverable statement
-        sleep $polling_interval;                                    # uncoverable statement
+        sleep $polling_interval;    # uncoverable statement
     }
     ok(!@non_offline_workers, 'all workers offline') or diag explain \@non_offline_workers;
 };

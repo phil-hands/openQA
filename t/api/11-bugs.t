@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (C) 2017-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2017-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -27,9 +15,9 @@ use OpenQA::Test::Client 'client';
 require OpenQA::Schema::Result::Jobs;
 
 OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 03-users.pl');
-my $t    = client(Test::Mojo->new('OpenQA::WebAPI'));
+my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
 my $bugs = $t->app->schema->resultset('Bugs');
-my $bug  = $bugs->get_bug('poo#200');
+my $bug = $bugs->get_bug('poo#200');
 is($bugs->first->bugid, 'poo#200', 'Test bug inserted');
 
 subtest 'Properties' => sub {
@@ -70,7 +58,7 @@ subtest 'Created since' => sub {
     my $update_time = time;
     ok(my $bug = $bugs->find($bugid), "Bug $bugid found in the database") or return;
     $bug->update({t_created => time2str('%Y-%m-%d %H:%M:%S', $update_time - 490, 'UTC')});
-    my $now   = time;
+    my $now = time;
     my $delta = $now - $update_time + 500;
     $t->get_ok("/api/v1/bugs?created_since=$delta");
     is(scalar(keys %{$t->tx->res->json->{bugs}}), 3, "All reported bugs with delta $delta");

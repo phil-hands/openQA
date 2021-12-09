@@ -1,17 +1,5 @@
-# Copyright (C) 2014-2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebSockets;
 use Mojo::Base 'Mojolicious';
@@ -86,7 +74,7 @@ sub ws_send {
 sub ws_send_job {
     my ($job_info, $message) = @_;
     my $result = {state => {msg_sent => 0}};
-    my $state  = $result->{state};
+    my $state = $result->{state};
 
     unless (ref($job_info) eq 'HASH' && exists $job_info->{assigned_worker_id}) {
         # uncoverable statement untested exceptional error
@@ -95,7 +83,7 @@ sub ws_send_job {
     }
 
     my $worker_id = $job_info->{assigned_worker_id};
-    my $worker    = OpenQA::WebSockets::Model::Status->singleton->workers->{$worker_id};
+    my $worker = OpenQA::WebSockets::Model::Status->singleton->workers->{$worker_id};
     if (!$worker) {
         # uncoverable statement untested exceptional error
         $state->{error} = "Unable to assign job to worker $worker_id: the worker has not established a ws connection";

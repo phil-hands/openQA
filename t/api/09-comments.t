@@ -1,19 +1,8 @@
-# Copyright (C) 2016-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Mojo::Base -signatures;
 use utf8;
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
@@ -31,16 +20,15 @@ my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
 # create a parent group
 $t->app->schema->resultset('JobGroupParents')->create({id => 1, name => 'Test parent', sort_order => 0});
 
-sub test_get_comment {
+sub test_get_comment ($in, $id, $comment_id, $supposed_text) {
     # Report failure at the callsite instead of the test function
     local $Test::Builder::Level = $Test::Builder::Level + 1;
-    my ($in, $id, $comment_id, $supposed_text) = @_;
     $t->get_ok("/api/v1/$in/$id/comments/$comment_id")->json_is('/id', $comment_id, 'comment id is correct')
       ->json_is('/text' => $supposed_text, 'comment text is correct');
 }
 
-sub test_get_comment_groups_json {
-    my ($id, $supposed_text) = @_;
+sub test_get_comment_groups_json ($id, $supposed_text) {
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
     $t->get_ok("/group_overview/$id.json");
     my $found_comment = 0;
     for my $comment (@{$t->tx->res->json->{comments}}) {
@@ -52,8 +40,8 @@ sub test_get_comment_groups_json {
     ok($found_comment, 'comment found in .json');
 }
 
-sub test_get_comment_invalid_job_or_group {
-    my ($in, $id, $comment_id) = @_;
+sub test_get_comment_invalid_job_or_group ($in, $id, $comment_id) {
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
     $t->get_ok("/api/v1/$in/$id/comments/$comment_id")->status_is(404, 'comment not found');
     like(
         $t->tx->res->json->{error},
@@ -62,29 +50,29 @@ sub test_get_comment_invalid_job_or_group {
     );
 }
 
-sub test_get_comment_invalid_comment {
-    my ($in, $id, $comment_id) = @_;
+sub test_get_comment_invalid_comment ($in, $id, $comment_id) {
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
     $t->get_ok("/api/v1/$in/$id/comments/$comment_id")->status_is(404, 'comment not found');
     is($t->tx->res->json->{error}, "Comment $comment_id does not exist", 'comment does not exist');
 }
 
-sub test_create_comment {
-    my ($in, $id, $text) = @_;
-    $t->post_ok("/api/v1/$in/$id/comments" => form => {text => $text})->status_is(200, 'comment can be created');
+sub test_create_comment ($in, $id, $text) {
+    local $Test::Builder::Level = $Test::Builder::Level + 1;
+    $t->post_ok("/api/v1/$in/$id/comments" => form => {text => $text})->status_is(200, 'comment can be created')
+      ->or(sub { diag 'error: ' . $t->tx->res->json->{error} });
     return $t->tx->res->json->{id};
 }
 
-my $test_message         = 'This is a cool test ☠ - http://open.qa';
+my $test_message = 'This is a cool test ☠ - http://open.qa';
 my $another_test_message = ' - this message will be\nappended if editing works ☠';
-my $edited_test_message  = $test_message . $another_test_message;
+my $edited_test_message = $test_message . $another_test_message;
 
-sub test_comments {
-    my ($in, $id) = @_;
+sub test_comments ($in, $id) {
     my $new_comment_id = test_create_comment($in, $id, $test_message);
 
     my %expected_names = (
-        jobs          => 'Job',
-        groups        => 'Job group',
+        jobs => 'Job',
+        groups => 'Job group',
         parent_groups => 'Parent group',
     );
     my $expected_name = $expected_names{$in};
@@ -194,12 +182,57 @@ subtest 'can not edit comment by other user' => sub {
     test_get_comment(jobs => 99981, 1, $edited_test_message);
 };
 
+subtest 'can update job result with special label comment' => sub {
+    my $job_id = 99938;
+    my $schema = $t->app->schema;
+    my $jobs = $schema->resultset('Jobs');
+    my $events = $schema->resultset('AuditEvents');
+    is $jobs->find($job_id)->result, 'failed', 'job initially is failed';
+    is $events->all, 1, 'only 1 event initially';
+    test_create_comment('jobs', $job_id, 'label:force_result:softfailed:simon_says');
+    is $jobs->find($job_id)->result, 'softfailed', 'job is updated to softfailed';
+    is $events->all, 2, 'event for result update emitted';
+    ok $events->find({event => 'job_update_result'}), 'job_update_result event found';
+    my $route = "/api/v1/jobs/$job_id/comments";
+    my $comments = $schema->resultset('Comments');
+    my $nr_comments = $comments->all;
+    $t->post_ok($route => form => {text => 'label:force_result:invalid_result'})
+      ->status_is(400, 'comment can not be created with invalid result for force_result')
+      ->json_like('/error' => qr/Invalid result/);
+    is $jobs->find($job_id)->result, 'softfailed', 'job is not updated with invalid result';
+    is $comments->all, $nr_comments, 'no new comment created with invalid result';
+    my $global_cfg = $t->app->config->{global};
+    $global_cfg->{force_result_regex} = '[A-Z0-9-]+';
+    $t->post_ok($route => form => {text => 'label:force_result:passed'})
+      ->status_is(400, 'comment can not be created when description pattern does not match')
+      ->json_like('/error' => qr/description.*does not match/);
+    is $jobs->find($job_id)->result, 'softfailed', 'job is not updated when description pattern does not match';
+    is $comments->all, $nr_comments, 'no new comment created for wrong description';
+    test_create_comment('jobs', $job_id, 'label:force_result:passed:boo42');
+    is $jobs->find($job_id)->result, 'passed', 'job is updated when description pattern matches';
+    my $id = $t->get_ok("/api/v1/jobs/$job_id/comments")->tx->res->json->[0]->{id};
+    $t->put_ok("$route/$id" => form => {text => 'label:force_result:passed'})
+      ->status_is(400, 'can not update comment with invalid description')
+      ->json_like('/error' => qr/description.*does not match/);
+    $t->delete_ok("$route/$id")->status_is(403, 'can not delete comment with label:force_result');
+    $t->put_ok("$route/$id" => form => {text => 'no label'})->status_is(200, 'can update comment with special label');
+    $t->delete_ok("$route/$id")->status_is(200, 'can now delete comment with former label');
+    $global_cfg->{force_result_regex} = '';
+    $job_id = 99927;
+    $route = "/api/v1/jobs/$job_id/comments";
+    is $jobs->find($job_id)->state, 'scheduled', 'job initially is unfinished';
+    $t->post_ok($route => form => {text => 'label:force_result:passed'})
+      ->status_is(400, 'comment can not be created when job is unfinished')
+      ->json_like('/error' => qr/only allowed on finished/);
+    is $jobs->find($job_id)->result, 'none', 'unfinished job will not be updated';
+};
+
 subtest 'unauthorized users can only read' => sub {
     my $app = $t->app;
     $t->ua(OpenQA::Client->new()->ioloop(Mojo::IOLoop->singleton));
     $t->app($app);
-    test_get_comment(jobs   => 99981, 1, $edited_test_message);
-    test_get_comment(groups => 1001,  2, $edited_test_message);
+    test_get_comment(jobs => 99981, 1, $edited_test_message);
+    test_get_comment(groups => 1001, 2, $edited_test_message);
 };
 
 done_testing();

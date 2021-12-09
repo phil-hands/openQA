@@ -2,7 +2,11 @@
 # https://github.com/marketplace/actions/gs-commit-message-checker
 name: 'Commit Message Check'
 # yamllint disable-line rule:truthy
-on: [push, pull_request]
+on:
+  pull_request:
+  push:
+    branches:
+      - '!master'  # we must not fix commit messages when they already reached master
 
 jobs:
   check-commit-message:
@@ -12,7 +16,7 @@ jobs:
       - name: Check Subject Begining
         uses: gsactions/commit-message-checker@v1
         with:
-          pattern: '^([A-Z]|\w+:)'
+          pattern: '^([A-Z]|[A-Za-z0-9_/.\-\s]+:|git subrepo pull)'
           flags: 'g'
           error: 'The subject does not start with a capital or tag.'
           excludeDescription: 'true'

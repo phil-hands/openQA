@@ -1,18 +1,6 @@
 #!/usr/bin/env perl
-# Copyright (c) 2018-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 use Time::Seconds;
@@ -21,15 +9,15 @@ my $tempdir;
 BEGIN {
     use Mojo::File qw(path tempdir);
 
-    $ENV{OPENQA_CACHE_SERVICE_QUIET}      = $ENV{HARNESS_IS_VERBOSE} ? 0 : 1;
-    $ENV{OPENQA_CACHE_ATTEMPTS}           = 3;
+    $ENV{OPENQA_CACHE_SERVICE_QUIET} = $ENV{HARNESS_IS_VERBOSE} ? 0 : 1;
+    $ENV{OPENQA_CACHE_ATTEMPTS} = 3;
     $ENV{OPENQA_CACHE_ATTEMPT_SLEEP_TIME} = 0;
 
     $tempdir = tempdir;
     my $basedir = $tempdir->child('t', 'cache.d');
     $ENV{OPENQA_CACHE_DIR} = path($basedir, 'cache');
-    $ENV{OPENQA_BASEDIR}   = $basedir;
-    $ENV{OPENQA_CONFIG}    = path($basedir, 'config')->make_path;
+    $ENV{OPENQA_BASEDIR} = $basedir;
+    $ENV{OPENQA_CONFIG} = path($basedir, 'config')->make_path;
     path($ENV{OPENQA_CONFIG})->child("workers.ini")->spurt('
 [global]
 CACHEDIRECTORY = ' . $ENV{OPENQA_CACHE_DIR} . '
@@ -49,22 +37,22 @@ use POSIX '_exit';
 use Mojo::IOLoop::ReadWriteProcess qw(queue process);
 use Mojo::IOLoop::ReadWriteProcess::Session 'session';
 use OpenQA::Test::Utils qw(fake_asset_server cache_minion_worker cache_worker_service wait_for_or_bail_out);
-use OpenQA::Test::TimeLimit '50';
+use OpenQA::Test::TimeLimit '90';
 use Mojo::Util qw(md5_sum);
 use OpenQA::CacheService;
 use OpenQA::CacheService::Request;
 use OpenQA::CacheService::Client;
 
 my $cachedir = $ENV{OPENQA_CACHE_DIR};
-my $port     = Mojo::IOLoop::Server->generate_port;
-my $host     = "http://localhost:$port";
+my $port = Mojo::IOLoop::Server->generate_port;
+my $host = "http://localhost:$port";
 
 my $cache_client = OpenQA::CacheService::Client->new();
 
 END { session->clean }
 
 my $daemon;
-my $cache_service        = cache_worker_service;
+my $cache_service = cache_worker_service;
 my $worker_cache_service = cache_minion_worker;
 
 my $server_instance = process sub {
@@ -74,10 +62,10 @@ my $server_instance = process sub {
     Devel::Cover::report() if Devel::Cover->can('report');
     _exit(0);    # uncoverable statement to ensure proper exit code of complete test at cleanup
   },
-  max_kill_attempts        => 0,
-  blocking_stop            => 1,
+  max_kill_attempts => 0,
+  blocking_stop => 1,
   _default_blocking_signal => POSIX::SIGTERM,
-  kill_sleeptime           => 0;
+  kill_sleeptime => 0;
 
 sub start_server {
     $server_instance->set_pipes(0)->separate_err(0)->blocking_stop(1)->channels(0)->restart;
@@ -98,13 +86,13 @@ sub test_default_usage {
 }
 
 sub test_sync {
-    my ($run)         = @_;
-    my $dir           = tempdir;
-    my $dir2          = tempdir;
+    my ($run) = @_;
+    my $dir = tempdir;
+    my $dir2 = tempdir;
     my $rsync_request = $cache_client->rsync_request(from => $dir, to => $dir2);
 
     my $t_dir = int(rand(13432432));
-    my $data  = int(rand(348394280934820842093));
+    my $data = int(rand(348394280934820842093));
     $dir->child($t_dir)->spurt($data);
     my $expected = $dir2->child('tests')->child($t_dir);
 
@@ -142,8 +130,8 @@ sub test_download {
 
 sub perform_job_in_foreground {
     my $job = shift;
-    if   (my $err = $job->execute) { $job->fail($err) }
-    else                           { $job->finish }
+    if (my $err = $job->execute) { $job->fail($err) }
+    else { $job->finish }
 }
 
 subtest 'OPENQA_CACHE_DIR environment variable' => sub {
@@ -157,19 +145,19 @@ subtest 'Availability check and worker status' => sub {
     is($info->availability_error, 'foo', 'availability error');
 
     $info = OpenQA::CacheService::Response::Info->new(
-        data  => {active_workers => 0, inactive_workers => 0, inactive_jobs => 0},
+        data => {active_workers => 0, inactive_workers => 0, inactive_jobs => 0},
         error => undef
     );
     is $info->availability_error, 'No workers active in the cache service', 'no workers active';
 
     $info = OpenQA::CacheService::Response::Info->new(
-        data  => {active_workers => 1, inactive_workers => 0, inactive_jobs => 6},
+        data => {active_workers => 1, inactive_workers => 0, inactive_jobs => 6},
         error => undef
     );
     is $info->availability_error, 'Cache service queue already full (5)', 'cache service jobs pileup';
 
     $info = OpenQA::CacheService::Response::Info->new(
-        data  => {active_workers => 0, inactive_workers => 1, inactive_jobs => 3},
+        data => {active_workers => 0, inactive_workers => 1, inactive_jobs => 3},
         error => undef
     );
     is $info->availability_error, undef, 'no error';
@@ -194,10 +182,10 @@ subtest 'Cache Requests' => sub {
     my $asset_request = $cache_client->asset_request(id => 922756, asset => 'test', type => 'hdd', host => 'open.qa');
     my $rsync_request = $cache_client->rsync_request(from => 'foo', to => 'bar');
 
-    is $rsync_request->lock, join('.', 'foo',  'bar'),     'rsync request';
+    is $rsync_request->lock, join('.', 'foo', 'bar'), 'rsync request';
     is $asset_request->lock, join('.', 'test', 'open.qa'), 'asset request';
 
-    is_deeply $rsync_request->to_array, [qw(foo bar)],                 'rsync request array';
+    is_deeply $rsync_request->to_array, [qw(foo bar)], 'rsync request array';
     is_deeply $asset_request->to_array, [qw(922756 hdd test open.qa)], 'asset request array';
 
     my $base = OpenQA::CacheService::Request->new;
@@ -213,28 +201,28 @@ start_server;
 ok $cache_client->info->available, 'cache service is available';
 
 subtest 'Invalid requests' => sub {
-    my $url             = $cache_client->url('/status/12345');
+    my $url = $cache_client->url('/status/12345');
     my $invalid_request = $cache_client->ua->get($url);
-    my $json            = $invalid_request->result->json;
+    my $json = $invalid_request->result->json;
     is_deeply($json, {error => 'Specified job ID is invalid'}, 'invalid job ID') or diag explain $json;
 
-    $url             = $cache_client->url('/status/abc');
+    $url = $cache_client->url('/status/abc');
     $invalid_request = $cache_client->ua->get($url);
     is $invalid_request->res->code, 404, 'invalid job ID';
 
-    $url             = $cache_client->url('/enqueue');
+    $url = $cache_client->url('/enqueue');
     $invalid_request = $cache_client->ua->post($url => json => {args => []});
-    $json            = $invalid_request->result->json;
+    $json = $invalid_request->result->json;
     is_deeply($json, {error => 'No task defined'}, 'invalid task') or diag explain $json;
 
-    $url             = $cache_client->url('/enqueue');
+    $url = $cache_client->url('/enqueue');
     $invalid_request = $cache_client->ua->post($url => json => {task => 'cache_asset'});
-    $json            = $invalid_request->result->json;
+    $json = $invalid_request->result->json;
     is_deeply($json, {error => 'No arguments defined'}, 'invalid args') or diag explain $json;
 
-    $url             = $cache_client->url('/enqueue');
+    $url = $cache_client->url('/enqueue');
     $invalid_request = $cache_client->ua->post($url => json => {task => 'cache_asset', args => []});
-    $json            = $invalid_request->result->json;
+    $json = $invalid_request->result->json;
     is_deeply($json, {error => 'No lock defined'}, 'invalid lock') or diag explain $json;
 };
 
@@ -251,8 +239,8 @@ subtest 'Asset exists' => sub {
 
 subtest 'Increased SQLite busy timeout' => sub {
     my $cache = OpenQA::CacheService->new;
-    is $cache->cache->sqlite->db->dbh->sqlite_busy_timeout, 360000, '5 minute cache busy timeout';
-    is $cache->minion->backend->sqlite->db->dbh->sqlite_busy_timeout, 360000, '5 minute minion busy timeout';
+    is $cache->cache->sqlite->db->dbh->sqlite_busy_timeout, 600000, '10 minute cache busy timeout';
+    is $cache->minion->backend->sqlite->db->dbh->sqlite_busy_timeout, 600000, '10 minute minion busy timeout';
 };
 
 subtest 'Job progress (guard against parallel downloads of the same file)' => sub {
@@ -260,9 +248,9 @@ subtest 'Job progress (guard against parallel downloads of the same file)' => su
     ok !$app->progress->is_downloading('foo'), 'not downloading';
     is $app->progress->downloading_job('foo'), undef, 'no job';
     my $guard = $app->progress->guard('foo', 123);
-    ok $app->progress->is_downloading('foo'),  'is downloading';
+    ok $app->progress->is_downloading('foo'), 'is downloading';
     is $app->progress->downloading_job('foo'), 123, 'has job';
-    ok $app->progress->is_downloading('foo'),  'still downloading';
+    ok $app->progress->is_downloading('foo'), 'still downloading';
     undef $guard;
     ok !$app->progress->is_downloading('foo'), 'not downloading anymore';
 
@@ -312,9 +300,9 @@ subtest 'Race for same asset' => sub {
     ok(!$cache_client->asset_exists('localhost', $asset), 'Asset absent')
       or die diag "Asset already exists - abort test";
 
-    my $tot_proc   = $ENV{STRESS_TEST} ? 100 : 3;
-    my $concurrent = $ENV{STRESS_TEST} ? 30  : 2;
-    my $q          = queue;
+    my $tot_proc = $ENV{STRESS_TEST} ? 100 : 3;
+    my $concurrent = $ENV{STRESS_TEST} ? 30 : 2;
+    my $q = queue;
     $q->pool->maximum_processes($concurrent);
     $q->queue->maximum_processes($tot_proc);
 
@@ -341,7 +329,7 @@ subtest 'Race for same asset' => sub {
 };
 
 subtest 'Default usage' => sub {
-    my $asset         = 'sle-12-SP3-x86_64-0368-200_1000@64bit.qcow2';
+    my $asset = 'sle-12-SP3-x86_64-0368-200_1000@64bit.qcow2';
     my $asset_request = $cache_client->asset_request(id => 922756, asset => $asset, type => 'hdd', host => $host);
 
     unlink path($cachedir)->child($asset);
@@ -357,7 +345,7 @@ subtest 'Default usage' => sub {
 };
 
 subtest 'Small assets causes racing when releasing locks' => sub {
-    my $asset         = 'sle-12-SP3-x86_64-0368-200_1@64bit.qcow2';
+    my $asset = 'sle-12-SP3-x86_64-0368-200_1@64bit.qcow2';
     my $asset_request = $cache_client->asset_request(id => 922756, asset => $asset, type => 'hdd', host => $host);
 
     unlink path($cachedir)->child($asset);
@@ -442,7 +430,7 @@ subtest 'Test Minion task registration and execution' => sub {
 subtest 'Test Minion Sync task' => sub {
     my $app = OpenQA::CacheService->new;
 
-    my $dir  = tempdir;
+    my $dir = tempdir;
     my $dir2 = tempdir;
     $dir->child('test')->spurt('foobar');
     my $expected = $dir2->child('tests')->child('test');
@@ -465,14 +453,14 @@ subtest 'Test Minion Sync task' => sub {
 
 subtest 'Minion monitoring with InfluxDB' => sub {
     my $url = $cache_client->url('/influxdb/minion');
-    my $ua  = $cache_client->ua;
+    my $ua = $cache_client->ua;
     my $res = $ua->get($url)->result;
     is $res->body, <<'EOF', 'three workers still running';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=0i,failed=0i,inactive=0i
 openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=2i
 EOF
 
-    my $app    = OpenQA::CacheService->new;
+    my $app = OpenQA::CacheService->new;
     my $minion = $app->minion;
     my $worker = $minion->repair->worker->register;
     $res = $ua->get($url)->result;
@@ -482,9 +470,9 @@ openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i
 EOF
 
     $minion->add_task(test => sub { });
-    my $job_id  = $minion->enqueue('test');
+    my $job_id = $minion->enqueue('test');
     my $job_id2 = $minion->enqueue('test');
-    my $job     = $worker->dequeue(0);
+    my $job = $worker->dequeue(0);
     $res = $ua->get($url)->result;
     is $res->body, <<'EOF', 'two jobs';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=1i,delayed=0i,failed=0i,inactive=1i
@@ -554,12 +542,12 @@ subtest 'Concurrent downloads of the same file' => sub {
     $app->minion->job($req->minion_id)->remove;
     my $status3 = $cache_client->status($req2);
     ok $status3->is_processed, 'is processed';
-    like $status3->output,     qr/Asset "sle.+" was downloaded by #\d+, details are therefore unavailable here/,
+    like $status3->output, qr/Asset "sle.+" was downloaded by #\d+, details are therefore unavailable here/,
       'right output';
 };
 
 subtest 'Concurrent rsync' => sub {
-    my $dir  = tempdir;
+    my $dir = tempdir;
     my $dir2 = tempdir;
     $dir->child('test')->spurt('foobar');
     my $expected = $dir2->child('tests')->child('test');
@@ -613,8 +601,8 @@ subtest 'Concurrent rsync' => sub {
     $app->minion->job($req->minion_id)->remove;
     my $status3 = $cache_client->status($req2);
     ok $status3->is_processed, 'is processed';
-    is $status3->result,       undef, 'expected result';
-    like $status3->output,     qr/Sync ".+" to ".+" was performed by #\d+, details are therefore unavailable here/,
+    is $status3->result, undef, 'expected result';
+    like $status3->output, qr/Sync ".+" to ".+" was performed by #\d+, details are therefore unavailable here/,
       'right output';
 };
 

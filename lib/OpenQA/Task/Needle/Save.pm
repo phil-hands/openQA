@@ -1,17 +1,5 @@
-# Copyright (C) 2019-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Task::Needle::Save;
 use Mojo::Base 'Mojolicious::Plugin';
@@ -48,11 +36,11 @@ sub _json_validation {
 
     my $areas = $djson->{area};
     foreach my $area (@$areas) {
-        die 'area without xpos'   unless exists $area->{xpos};
-        die 'area without ypos'   unless exists $area->{ypos};
-        die 'area without type'   unless exists $area->{type};
+        die 'area without xpos' unless exists $area->{xpos};
+        die 'area without ypos' unless exists $area->{ypos};
+        die 'area without type' unless exists $area->{type};
         die 'area without height' unless exists $area->{height};
-        die 'area without width'  unless exists $area->{width};
+        die 'area without width' unless exists $area->{width};
     }
     return $djson;
 }
@@ -69,16 +57,16 @@ sub _save_needle {
     return $minion_job->finish({error => 'Another save or delete needle job is ongoing. Try again later.'})
       unless my $guard = $app->minion->guard('limit_needle_task', 7200);
 
-    my $schema         = $app->schema;
-    my $openqa_job     = $schema->resultset('Jobs')->find($args->{job_id});
-    my $user           = $schema->resultset('Users')->find($args->{user_id});
-    my $needle_json    = encode_utf8($args->{needle_json});
-    my $imagedir       = $args->{imagedir};
-    my $imagedistri    = $args->{imagedistri};
-    my $imagename      = $args->{imagename};
-    my $imageversion   = $args->{imageversion};
-    my $needledir      = $args->{needledir};
-    my $needlename     = $args->{needlename};
+    my $schema = $app->schema;
+    my $openqa_job = $schema->resultset('Jobs')->find($args->{job_id});
+    my $user = $schema->resultset('Users')->find($args->{user_id});
+    my $needle_json = encode_utf8($args->{needle_json});
+    my $imagedir = $args->{imagedir};
+    my $imagedistri = $args->{imagedistri};
+    my $imagename = $args->{imagename};
+    my $imageversion = $args->{imageversion};
+    my $needledir = $args->{needledir};
+    my $needlename = $args->{needlename};
     my $commit_message = $args->{commit_message};
 
     # read JSON data
@@ -152,7 +140,7 @@ sub _save_needle {
     if ($git->enabled) {
         my $error = $git->commit(
             {
-                add     => ["$needlename.json", "$needlename.png"],
+                add => ["$needlename.json", "$needlename.png"],
                 message => ($commit_message || sprintf("%s for %s", $needlename, $openqa_job->name)),
             });
         if ($error) {
@@ -166,7 +154,7 @@ sub _save_needle {
 
     # finish minion job with successful result
     my $info = {
-        success   => "Needle $needlename created/updated",
+        success => "Needle $needlename created/updated",
         json_data => $json_data,
     };
     if ($openqa_job->state eq OpenQA::Jobs::Constants::RUNNING && $openqa_job->developer_session) {

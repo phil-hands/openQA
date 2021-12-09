@@ -1,17 +1,5 @@
-# Copyright (C) 2019 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2019 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::Admin::Influxdb;
 use Mojo::Base 'Mojolicious::Controller';
@@ -64,9 +52,9 @@ sub jobs {
     $rs = $schema->resultset('Jobs')->search(
         {state => [OpenQA::Jobs::Constants::EXECUTION_STATES]},
         {
-            join     => [qw(assigned_worker)],
-            select   => ['assigned_worker.host', {count => 'job_id'}],
-            as       => [qw(host count)],
+            join => [qw(assigned_worker)],
+            select => ['assigned_worker.host', {count => 'job_id'}],
+            as => [qw(host count)],
             group_by => 'assigned_worker.host'
         });
 
@@ -92,7 +80,7 @@ sub jobs {
         $result->{openqa_jobs_by_group}->{"group=No Group"} = $result->{by_group}->{0};
     }
 
-    my $url  = $self->app->config->{global}->{base_url} || $self->req->url->base->to_string;
+    my $url = $self->app->config->{global}->{base_url} || $self->req->url->base->to_string;
     my $text = '';
     $text .= _queue_output_measure($url, 'openqa_jobs', undef, $result->{openqa_jobs});
     for my $key (qw(openqa_jobs_by_group openqa_jobs_by_worker openqa_jobs_by_arch)) {
@@ -107,20 +95,20 @@ sub jobs {
 sub minion {
     my $self = shift;
 
-    my $stats           = $self->app->minion->stats;
-    my $block_list      = $self->app->config->{influxdb}->{ignored_failed_minion_jobs} || [];
+    my $stats = $self->app->minion->stats;
+    my $block_list = $self->app->config->{influxdb}->{ignored_failed_minion_jobs} || [];
     my $filter_jobs_num = $self->app->minion->jobs({states => ['failed'], tasks => $block_list})->total;
 
     my $jobs = {
-        active   => $stats->{active_jobs},
-        delayed  => $stats->{delayed_jobs},
-        failed   => $stats->{failed_jobs} - $filter_jobs_num,
+        active => $stats->{active_jobs},
+        delayed => $stats->{delayed_jobs},
+        failed => $stats->{failed_jobs} - $filter_jobs_num,
         inactive => $stats->{inactive_jobs}};
     my $workers = {active => $stats->{active_workers}, inactive => $stats->{inactive_workers}};
 
-    my $url  = $self->app->config->{global}->{base_url} || $self->req->url->base->to_string;
+    my $url = $self->app->config->{global}->{base_url} || $self->req->url->base->to_string;
     my $text = '';
-    $text .= _queue_output_measure($url, 'openqa_minion_jobs',    undef, $jobs);
+    $text .= _queue_output_measure($url, 'openqa_minion_jobs', undef, $jobs);
     $text .= _queue_output_measure($url, 'openqa_minion_workers', undef, $workers);
 
     $self->render(text => $text);

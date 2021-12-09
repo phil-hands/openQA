@@ -1,41 +1,45 @@
 #!/usr/bin/env perl
-# Copyright (C) 2016-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
+# define test helper to check for exit code
+our $exit_handler = sub { CORE::exit $_[0] };
+BEGIN {
+    *CORE::GLOBAL::exit = sub (;$) { $exit_handler->(@_ ? 0 + $_[0] : 0) }
+}
+sub exit_code(&) {
+    my $exit_code;
+    local $exit_handler = sub { $exit_code = $_[0] };
+    shift->();
+    return $exit_code;
+}
+
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
-use OpenQA::Utils qw(:DEFAULT prjdir sharedir resultdir assetdir imagesdir base_host random_string random_hex);
+use OpenQA::Utils
+  qw(:DEFAULT prjdir sharedir resultdir assetdir imagesdir base_host random_string random_hex download_speed);
+use OpenQA::Task::SignalGuard;
 use OpenQA::Test::Utils 'redirect_output';
 use OpenQA::Test::TimeLimit '10';
 use Scalar::Util 'reftype';
+use Test::MockObject;
+use Test::Output qw(combined_like);
 use Mojo::File qw(path tempdir tempfile);
 
 subtest 'service ports' => sub {
     local $ENV{OPENQA_BASE_PORT} = undef;
-    is service_port('webui'),         9526, 'webui port';
-    is service_port('websocket'),     9527, 'websocket port';
-    is service_port('livehandler'),   9528, 'livehandler port';
-    is service_port('scheduler'),     9529, 'scheduler port';
+    is service_port('webui'), 9526, 'webui port';
+    is service_port('websocket'), 9527, 'websocket port';
+    is service_port('livehandler'), 9528, 'livehandler port';
+    is service_port('scheduler'), 9529, 'scheduler port';
     is service_port('cache_service'), 9530, 'cache service port';
     local $ENV{OPENQA_BASE_PORT} = 9530;
-    is service_port('webui'),         9530, 'webui port';
-    is service_port('websocket'),     9531, 'websocket port';
-    is service_port('livehandler'),   9532, 'livehandler port';
-    is service_port('scheduler'),     9533, 'scheduler port';
+    is service_port('webui'), 9530, 'webui port';
+    is service_port('websocket'), 9531, 'websocket port';
+    is service_port('livehandler'), 9532, 'livehandler port';
+    is service_port('scheduler'), 9533, 'scheduler port';
     is service_port('cache_service'), 9534, 'cache service port';
     eval { service_port('unknown') };
     like $@, qr/Unknown service: unknown/, 'unknown port';
@@ -50,14 +54,14 @@ subtest 'set listen address' => sub {
 };
 
 subtest 'random number generator' => sub {
-    my $r  = random_string;
+    my $r = random_string;
     my $r2 = random_string;
     is(length($r), 16, "length 16");
     like($r, qr/^\w+$/a, "random_string only consists of word characters");
     is(length($r), length($r2), "same length");
     isnt($r, $r2, "random_string produces different results");
 
-    $r  = random_string 32;
+    $r = random_string 32;
     $r2 = random_string 32;
     is(length($r), 32, "length 32");
     like($r, qr/^\w+$/a, "random_string only consists of word characters");
@@ -65,7 +69,7 @@ subtest 'random number generator' => sub {
     isnt($r, $r2, "random_string produces different results");
 
     is(length(random_hex), 16, 'default length 16');
-    $r  = random_hex 97;
+    $r = random_hex 97;
     $r2 = random_hex 97;
     is(length($r), 97, "length 97");
     like($r, qr/^[0-9A-F]+$/a, "random_hex only consists of hex characters");
@@ -73,16 +77,29 @@ subtest 'random number generator' => sub {
     isnt($r, $r2, "random_hex produces different results");
 };
 
+subtest 'download speed' => sub {
+    is download_speed([1638459407, 528237], [1638459408, 628237], 1024), '930.91 Byte/s';
+    is download_speed([1638459407, 528237], [1638459408, 628237], 1024 * 1024), '931 KiB/s';
+    is download_speed([1638459407, 528237], [1638459408, 628237], 1024 * 1024 * 1024), '931 MiB/s';
+    is download_speed([1638459407, 528237], [1638459408, 628237], 1024 * 1024 * 1024 * 1024), '931 GiB/s';
+    is download_speed([1638459407, 528237], [1638459408, 628237], 1024 * 1024 * 1024 * 1024 * 1024), '953251 GiB/s';
+
+    is download_speed([1638459407, 528237], [1638459508, 628237], 1024 * 1024 * 512), '5.1 MiB/s';
+    is download_speed([1638459407, 528237], [1638459407, 588237], 123456789), '1.9 GiB/s';
+
+    is download_speed([1638459407, 528237], [1638459407, 528237], 1024), '??/s';
+};
+
 is bugurl('bsc#1234'), 'https://bugzilla.suse.com/show_bug.cgi?id=1234', 'bug url is properly expanded';
 ok find_bugref('gh#os-autoinst/openQA#1234'), 'github bugref is recognized';
 is(find_bugref('bsc#1234 poo#4321'), 'bsc#1234', 'first bugres found');
 is_deeply(find_bugrefs('bsc#1234 poo#4321'), ['bsc#1234', 'poo#4321'], 'multiple bugrefs found');
-is_deeply(find_bugrefs('bc#1234 #4321'),     [],                       'no bugrefs found');
-is bugurl('gh#os-autoinst/openQA#1234'),                        'https://github.com/os-autoinst/openQA/issues/1234';
-is bugurl('poo#1234'),                                          'https://progress.opensuse.org/issues/1234';
+is_deeply(find_bugrefs('bc#1234 #4321'), [], 'no bugrefs found');
+is bugurl('gh#os-autoinst/openQA#1234'), 'https://github.com/os-autoinst/openQA/issues/1234';
+is bugurl('poo#1234'), 'https://progress.opensuse.org/issues/1234';
 is href_to_bugref('https://progress.opensuse.org/issues/1234'), 'poo#1234';
 is bugref_to_href('boo#9876'), '<a href="https://bugzilla.opensuse.org/show_bug.cgi?id=9876">boo#9876</a>';
-is href_to_bugref('https://github.com/foo/bar/issues/1234'),              'gh#foo/bar#1234';
+is href_to_bugref('https://github.com/foo/bar/issues/1234'), 'gh#foo/bar#1234';
 is href_to_bugref('https://github.com/os-autoinst/os-autoinst/pull/960'), 'gh#os-autoinst/os-autoinst#960',
   'github pull are also transformed same as issues';
 is bugref_to_href('gh#foo/bar#1234'), '<a href="https://github.com/foo/bar/issues/1234">gh#foo/bar#1234</a>';
@@ -162,12 +179,12 @@ subtest 'get current version' => sub {
     # If it's a git version it should be in the form: git-tag-sha1
     # otherwise is a group of 3 decimals followed by a partial sha1: a.b.c.sha1
 
-    my $changelog_dir  = tempdir;
-    my $git_dir        = tempdir;
+    my $changelog_dir = tempdir;
+    my $git_dir = tempdir;
     my $changelog_file = $changelog_dir->child('public')->make_path->child('Changelog');
-    my $refs_file      = $git_dir->child('.git')->make_path->child('packed-refs');
-    my $head_file      = $git_dir->child('.git', 'refs', 'heads')->make_path->child('master');
-    my $sha_regex      = qr/\b[0-9a-f]{5,40}\b/;
+    my $refs_file = $git_dir->child('.git')->make_path->child('packed-refs');
+    my $head_file = $git_dir->child('.git', 'refs', 'heads')->make_path->child('master');
+    my $sha_regex = qr/\b[0-9a-f]{5,40}\b/;
 
     my $changelog_content = <<'EOT';
 -------------------------------------------------------------------
@@ -230,7 +247,7 @@ EOT
     # Create a valid Git repository where we can fetch the exact version.
     $head_file->spurt("7223a2408120127ad2d82d71ef1893bbe02ad8aa");
     $refs_file->spurt($refs_content);
-    is detect_current_version($git_dir),   'git-4.3-7223a240', 'detect current version from Git repository';
+    is detect_current_version($git_dir), 'git-4.3-7223a240', 'detect current version from Git repository';
     like detect_current_version($git_dir), qr/(git\-\d+\.\d+\-$sha_regex)/, 'Git version scheme matches';
 
     # If refs file can't be found or there is no tag present, version should be undef
@@ -242,11 +259,11 @@ EOT
 
 subtest 'Plugins handling' => sub {
 
-    is path_to_class('foo/bar.pm'),     "foo::bar";
+    is path_to_class('foo/bar.pm'), "foo::bar";
     is path_to_class('foo/bar/baz.pm'), "foo::bar::baz";
 
     ok grep("OpenQA::Utils", loaded_modules), "Can detect loaded modules";
-    ok grep("Test::Most",    loaded_modules), "Can detect loaded modules";
+    ok grep("Test::Most", loaded_modules), "Can detect loaded modules";
 
     is_deeply [loaded_plugins('OpenQA::Utils', 'Test::Most')], ['OpenQA::Utils', 'Test::Most', 'Test::Most::Exception'],
       "Can detect loaded plugins, filtering by namespace";
@@ -256,8 +273,8 @@ subtest 'Plugins handling' => sub {
     my $test_hash = {
         auth => {
             method => "Fake",
-            foo    => "bar",
-            b      => {bar2 => 2},
+            foo => "bar",
+            b => {bar2 => 2},
         },
         baz => {
             bar => "test"
@@ -282,103 +299,143 @@ subtest 'Plugins handling' => sub {
 
 subtest asset_type_from_setting => sub {
     use OpenQA::Utils 'asset_type_from_setting';
-    is asset_type_from_setting('ISO'),              'iso', 'simple from ISO';
+    is asset_type_from_setting('ISO'), 'iso', 'simple from ISO';
     is asset_type_from_setting('UEFI_PFLASH_VARS'), 'hdd', "simple from UEFI_PFLASH_VARS";
-    is asset_type_from_setting('UEFI_PFLASH_VARS', 'relative'),  'hdd', "relative from UEFI_PFLASH_VARS";
-    is asset_type_from_setting('UEFI_PFLASH_VARS', '/absolute'), '',    "absolute from UEFI_PFLASH_VARS";
+    is asset_type_from_setting('UEFI_PFLASH_VARS', 'relative'), 'hdd', "relative from UEFI_PFLASH_VARS";
+    is asset_type_from_setting('UEFI_PFLASH_VARS', '/absolute'), '', "absolute from UEFI_PFLASH_VARS";
 };
 
 subtest parse_assets_from_settings => sub {
     use OpenQA::Utils 'parse_assets_from_settings';
     my $settings = {
-        ISO   => "foo.iso",
+        ISO => "foo.iso",
         ISO_2 => "foo_2.iso",
         # this is a trap: shouldn't be treated as an asset
-        HDD   => "hdd.qcow2",
+        HDD => "hdd.qcow2",
         HDD_1 => "hdd_1.qcow2",
         HDD_2 => "hdd_2.qcow2",
         # shouldn't be treated as asset *yet* as it's absolute
         UEFI_PFLASH_VARS => "/absolute/path/uefi_pflash_vars.qcow2",
         # trap
-        REPO   => "repo",
+        REPO => "repo",
         REPO_1 => "repo_1",
         REPO_2 => "repo_2",
         # trap
-        ASSET   => "asset.pm",
+        ASSET => "asset.pm",
         ASSET_1 => "asset_1.pm",
         ASSET_2 => "asset_2.pm",
-        KERNEL  => "vmlinuz",
-        INITRD  => "initrd.img",
+        KERNEL => "vmlinuz",
+        INITRD => "initrd.img",
     };
-    my $assets    = parse_assets_from_settings($settings);
+    my $assets = parse_assets_from_settings($settings);
     my $refassets = {
-        ISO     => {type => "iso",   name => "foo.iso"},
-        ISO_2   => {type => "iso",   name => "foo_2.iso"},
-        HDD_1   => {type => "hdd",   name => "hdd_1.qcow2"},
-        HDD_2   => {type => "hdd",   name => "hdd_2.qcow2"},
-        REPO_1  => {type => "repo",  name => "repo_1"},
-        REPO_2  => {type => "repo",  name => "repo_2"},
+        ISO => {type => "iso", name => "foo.iso"},
+        ISO_2 => {type => "iso", name => "foo_2.iso"},
+        HDD_1 => {type => "hdd", name => "hdd_1.qcow2"},
+        HDD_2 => {type => "hdd", name => "hdd_2.qcow2"},
+        REPO_1 => {type => "repo", name => "repo_1"},
+        REPO_2 => {type => "repo", name => "repo_2"},
         ASSET_1 => {type => "other", name => "asset_1.pm"},
         ASSET_2 => {type => "other", name => "asset_2.pm"},
-        KERNEL  => {type => "other", name => "vmlinuz"},
-        INITRD  => {type => "other", name => "initrd.img"},
+        KERNEL => {type => "other", name => "vmlinuz"},
+        INITRD => {type => "other", name => "initrd.img"},
     };
     is_deeply $assets, $refassets, "correct with absolute UEFI_PFLASH_VARS";
     # now make this relative: it should now be seen as an asset type
-    $settings->{UEFI_PFLASH_VARS}  = "uefi_pflash_vars.qcow2";
-    $assets                        = parse_assets_from_settings($settings);
+    $settings->{UEFI_PFLASH_VARS} = "uefi_pflash_vars.qcow2";
+    $assets = parse_assets_from_settings($settings);
     $refassets->{UEFI_PFLASH_VARS} = {type => "hdd", name => "uefi_pflash_vars.qcow2"};
     is_deeply $assets, $refassets, "correct with relative UEFI_PFLASH_VARS";
 };
 
 subtest 'base_host' => sub {
-    is base_host('http://opensuse.org'),             'opensuse.org';
-    is base_host('www.opensuse.org'),                'www.opensuse.org';
-    is base_host('test'),                            'test';
+    is base_host('http://opensuse.org'), 'opensuse.org';
+    is base_host('www.opensuse.org'), 'www.opensuse.org';
+    is base_host('test'), 'test';
     is base_host('https://opensuse.org/test/1/2/3'), 'opensuse.org';
 };
 
 subtest 'project directory functions' => sub {
-    local $ENV{OPENQA_BASEDIR};
-    local $ENV{OPENQA_SHAREDIR};
-    is prjdir(),    '/var/lib/openqa',               'right directory';
-    is sharedir(),  '/var/lib/openqa/share',         'right directory';
-    is resultdir(), '/var/lib/openqa/testresults',   'right directory';
-    is assetdir(),  '/var/lib/openqa/share/factory', 'right directory';
-    is imagesdir(), '/var/lib/openqa/images',        'right directory';
-
-    local $ENV{OPENQA_BASEDIR} = '/tmp/test';
-    is prjdir(),    '/tmp/test/openqa',               'right directory';
-    is sharedir(),  '/tmp/test/openqa/share',         'right directory';
-    is resultdir(), '/tmp/test/openqa/testresults',   'right directory';
-    is assetdir(),  '/tmp/test/openqa/share/factory', 'right directory';
-    is imagesdir(), '/tmp/test/openqa/images',        'right directory';
-
-    local $ENV{OPENQA_SHAREDIR} = '/tmp/share';
-    is prjdir(),    '/tmp/test/openqa',             'right directory';
-    is sharedir(),  '/tmp/share',                   'right directory';
-    is resultdir(), '/tmp/test/openqa/testresults', 'right directory';
-    is assetdir(),  '/tmp/share/factory',           'right directory';
-    is imagesdir(), '/tmp/test/openqa/images',      'right directory';
+    my $distri = 'opensuse';
+    subtest 'default OPENQA_BASEDIR/OPENQA_SHAREDIR' => sub {
+        local $ENV{OPENQA_BASEDIR};
+        local $ENV{OPENQA_SHAREDIR};
+        is prjdir, '/var/lib/openqa', 'prjdir';
+        is sharedir, '/var/lib/openqa/share', 'sharedir';
+        is resultdir, '/var/lib/openqa/testresults', 'resultdir';
+        is assetdir, '/var/lib/openqa/share/factory', 'assetdir';
+        is imagesdir, '/var/lib/openqa/images', 'imagesdir';
+        combined_like { is gitrepodir, '', 'no gitrepodir when distri is not defined' }
+        qr{/var/lib/openqa/share/tests is not a git directory}, 'warning about Git dir logged';
+    };
+    subtest 'custom OPENQA_BASEDIR' => sub {
+        local $ENV{OPENQA_BASEDIR} = '/tmp/test';
+        is prjdir, '/tmp/test/openqa', 'prjdir';
+        is sharedir, '/tmp/test/openqa/share', 'sharedir';
+        is resultdir, '/tmp/test/openqa/testresults', 'resultdir';
+        is assetdir, '/tmp/test/openqa/share/factory', 'assetdir';
+        is imagesdir, '/tmp/test/openqa/images', 'imagesdir';
+        my $mocked_git = path(sharedir . '/tests/opensuse/.git');
+        $mocked_git->remove_tree if -e $mocked_git;
+        combined_like { is gitrepodir(distri => $distri), '', 'empty when .git is missing' }
+        qr{/tmp/test/openqa/share/tests/opensuse is not a git directory}, 'warning about Git dir logged';
+        $mocked_git->make_path;
+        $mocked_git->child('config')
+          ->spurt(qq{[remote "origin"]\n        url = git\@github.com:fakerepo/os-autoinst-distri-opensuse.git});
+        is gitrepodir(distri => $distri) =~ /github\.com.+os-autoinst-distri-opensuse\/commit/, 1, 'correct git url';
+        $mocked_git->child('config')
+          ->spurt(qq{[remote "origin"]\n        url = https://github.com/fakerepo/os-autoinst-distri-opensuse.git});
+        is gitrepodir(distri => $distri) =~ /github\.com.+os-autoinst-distri-opensuse\/commit/, 1, 'correct git url';
+    };
+    subtest 'custom OPENQA_BASEDIR and OPENQA_SHAREDIR' => sub {
+        local $ENV{OPENQA_BASEDIR} = '/tmp/test';
+        local $ENV{OPENQA_SHAREDIR} = '/tmp/share';
+        is prjdir, '/tmp/test/openqa', 'prjdir';
+        is sharedir, '/tmp/share', 'sharedir';
+        is resultdir, '/tmp/test/openqa/testresults', 'resultdir';
+        is assetdir, '/tmp/share/factory', 'assetdir';
+        is imagesdir, '/tmp/test/openqa/images', 'imagesdir';
+        combined_like { is gitrepodir, '', 'no gitrepodir when distri is not defined' }
+        qr{/tmp/test/openqa/share/tests is not a git directory}, 'warning about Git dir logged';
+        is gitrepodir(distri => $distri) =~ /github\.com.+os-autoinst-distri-opensuse\/commit/, 1, 'correct git url';
+    };
 };
 
 subtest 'change_sec_to_word' => sub {
     is change_sec_to_word(), undef, 'do pass parameter';
-    is change_sec_to_word(1.2),    undef,           'treat float as invalid parameter';
-    is change_sec_to_word('test'), undef,           'treat string as invalid parameter';
-    is change_sec_to_word(10),     '10s',           'correctly converted';
-    is change_sec_to_word(70),     '1m 10s',        'correctly converted';
-    is change_sec_to_word(900),    '15m',           'correctly converted';
-    is change_sec_to_word(3900),   '1h 5m',         'correctly converted';
-    is change_sec_to_word(7201),   '2h 1s',         'correctly converted';
-    is change_sec_to_word(64890),  '18h 1m 30s',    'correctly converted';
-    is change_sec_to_word(648906), '7d 12h 15m 6s', 'correctly converted';
+    is change_sec_to_word(1.2), undef, 'treat float as invalid parameter';
+    is change_sec_to_word('test'), undef, 'treat string as invalid parameter';
+    is change_sec_to_word(10), '10s', 'correctly converted (seconds)';
+    is change_sec_to_word(70), '1m 10s', 'correctly converted (minutes + seconds)';
+    is change_sec_to_word(900), '15m', 'correctly converted (minutes)';
+    is change_sec_to_word(3900), '1h 5m', 'correctly converted (hours + minutes)';
+    is change_sec_to_word(7201), '2h 1s', 'correctly converted (hours + seconds)';
+    is change_sec_to_word(64890), '18h 1m 30s', 'correctly converted (hours + minutes + seconds)';
+    is change_sec_to_word(648906), '7d 12h 15m 6s', 'correctly converted (all units)';
 };
 
-done_testing;
+my ($current_term_handler, $current_int_handler) = ($SIG{TERM}, $SIG{INT});
+subtest 'signal handling in Minion jobs' => sub {
+    my $job = Test::MockObject->new;
+    my $signal_guard = OpenQA::Task::SignalGuard->new($job);
+    $job->set_true($_) for qw(retry note);
 
-{
-    package foo;      # uncoverable statement
-    use Mojo::Base -base;
-    sub baz { @_ }    # uncoverable statement
-}
+    subtest 'signal arrives after lock acquisition' => sub {
+        is exit_code { kill INT => $$ }, 0, 'exited when signal arrives after lock acquisition';
+        $job->called_ok('note');
+        $job->called_ok('retry');
+        $job->called_args_pos_is(0, 3, 'Received signal INT, scheduling retry and releasing locks');
+        $job->clear;
+    };
+    subtest 'signal arrives after retry disabled' => sub {
+        $signal_guard->retry(0);
+        is exit_code { kill INT => $$ }, undef, 'not exited (the job is supposed to be concluded at this point)';
+        $job->called_ok('note');
+        $job->called_args_pos_is(0, 3, 'Received signal INT, concluding');
+        ok !$job->called('retry'), 'job not retried';
+    };
+};
+is $SIG{TERM}, $current_term_handler, 'SIGTERM handler restored after signal guard goes out of scope';
+is $SIG{INT}, $current_int_handler, 'SIGINT handler restored after signal guard goes out of scope';
+
+done_testing;

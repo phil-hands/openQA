@@ -1,17 +1,5 @@
-# Copyright (C) 2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::CLI::archive;
 use Mojo::Base 'OpenQA::Command';
@@ -19,7 +7,7 @@ use Mojo::Base 'OpenQA::Command';
 use Mojo::Util qw(getopt);
 
 has description => 'Download assets and test results from a job';
-has usage       => sub { shift->extract_usage };
+has usage => sub { shift->extract_usage };
 
 sub command {
     my ($self, @args) = @_;
@@ -27,13 +15,13 @@ sub command {
     die $self->usage
       unless getopt \@args,
       'l|asset-size-limit=i' => \(my $limit),
-      't|with-thumbnails'    => \my $thumbnails;
+      't|with-thumbnails' => \my $thumbnails;
 
     @args = $self->decode_args(@args);
-    die $self->usage unless my $job  = shift @args;
+    die $self->usage unless my $job = shift @args;
     die $self->usage unless my $path = shift @args;
 
-    my $url    = $self->url_for("jobs/$job/details");
+    my $url = $self->url_for("jobs/$job/details");
     my $client = $self->client($url);
     $client->archive->run(
         {url => $url, archive => $path, 'with-thumbnails' => $thumbnails, 'asset-size-limit' => $limit});

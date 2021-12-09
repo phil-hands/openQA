@@ -1,17 +1,5 @@
-# Copyright (C) 2018-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Task::Job::Limit;
 use Mojo::Base 'Mojolicious::Plugin';
@@ -20,24 +8,26 @@ use OpenQA::Log 'log_debug';
 use OpenQA::ScreenshotDeletion;
 use OpenQA::Utils qw(:DEFAULT resultdir check_df);
 use OpenQA::Task::Utils qw(acquire_limit_lock_or_retry finish_job_if_disk_usage_below_percentage);
+use OpenQA::Task::SignalGuard;
 use Scalar::Util 'looks_like_number';
 use List::Util 'min';
 use Time::Seconds;
 
 # define default parameters for batch processing
-use constant DEFAULT_SCREENSHOTS_PER_BATCH  => 200000;
+use constant DEFAULT_SCREENSHOTS_PER_BATCH => 200000;
 use constant DEFAULT_BATCHES_PER_MINION_JOB => 450;
 
 sub register {
     my ($self, $app) = @_;
     my $minion = $app->minion;
-    $minion->add_task(limit_results_and_logs         => \&_limit);
-    $minion->add_task(limit_screenshots              => \&_limit_screenshots);
+    $minion->add_task(limit_results_and_logs => \&_limit);
+    $minion->add_task(limit_screenshots => \&_limit_screenshots);
     $minion->add_task(ensure_results_below_threshold => \&_ensure_results_below_threshold);
 }
 
 sub _limit {
     my ($job, $args) = @_;
+    my $signal_guard = OpenQA::Task::SignalGuard->new($job);
 
     # prevent multiple limit_results_and_logs tasks and limit_screenshots_task/archive_job_results to run in parallel
     my $app = $job->app;
@@ -52,9 +42,9 @@ sub _limit {
 
     return undef
       if finish_job_if_disk_usage_below_percentage(
-        job     => $job,
+        job => $job,
         setting => 'result_cleanup_max_free_percentage',
-        dir     => resultdir,
+        dir => resultdir,
       );
 
     # create temporary job group outside of DB to collect
@@ -62,8 +52,8 @@ sub _limit {
     my $schema = $app->schema;
     $schema->resultset('JobGroups')->new({})->limit_results_and_logs;
 
-    my $groups  = $schema->resultset('JobGroups');
-    my $gru     = $app->gru;
+    my $groups = $schema->resultset('JobGroups');
+    my $gru = $app->gru;
     my %options = (priority => 0, ttl => 2 * ONE_DAY);
     while (my $group = $groups->next) {
         my $preserved_important_jobs;
@@ -77,6 +67,8 @@ sub _limit {
         }
     }
 
+    $signal_guard->retry(0);
+
     # prevent enqueuing new limit_screenshot if there are still inactive/delayed ones
     my $limit_screenshots_jobs
       = $app->minion->jobs({tasks => ['limit_screenshots'], states => ['inactive', 'active']})->total;
@@ -88,8 +80,8 @@ sub _limit {
     # enqueue further Minion jobs to delete unused screenshots in batches
     my ($min_id, $max_id) = $schema->storage->dbh->selectrow_array('select min(id), max(id) from screenshots');
     return undef unless $min_id && $max_id;
-    my $config                 = $app->config->{misc_limits};
-    my $screenshots_per_batch  = $args->{screenshots_per_batch} // $config->{screenshot_cleanup_batch_size};
+    my $config = $app->config->{misc_limits};
+    my $screenshots_per_batch = $args->{screenshots_per_batch} // $config->{screenshot_cleanup_batch_size};
     my $batches_per_minion_job = $args->{batches_per_minion_job}
       // $config->{screenshot_cleanup_batches_per_minion_job};
     my $screenshots_per_minion_job = $batches_per_minion_job * $screenshots_per_batch;
@@ -97,13 +89,13 @@ sub _limit {
     my @parent_minion_job_ids = ($job->id);
     for (my $i = $min_id; $i < $max_id; $i += $screenshots_per_minion_job) {
         my %args = (
-            min_screenshot_id     => $i,
-            max_screenshot_id     => min($max_id, $i + $screenshots_per_minion_job - 1),
+            min_screenshot_id => $i,
+            max_screenshot_id => min($max_id, $i + $screenshots_per_minion_job - 1),
             screenshots_per_batch => $screenshots_per_batch,
         );
         my $ids = $gru->enqueue(limit_screenshots => \%args, \%options);
         push(@screenshot_cleanup_info, \%args);
-        push(@parent_minion_job_ids,   $ids->{minion_id});
+        push(@parent_minion_job_ids, $ids->{minion_id});
     }
     $job->note(screenshot_cleanup => \@screenshot_cleanup_info);
     $gru->enqueue(ensure_results_below_threshold => {}, {parents => \@parent_minion_job_ids})
@@ -112,6 +104,7 @@ sub _limit {
 
 sub _limit_screenshots {
     my ($job, $args) = @_;
+    my $signal_guard = OpenQA::Task::SignalGuard->new($job);
 
     # prevent multiple limit_screenshots tasks to run in parallel
     my $app = $job->app;
@@ -131,8 +124,8 @@ sub _limit_screenshots {
       && looks_like_number($args->{screenshots_per_batch});
 
     # delete unused screenshots in batches
-    my $dbh                      = $app->schema->storage->dbh;
-    my $delete_screenshot_query  = $dbh->prepare('DELETE FROM screenshots WHERE id = ?');
+    my $dbh = $app->schema->storage->dbh;
+    my $delete_screenshot_query = $dbh->prepare('DELETE FROM screenshots WHERE id = ?');
     my $unused_screenshots_query = $dbh->prepare(
         'SELECT me.id, me.filename
          FROM screenshots me
@@ -153,18 +146,19 @@ sub _check_remaining_disk_usage {
     my ($job, $resultdir, $min_free_percentage) = @_;
 
     my ($available_bytes, $total_bytes) = check_df($resultdir);
-    my $free_percentage   = $available_bytes / $total_bytes * 100;
+    my $free_percentage = $available_bytes / $total_bytes * 100;
     my $margin_percentage = $free_percentage - $min_free_percentage;
-    my $margin_bytes      = $margin_percentage / 100 * $total_bytes;
-    $job->note(available_bytes   => $available_bytes);
-    $job->note(total_bytes       => $total_bytes);
+    my $margin_bytes = $margin_percentage / 100 * $total_bytes;
+    $job->note(available_bytes => $available_bytes);
+    $job->note(total_bytes => $total_bytes);
     $job->note(margin_percentage => $margin_percentage);
-    $job->note(margin_bytes      => $margin_bytes);
+    $job->note(margin_bytes => $margin_bytes);
     return $margin_bytes;
 }
 
 sub _ensure_results_below_threshold {
     my ($job, $args) = @_;
+    my $signal_guard = OpenQA::Task::SignalGuard->new($job);
 
     # prevent multiple limit_* tasks to run in parallel
     my $app = $job->app;
@@ -181,9 +175,9 @@ sub _ensure_results_below_threshold {
     # caveat: We're using `df` here which might not be appropriate for any filesystem, e.g. one might want
     #         to use `btrfs filesystem df …` instead. It is conceivable to allow running a custom script here
     #         instead.
-    my $resultdir    = resultdir;
+    my $resultdir = resultdir;
     my $margin_bytes = 0;
-    my $df_chk       = sub {
+    my $df_chk = sub {
         $margin_bytes = _check_remaining_disk_usage($job, $resultdir, $min_free_percentage);
         return $margin_bytes >= 0;
     };
@@ -218,8 +212,8 @@ sub _ensure_results_below_threshold {
     #         with a huge number of jobs.
 
     log_debug "Deleting videos from non-important jobs startinng from oldest job (balance is $margin_bytes)";
-    my $jobs        = $schema->resultset('Jobs');
-    my @job_id_args = (id       => {'<=' => $max_job_id});
+    my $jobs = $schema->resultset('Jobs');
+    my @job_id_args = (id => {'<=' => $max_job_id});
     my %jobs_params = (order_by => {-asc => 'id'});
     my $relevant_jobs
       = $jobs->search({@job_id_args, logs_present => 1, BUILD => {-not_in => \@important_builds}}, \%jobs_params);

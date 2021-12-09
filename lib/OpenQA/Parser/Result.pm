@@ -1,17 +1,5 @@
-# Copyright (C) 2017-2020 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2017-2020 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Parser::Result;
 use Mojo::Base -base;
@@ -35,7 +23,7 @@ sub new {
 
 sub get { OpenQA::Parser::Result::Node->new(val => shift->{shift()}) }
 
-sub to_json   { encode_json shift() }
+sub to_json { encode_json shift() }
 sub from_json { shift->new(decode_json shift()) }
 
 sub to_hash {
@@ -58,7 +46,7 @@ sub write {
 
 sub write_json { shift->write(@_) }
 
-sub serialize   { Storable::freeze(shift->to_el) }
+sub serialize { Storable::freeze(shift->to_el) }
 sub deserialize { shift()->new(OpenQA::Parser::restore_el(Storable::thaw(shift))) }
 
 sub TO_JSON { shift->to_hash }

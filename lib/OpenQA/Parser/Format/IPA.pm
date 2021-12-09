@@ -1,17 +1,5 @@
-# Copyright (C) 2018 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2018 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Parser::Format::IPA;
 use Mojo::Base 'OpenQA::Parser::Format::Base';
@@ -65,7 +53,7 @@ sub parse {
         $t_name =~ s/[:\/\[\]\.]/_/g;
 
         $result->{result} = 'fail';
-        $result->{result} = 'ok'   if $res->{outcome} =~ /passed/i;
+        $result->{result} = 'ok' if $res->{outcome} =~ /passed/i;
         $result->{result} = 'skip' if $res->{outcome} =~ /skipped/i;
 
         $result->{name} = $t_name;
@@ -74,23 +62,23 @@ sub parse {
         my $text_fn = "IPA-$t_name.txt";
         my $content = join("\n", $t_name, $result->{result});
 
-        $details->{text}  = $text_fn;
+        $details->{text} = $text_fn;
         $details->{title} = $t_name;
 
         push @{$result->{details}}, $details;
 
         $self->_add_output(
             {
-                file    => $text_fn,
+                file => $text_fn,
                 content => $content
             });
 
         my $t = OpenQA::Parser::Result::Test->new(
-            flags    => {},
+            flags => {},
             category => 'IPA',
-            name     => $t_name,
-            script   => undef,
-            result   => $result->{result});
+            name => $t_name,
+            script => undef,
+            result => $result->{result});
         $self->tests->add($t);
         $result->{test} = $t if $self->include_results();
         $self->_add_single_result($result);

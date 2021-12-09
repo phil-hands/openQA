@@ -1,24 +1,12 @@
-# Copyright (C) 2014-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Test::Database;
 use Test::Most;
 use Mojo::Base -base;
 
 use Date::Format;    # To allow fixtures with relative dates
-use DateTime;        # To allow fixtures using InflateColumn::DateTime
+use DateTime;    # To allow fixtures using InflateColumn::DateTime
 use Carp;
 use Cwd qw( abs_path getcwd );
 use OpenQA::Schema;
@@ -43,8 +31,8 @@ sub create {
 
     # create a new schema or use an existing one
     unless (defined $options{skip_schema}) {
-        my $storage     = $schema->storage;
-        my $dbh         = $storage->dbh;
+        my $storage = $schema->storage;
+        my $dbh = $storage->dbh;
         my $schema_name = $options{schema_name} // generate_schema_name;
         log_info("using database schema \"$schema_name\"");
 
@@ -93,7 +81,7 @@ sub insert_fixtures {
         # Arrayref of hashrefs, multiple tables per file
         for (my $i = 0; $i < @$info; $i++) {
             my $class = $info->[$i];
-            my $ri    = $info->[++$i];
+            my $ri = $info->[++$i];
             try {
                 my $row = $schema->resultset($class)->create($ri);
                 $ids{$row->result_source->from} = $ri->{id} if $ri->{id};
@@ -116,7 +104,7 @@ sub insert_fixtures {
 
 sub disconnect {
     my $schema = shift;
-    my $dbh    = $schema->storage->dbh;
+    my $dbh = $schema->storage->dbh;
     if (my $search_path = $schema->search_path_for_tests) { $dbh->do("drop schema $search_path") }
     return $dbh->disconnect;
 }

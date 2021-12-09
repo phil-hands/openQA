@@ -1,17 +1,5 @@
-# Copyright (C) 2014-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2014-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Scheduler::Client;
 use Mojo::Base -base, -signatures;
@@ -20,13 +8,13 @@ use OpenQA::Client;
 use OpenQA::Log 'log_warning';
 use OpenQA::Utils 'service_port';
 
-has host   => sub { $ENV{OPENQA_SCHEDULER_HOST} };
+has host => sub { $ENV{OPENQA_SCHEDULER_HOST} };
 has client => sub { OpenQA::Client->new(api => shift->host // 'localhost') };
-has port   => sub { service_port('scheduler') };
+has port => sub { service_port('scheduler') };
 
 my $IS_SCHEDULER_ITSELF;
 sub mark_current_process_as_scheduler { $IS_SCHEDULER_ITSELF = 1; }
-sub is_current_process_the_scheduler  { return $IS_SCHEDULER_ITSELF; }
+sub is_current_process_the_scheduler { return $IS_SCHEDULER_ITSELF; }
 
 sub new {
     my $class = shift;

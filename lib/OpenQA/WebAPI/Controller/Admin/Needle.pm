@@ -1,17 +1,5 @@
-# Copyright (C) 2015-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2015-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::Admin::Needle;
 use Mojo::Base 'Mojolicious::Controller';
@@ -61,10 +49,10 @@ sub _translate_cond($) {
 sub _prepare_data_table {
     my ($self, $n, $paths, $dir_rs, $needles_rs) = @_;
     my $filename = $n->filename;
-    my $hash     = {
-        id        => $n->id,
+    my $hash = {
+        id => $n->id,
         directory => $n->directory->name,
-        filename  => $filename,
+        filename => $filename,
     };
     my $dir_path = $n->directory->path;
     my $real_dir_id;
@@ -73,14 +61,14 @@ sub _prepare_data_table {
         $real_dir_id = $paths->{$dir_path}->{real_path_id} if $dir_path ne ($paths->{$dir_path}->{real_path} // '');
     }
     else {
-        my $real_path_id  = $n->directory->id;
+        my $real_path_id = $n->directory->id;
         my $dir_real_path = realpath($dir_path);
         if ($dir_real_path && $dir_real_path ne $dir_path) {
             my $real_dir = $dir_rs->find({path => $dir_real_path});
             $real_dir_id = $real_path_id = $real_dir->id if $real_dir;
         }
         $paths->{$dir_path} = {
-            real_path    => $dir_real_path,
+            real_path => $dir_real_path,
             real_path_id => $real_path_id,
         };
     }
@@ -107,11 +95,11 @@ sub ajax {
     }
 
     OpenQA::WebAPI::ServerSideDataTable::render_response(
-        controller        => $self,
-        resultset         => 'Needles',
-        columns           => \@columns,
-        initial_conds     => [{file_present => 1}],
-        filter_conds      => \@filter_conds,
+        controller => $self,
+        resultset => 'Needles',
+        columns => \@columns,
+        initial_conds => [{file_present => 1}],
+        filter_conds => \@filter_conds,
         additional_params => {
             prefetch => ['directory'],
             # Required for ordering by those columns and also eases filtering
@@ -119,7 +107,7 @@ sub ajax {
         },
         prepare_data_function => sub {
             my $needle_dirs = $self->schema->resultset('NeedleDirs');
-            my $needles     = $self->schema->resultset('Needles');
+            my $needles = $self->schema->resultset('Needles');
             my %paths;
             [map { $self->_prepare_data_table($_, \%paths, $needle_dirs, $needles) } shift->all];
         },
@@ -146,11 +134,11 @@ sub delete {
     my ($self) = @_;
 
     $self->gru->enqueue_and_keep_track(
-        task_name        => 'delete_needles',
+        task_name => 'delete_needles',
         task_description => 'deleting needles',
-        task_args        => {
+        task_args => {
             needle_ids => $self->every_param('id'),
-            user_id    => $self->current_user->id,
+            user_id => $self->current_user->id,
         }
     )->then(
         sub {

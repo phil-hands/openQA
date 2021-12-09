@@ -31,9 +31,10 @@ else
 SCALE_FACTOR ?= 2
 endif
 TIMEOUT_RETRIES ?= $$((${TIMEOUT_M} * ${SCALE_FACTOR} * (${RETRY} + 1) ))m
+CRE ?= podman
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(patsubst %/,%,$(dir $(mkfile_path)))
-docker_env_file := "$(current_dir)/docker.env"
+container_env_file := "$(current_dir)/container.env"
 unstables := $(shell cat tools/unstable_tests.txt | tr '\n' :)
 
 # tests need these environment variables to be unset
@@ -110,6 +111,7 @@ install-generic:
 	install -m 644 profiles/apparmor.d/usr.share.openqa.script.worker "$(DESTDIR)"/etc/apparmor.d
 	install -d -m 755 "$(DESTDIR)"/etc/apparmor.d/local
 	install -m 644 profiles/apparmor.d/local/usr.share.openqa.script.openqa "$(DESTDIR)"/etc/apparmor.d/local
+	install -m 644 profiles/apparmor.d/local/usr.share.openqa.script.worker "$(DESTDIR)"/etc/apparmor.d/local
 
 	cp -Ra dbicdh "$(DESTDIR)"/usr/share/openqa/dbicdh
 
@@ -172,11 +174,11 @@ test-api:
 # put unstable tests in tools/unstable_tests.txt and uncomment in circle CI config to handle unstables with retries
 .PHONY: test-unstable
 test-unstable:
-	for f in $$(cat tools/unstable_tests.txt); do $(MAKE) test-with-database TIMEOUT_M=10 PROVE_ARGS="$$HARNESS $$f" RETRY=5 || exit; done
+	for f in $$(cat tools/unstable_tests.txt); do $(MAKE) test-with-database COVERDB_SUFFIX=$$(echo $${COVERDB_SUFFIX}_$$f | tr '/' '_') TIMEOUT_M=10 PROVE_ARGS="$$HARNESS $$f" RETRY=5 || exit; done
 
 .PHONY: test-fullstack
 test-fullstack:
-	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=9 RETRY=5 PROVE_ARGS="$$HARNESS t/full-stack.t"
+	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=30 RETRY=15 PROVE_ARGS="$$HARNESS t/full-stack.t"
 
 .PHONY: test-fullstack-unstable
 test-fullstack-unstable:
@@ -195,11 +197,11 @@ test-unit-and-integration:
 	export GLOBIGNORE="$(GLOBIGNORE)";\
 	export DEVEL_COVER_DB_FORMAT=JSON;\
 	export PERL5OPT="$(COVEROPT)$(PERL5OPT) -It/lib -I$(PWD)/t/lib -MOpenQA::Test::PatchDeparse";\
-	RETRY=${RETRY} timeout -s SIGINT -k 5 -v ${TIMEOUT_RETRIES} tools/retry prove ${PROVE_LIB_ARGS} ${PROVE_ARGS}
+	RETRY=${RETRY} HOOK=./tools/delete-coverdb-folder timeout -s SIGINT -k 5 -v ${TIMEOUT_RETRIES} tools/retry prove ${PROVE_LIB_ARGS} ${PROVE_ARGS}
 
 # prepares running the tests within a container (eg. pulls os-autoinst) and then runs the tests considering
 # the test matrix environment variables
-# note: This is supposed to run within the container unlike `launch-docker-to-run-tests-within`
+# note: This is supposed to run within the container unlike `launch-container-to-run-tests-within`
 #       which launches the container.
 .PHONY: run-tests-within-container
 run-tests-within-container:
@@ -245,24 +247,24 @@ public/favicon.ico: assets/images/logo.svg
 	convert assets/images/logo-16.png assets/images/logo-32.png assets/images/logo-64.png assets/images/logo-128.png -background white -alpha remove public/favicon.ico
 	rm assets/images/logo-128.png assets/images/logo-32.png assets/images/logo-64.png
 
-.PHONY: docker-test-build
-docker-test-build:
-	docker build --no-cache $(current_dir)/docker/openqa -t $(DOCKER_IMG)
+.PHONY: container-test-build
+container-test-build:
+	${CRE} build --no-cache $(current_dir)/container/openqa -t $(DOCKER_IMG)
 
-.PHONY: docker.env
-docker.env:
-	env | grep -E 'CHECKSTYLE|FULLSTACK|UITEST|GH|TRAVIS|CPAN|DEBUG|ZYPPER' > $(docker_env_file)
+.PHONY: $(container_env_file)
+$(container_env_file):
+	env | grep -E 'CHECKSTYLE|FULLSTACK|UITEST|GH|TRAVIS|CPAN|DEBUG|ZYPPER' > $@
 
-.PHONY: launch-docker-to-run-tests-within
-launch-docker-to-run-tests-within: docker.env
-	docker run --env-file $(docker_env_file) -v $(current_dir):/opt/openqa \
+.PHONY: launch-container-to-run-tests-within
+launch-container-to-run-tests-within: $(container_env_file)
+	${CRE} run --env-file $(container_env_file) -v $(current_dir):/opt/openqa \
 	   $(CONTAINER_IMG) make coverage-codecov
-	rm $(docker_env_file)
+	rm $(container_env_file)
 
-.PHONY: prepare-and-launch-docker-to-run-tests-within
-.NOTPARALLEL: prepare-and-launch-docker-to-run-tests-within
-prepare-and-launch-docker-to-run-tests-within: docker-test-build launch-docker-to-run-tests-within
-	echo "Use docker-rm and docker-rmi to remove the container and image if necessary"
+.PHONY: prepare-and-launch-container-to-run-tests-within
+.NOTPARALLEL: prepare-and-launch-container-to-run-tests-within
+prepare-and-launch-container-to-run-tests-within: container-test-build launch-container-to-run-tests-within
+	echo "Use '${CRE} rm' and '${CRE} rmi' to remove the container and image if necessary"
 
 # all additional checks not called by prove
 .PHONY: test-checkstyle-standalone

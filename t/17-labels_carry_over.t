@@ -1,19 +1,7 @@
 #!/usr/bin/env perl
 
-# Copyright (C) 2016-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2016-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
 
@@ -29,10 +17,10 @@ use OpenQA::Test::Utils qw(assume_all_assets_exist);
 use Mojo::JSON qw(decode_json);
 
 my $test_case = OpenQA::Test::Case->new;
-my $schema    = $test_case->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 05-job_modules.pl');
-my $t         = Test::Mojo->new('OpenQA::WebAPI');
-my $rs        = $t->app->schema->resultset('Jobs');
-my $auth      = {'X-CSRF-Token' => $t->ua->get('/tests')->res->dom->at('meta[name=csrf-token]')->attr('content')};
+my $schema = $test_case->init_data(fixtures_glob => '01-jobs.pl 03-users.pl 05-job_modules.pl');
+my $t = Test::Mojo->new('OpenQA::WebAPI');
+my $rs = $t->app->schema->resultset('Jobs');
+my $auth = {'X-CSRF-Token' => $t->ua->get('/tests')->res->dom->at('meta[name=csrf-token]')->attr('content')};
 $test_case->login($t, 'percival');
 assume_all_assets_exist;
 
@@ -44,7 +32,7 @@ sub comments ($url) {
 
 sub restart_with_result ($old_job, $result) {
     $t->post_ok("/api/v1/jobs/$old_job/restart", $auth)->status_is(200);
-    my $res     = decode_json($t->tx->res->body);
+    my $res = decode_json($t->tx->res->body);
     my $new_job = $res->{result}[0]->{$old_job};
     $t->post_ok("/api/v1/jobs/$new_job/set_done", $auth => form => {result => $result})->status_is(200);
     return $res;
@@ -53,16 +41,16 @@ sub restart_with_result ($old_job, $result) {
 $schema->txn_begin;
 
 subtest '"happy path": failed->failed carries over last issue reference' => sub {
-    my $label          = 'label:false_positive';
-    my $second_label   = 'bsc#1234';
+    my $label = 'label:false_positive';
+    my $second_label = 'bsc#1234';
     my $simple_comment = 'just another simple comment';
     for my $comment ($label, $second_label, $simple_comment) {
         $t->post_ok('/api/v1/jobs/99962/comments', $auth => form => {text => $comment})->status_is(200);
     }
     my @comments_previous = @{comments('/tests/99962')};
-    is(scalar @comments_previous, 3,               'all entered comments found');
-    is($comments_previous[0],     $label,          'comment present on previous test result');
-    is($comments_previous[2],     $simple_comment, 'another comment present');
+    is(scalar @comments_previous, 3, 'all entered comments found');
+    is($comments_previous[0], $label, 'comment present on previous test result');
+    is($comments_previous[2], $simple_comment, 'another comment present');
 
     my $group = $t->app->schema->resultset('JobGroups')->find(1001);
 
@@ -94,7 +82,7 @@ subtest 'failed->passed discards all labels' => sub {
 subtest 'passed->failed does not carry over old labels' => sub {
     my $res = restart_with_result($job, 'failed');
     $old_job = $job;
-    $job     = $res->{result}[0]->{$job};
+    $job = $res->{result}[0]->{$job};
     my @comments_new = @{comments($res->{test_url}[0]->{$old_job})};
     is(scalar @comments_new, 0, 'no old labels on new failure');
 };
@@ -102,7 +90,7 @@ subtest 'passed->failed does not carry over old labels' => sub {
 subtest 'failed->failed without labels does not fail' => sub {
     my $res = restart_with_result($job, 'failed');
     $old_job = $job;
-    $job     = $res->{result}[0]->{$job};
+    $job = $res->{result}[0]->{$job};
     my @comments_new = @{comments($res->{test_url}[0]->{$old_job})};
     is(scalar @comments_new, 0, 'nothing there, nothing appears');
 };
@@ -114,7 +102,7 @@ subtest 'failed->failed labels which are not bugrefs are *not* carried over' => 
     $old_job = $job;
     my @comments_new = @{comments($res->{test_url}[0]->{$old_job})};
     is(join('', @comments_new), '', 'no simple labels are carried over');
-    is(scalar @comments_new,    0,  'no simple label present in new result');
+    is(scalar @comments_new, 0, 'no simple label present in new result');
 };
 
 # Reset to a clean state
@@ -144,8 +132,8 @@ subtest 'failed in different modules with different bugref in details' => sub {
 
 subtest 'failed in different modules with same bugref in details' => sub {
     # Fail test in different modules with same bug reference and a 3rd module
-    $prev_job->update_module('aplay',      {result => 'fail', details => [{title => 'bsc#77777'}]});
-    $curr_job->update_module('yast2_lan',  {result => 'fail', details => [{title => 'bsc#77777'}]});
+    $prev_job->update_module('aplay', {result => 'fail', details => [{title => 'bsc#77777'}]});
+    $curr_job->update_module('yast2_lan', {result => 'fail', details => [{title => 'bsc#77777'}]});
     $curr_job->update_module('bootloader', {result => 'softfail'});
     $t->post_ok('/api/v1/jobs/99963/set_done', $auth => form => {result => 'failed'})->status_is(200);
     is @{comments('/tests/99963')}, 0,

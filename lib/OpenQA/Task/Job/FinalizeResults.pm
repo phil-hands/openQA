@@ -1,17 +1,5 @@
-# Copyright (C) 2020-2021 SUSE LLC
-#
-# This program is free software; you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation; either version 2 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License along
-# with this program; if not, see <http://www.gnu.org/licenses/>.
+# Copyright 2020-2021 SUSE LLC
+# SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Task::Job::FinalizeResults;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
@@ -50,17 +38,18 @@ sub _finalize_results {
     return if $carried_over;
     my $key = 'job_done_hook_' . $openqa_job->result;
     if (my $hook = $ENV{'OPENQA_' . uc $key} // $app->config->{hooks}->{lc $key}) {
-        my $timeout      = $ENV{OPENQA_JOB_DONE_HOOK_TIMEOUT}      // '5m';
+        my $timeout = $ENV{OPENQA_JOB_DONE_HOOK_TIMEOUT} // '5m';
         my $kill_timeout = $ENV{OPENQA_JOB_DONE_HOOK_KILL_TIMEOUT} // '30s';
-        my $ret          = _done_hook_new_issue($openqa_job, $hook, $timeout, $kill_timeout);
-        $minion_job->note(hook_cmd => $hook, hook_result => $ret);
+        my ($rc, $out) = _done_hook_new_issue($openqa_job, $hook, $timeout, $kill_timeout);
+        $minion_job->note(hook_cmd => $hook, hook_result => $out, hook_rc => $rc);
     }
     $app->minion->enqueue($_ => []) for @{$app->config->{minion_task_triggers}->{on_job_done}};
 }
 
 sub _done_hook_new_issue ($openqa_job, $hook, $timeout, $kill_timeout) {
     my $id = $openqa_job->id;
-    qx{timeout --kill-after="$kill_timeout" "$timeout" $hook $id};
+    my $out = qx{timeout -v --kill-after="$kill_timeout" "$timeout" $hook $id};
+    return ($?, $out);
 }
 
 1;
