@@ -155,10 +155,12 @@ A single combined diff, containing all the changes, follows.
  =cut
 --- openqa-4.6.1639057582.07f0f29.orig/lib/OpenQA/Command.pm
 +++ openqa-4.6.1639057582.07f0f29/lib/OpenQA/Command.pm
-@@ -97,6 +97,7 @@ sub run {
+@@ -96,7 +96,8 @@ sub run {
+       'apisecret=s' => sub { $self->apisecret($_[1]) },
        'host=s' => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
        'o3' => sub { $self->host('https://openqa.opensuse.org') },
-       'osd' => sub { $self->host('http://openqa.suse.de') };
+-      'osd' => sub { $self->host('http://openqa.suse.de') };
++      'osd' => sub { $self->host('http://openqa.suse.de') },
 +      'odn' => sub { $self->host('https://openqa.debian.net') };
  
      return $self->command(@args);
