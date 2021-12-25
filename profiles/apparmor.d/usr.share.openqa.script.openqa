@@ -82,6 +82,7 @@
   /var/log/openqa rwk,
   /var/tmp/* rwk,
   owner /var/lib/openqa/share/tests/** rwl,
+  owner /var/lib/openqa/archive/** rwl,
 
 
   profile /usr/bin/ssh {
@@ -129,6 +130,7 @@
   /usr/bin/grep mrix,
   /usr/bin/head mrix,
   /usr/bin/hxselect mrix,
+  /usr/bin/hxnormalize mrix,
   /usr/bin/jq rix,
   /usr/bin/mv ix,
   /usr/bin/mktemp rix,
