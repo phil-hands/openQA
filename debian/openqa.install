@@ -8,21 +8,24 @@ etc/apache2/vhosts.d/openqa-common.inc => etc/apache2/sites-available/openqa-com
 etc/apache2/vhosts.d/openqa-ssl.conf.template => etc/apache2/sites-available/openqa-ssl.conf.template
 etc/apparmor.d/usr.share.openqa.script.openqa
 etc/apparmor.d/local/usr.share.openqa.script.openqa
-usr/lib/systemd/system/openqa-webui.service
-usr/lib/systemd/system/openqa-livehandler.service
-usr/lib/systemd/system/openqa-gru.service
-usr/lib/systemd/system/openqa-scheduler.service
-usr/lib/systemd/system/openqa-websockets.service
-usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.service
-usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.timer
-usr/lib/systemd/system/openqa-enqueue-asset-cleanup.service
-usr/lib/systemd/system/openqa-enqueue-asset-cleanup.timer
-usr/lib/systemd/system/openqa-enqueue-result-cleanup.service
-usr/lib/systemd/system/openqa-enqueue-result-cleanup.timer
-usr/lib/systemd/system/openqa-enqueue-bug-cleanup.service
-usr/lib/systemd/system/openqa-enqueue-bug-cleanup.timer
-usr/lib/systemd/system/openqa-setup-db.service
-usr/lib/tmpfiles.d/openqa-webui.conf
+usr/lib/systemd/system/openqa-webui.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-livehandler.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-gru.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-scheduler.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-websockets.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.timer /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-asset-cleanup.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-asset-cleanup.timer /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-result-cleanup.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-result-cleanup.timer /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-bug-cleanup.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-enqueue-bug-cleanup.timer /lib/systemd/system/
+usr/lib/systemd/system/openqa-setup-db.service /lib/systemd/system/
+usr/lib/systemd/system/openqa-reload-worker-auto-restart@.path /lib/systemd/system/
+usr/lib/systemd/system/openqa-reload-worker-auto-restart@.service /lib/systemd/system/
+usr/lib/sysusers.d/geekotest.conf /lib/sysusers.d/
+usr/lib/tmpfiles.d/openqa-webui.conf /lib/tmpfiles.d/
 usr/share/openqa/lib/DBIx/
 usr/share/openqa/lib/OpenQA/LiveHandler.pm
 usr/share/openqa/lib/OpenQA/Resource/
