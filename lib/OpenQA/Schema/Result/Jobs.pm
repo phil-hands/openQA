@@ -260,16 +260,20 @@ sub archivable_result_dir ($self) {
     return $result_dir && -d $result_dir ? $result_dir : undef;
 }
 
-sub archive ($self) {
+sub archive ($self, $signal_guard = undef) {
     return undef unless my $normal_result_dir = $self->archivable_result_dir;
 
     my $archived_result_dir = $self->add_result_dir_prefix($self->remove_result_dir_prefix($normal_result_dir), 1);
+    # create destination directory manually because directory creation of File::Copy::Recursive has a race condition
+    # and therefore might fail when running archiving jobs using the same prefix-directory in parallel
+    path($archived_result_dir)->make_path;
     if (!File::Copy::Recursive::dircopy($normal_result_dir, $archived_result_dir)) {
         my $error = $!;
         File::Path::rmtree($archived_result_dir);    # avoid leftovers
         die "Unable to copy '$normal_result_dir' to '$archived_result_dir': $error";
     }
 
+    $signal_guard->retry(0) if $signal_guard;
     $self->update({archived => 1});
     $self->discard_changes;
     File::Path::remove_tree($normal_result_dir);
@@ -1816,12 +1820,13 @@ sub carry_over_bugrefs {
         next if !($comment->bugref);
 
         my $text = $comment->text;
+        my $prev_id = $prev->id;
         if ($text !~ "Automatic takeover") {
-            $text .= "\n\n(Automatic takeover from t#" . $prev->id . ")\n";
+            $text .= "\n\n(Automatic takeover from t#$prev_id)\n";
         }
         my %newone = (text => $text);
         $newone{user_id} = $comment->user_id;
-        $self->comments->create(\%newone);
+        $self->comments->create_with_event(\%newone, {taken_over_from_job_id => $prev_id});
         return 1;
     }
     return undef;
@@ -1999,6 +2004,20 @@ sub packages_diff {
     return join("\n", grep { !/(^@@|$ignore)/ } split(/\n/, $diff_packages));
 }
 
+sub ancestors ($self) {
+    my $o = $self->origin;
+    return $o ? 1 + $o->ancestors : 0;
+}
+
+sub handle_retry ($self) {
+    return undef unless my $retry = $self->settings_hash->{RETRY};
+    # strip any optional descriptions after a colon
+    $retry =~ s/:.*//;
+    my $ancestors = $self->ancestors;
+    log_debug('handle_retry: Found retry job ' . $self->id . ", try '$ancestors' of up to '$retry' retries");
+    return $ancestors < $retry;
+}
+
 =head2 done
 
 Finalize job by setting it as DONE.
@@ -2059,6 +2078,9 @@ sub done {
     }
     elsif ($reason_unknown && !defined $reason && $result eq INCOMPLETE) {
         $new_val{reason} = 'no test modules scheduled/uploaded';
+    }
+    elsif (!$self->is_ok) {
+        $restart = $self->handle_retry;
     }
     $self->update(\%new_val);
     # bugrefs are there to mark reasons of failure - the function checks itself though

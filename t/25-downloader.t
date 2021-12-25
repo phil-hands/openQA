@@ -4,11 +4,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Test::Warnings ':report_warnings';
 use utf8;
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 
 use OpenQA::Downloader;
+use Archive::Extract;
 use IO::Socket::INET;
 use Mojo::Server::Daemon;
 use Mojo::IOLoop::Server;

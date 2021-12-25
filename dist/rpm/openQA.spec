@@ -279,7 +279,7 @@ sed -e 's,/bin/env python,/bin/python,' -i script/openqa-label-all
 #for double checking
 %if %{with tests}
 sed -i '/Perl::Tidy/d' cpanfile
-cpanm --installdeps --with-feature=test .
+cpanm -n --mirror http://no.where/ --installdeps --with-feature=test .
 %endif
 
 # we don't really need the tidy test
@@ -688,5 +688,6 @@ fi
 %dir %{_unitdir}
 %{_unitdir}/openqa-auto-update.*
 %{_datadir}/openqa/script/openqa-auto-update
+%{_datadir}/openqa/script/openqa-check-devel-repo
 
 %changelog
