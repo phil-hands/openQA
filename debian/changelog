@@ -1,10 +1,10 @@
-openqa (4.6.1639057582.07f0f29-1) UNRELEASED; urgency=medium
+openqa (4.6.1640268275.25ac0d7-1) UNRELEASED; urgency=medium
 
   * openqa-common: depend on libfilesys-df-perl
   * fix lintian JS overrides
   * New upstream release.
 
- -- Philip Hands <phil@hands.com>  Fri, 10 Dec 2021 00:16:19 +0100
+ -- Philip Hands <phil@hands.com>  Sat, 25 Dec 2021 19:55:57 +0100
 
 openqa (4.6.1632930736.2895850-1) unstable; urgency=medium
 
