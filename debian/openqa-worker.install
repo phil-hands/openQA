@@ -1,5 +1,6 @@
 etc/openqa/workers.ini
 etc/apparmor.d/usr.share.openqa.script.worker
+etc/apparmor.d/local/usr.share.openqa.script.worker
 usr/lib/systemd/system-generators/systemd-openqa-generator
 usr/lib/systemd/system/openqa-worker.target
 usr/lib/systemd/system/openqa-worker@.service
