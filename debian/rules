@@ -122,6 +122,3 @@ override_dh_installman:
 	pod2man $(pod2man_opts) --name=openqa-cli lib/OpenQA/CLI.pm scratch/man/openqa-cli.1
 	sed -e 's/%%VER%%/$(DEB_VERSION_UPSTREAM)/' < man/openqa-label-all.1.in > scratch/man/openqa-label-all.1
 	dh_installman
-
-override_dh_missing:
-	dh_missing --list-missing
