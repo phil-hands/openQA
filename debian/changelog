@@ -1,10 +1,17 @@
-openqa (4.6.1640268275.25ac0d7-1) UNRELEASED; urgency=medium
+openqa (4.6.1640268275.25ac0d7-1) unstable; urgency=medium
 
+  * New upstream release.
   * openqa-common: depend on libfilesys-df-perl
   * fix lintian JS overrides
-  * New upstream release.
+  * using packaged bootstrap4 breaks scrollbar text alignment: add padding
+  * install systemd files under /lib so that dh_installsystemd notices them
+  * use execute_(before|after)_dh_* in rules
+  * deal with dh_missing errors
+  * postinst chmod renders lintian-override redundant
+  * ensure that missing assets result in failure
+  * node-jquery-ujs 1.2.3-1: rails.js --> /usr/share
 
- -- Philip Hands <phil@hands.com>  Sat, 25 Dec 2021 19:55:57 +0100
+ -- Philip Hands <phil@hands.com>  Fri, 31 Dec 2021 22:34:51 +0100
 
 openqa (4.6.1632930736.2895850-1) unstable; urgency=medium
 
