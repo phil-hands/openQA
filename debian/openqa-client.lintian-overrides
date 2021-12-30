@@ -1,1 +1,0 @@
-openqa-client: non-standard-file-perm etc/openqa/client.conf 0400 != 0644

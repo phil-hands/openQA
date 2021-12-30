@@ -5,12 +5,10 @@ set -e
 
 case "$1" in
     configure)
-        if [ -d "/var/lib/openqa" ]; then
-            chown _openqa-worker:root /var/lib/openqa/cache /var/lib/openqa/pool/1
-        fi
         if [ -e "/etc/openqa/client.conf" ]; then
-            # perhaps this should all be done in the -client postinst, but the user isn't available there
-            chown _openqa-worker:root /etc/openqa/client.conf
+            # we chown this to _openqa-worker in openqa-worker
+            # perhaps we should create that user in -client and use it.
+            # please report a bug if you discover a reason to care
             chmod 0640 /etc/openqa/client.conf
         fi
         ;;

@@ -1,7 +1,6 @@
 debian/tmp/etc/openqa/workers.ini
 etc/apparmor.d/usr.share.openqa.script.worker
 etc/apparmor.d/local/usr.share.openqa.script.worker
-etc/openqa/workers.ini
 usr/lib/systemd/system-generators/systemd-openqa-generator /lib/systemd/system-generators/
 usr/lib/systemd/system/openqa-worker.target /lib/systemd/system/
 usr/lib/systemd/system/openqa-worker@.service /lib/systemd/system/
