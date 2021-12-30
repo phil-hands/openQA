@@ -55,16 +55,14 @@ override_dh_auto_build:
 override_dh_auto_install:
 	dh_auto_install -- SHELL="/bin/bash"
 
-override_dh_install:
-	dh_install
+execute_after_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant
 	find $(CURDIR)/debian/openqa*/usr/share/openqa -type f -print0 | \
 		xargs -r0 sed -i -e '1s%^\(#!/usr/bin/\)env \(perl\|python3\)%\1\2%'
 	sed -i 's#/etc/apache2/vhosts\.d#/etc/apache2/sites-available#' \
 		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
 
-override_dh_fixperms-arch:
-	dh_fixperms -a
+execute_after_dh_fixperms-arch:
 	chmod 0400 debian/openqa-client/etc/openqa/client.conf
 	chmod -x debian/openqa/etc/logrotate.d/openqa
 	chmod +x debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
@@ -104,16 +102,15 @@ override_dh_auto_test:
 		dh_auto_test -- \
 		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
 
-override_dh_auto_clean:
+execute_before_dh_auto_clean:
 	-rm -rf assets/_debian/
 	rm -fr t/data/openqa/testresults/ .sass-cache/ assets/cache
 	rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
 	rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
 	rm -fr $(CURDIR)/debian/DB
-	dh_auto_clean
 
 pod2man_opts := --errors=stderr --section=1 --center "openQA Documentation" --release 'openQA $(DEB_VERSION_UPSTREAM)'
-override_dh_installman:
+execute_before_dh_installman:
 	mkdir -p scratch/man
 	for src in client load_templates dump_templates openqa-clone-job openqa-label-all openqa-validate-yaml ; do \
 		dst=$$(echo $$src | sed -e 's/_/-/;s/^\(openqa-\)\?/openqa-/') ; \
@@ -121,4 +118,3 @@ override_dh_installman:
 	done
 	pod2man $(pod2man_opts) --name=openqa-cli lib/OpenQA/CLI.pm scratch/man/openqa-cli.1
 	sed -e 's/%%VER%%/$(DEB_VERSION_UPSTREAM)/' < man/openqa-label-all.1.in > scratch/man/openqa-label-all.1
-	dh_installman
