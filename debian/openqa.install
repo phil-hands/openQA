@@ -1,8 +1,8 @@
 #! /usr/bin/dh-exec
 
-etc/openqa/openqa.ini
-etc/openqa/database.ini
-etc/logrotate.d/openqa
+debian/tmp/etc/openqa/openqa.ini
+debian/tmp/etc/openqa/database.ini
+debian/tmp/etc/logrotate.d/openqa
 etc/apache2/vhosts.d/openqa.conf.template => etc/apache2/sites-available/openqa.conf.template
 etc/apache2/vhosts.d/openqa-common.inc => etc/apache2/sites-available/openqa-common.inc
 etc/apache2/vhosts.d/openqa-ssl.conf.template => etc/apache2/sites-available/openqa-ssl.conf.template
@@ -24,7 +24,7 @@ usr/lib/systemd/system/openqa-enqueue-bug-cleanup.timer /lib/systemd/system/
 usr/lib/systemd/system/openqa-setup-db.service /lib/systemd/system/
 usr/lib/systemd/system/openqa-reload-worker-auto-restart@.path /lib/systemd/system/
 usr/lib/systemd/system/openqa-reload-worker-auto-restart@.service /lib/systemd/system/
-usr/lib/sysusers.d/geekotest.conf /lib/sysusers.d/
+debian/tmp/usr/lib/sysusers.d/geekotest.conf /lib/sysusers.d/
 usr/lib/tmpfiles.d/openqa-webui.conf /lib/tmpfiles.d/
 usr/share/openqa/lib/DBIx/
 usr/share/openqa/lib/OpenQA/LiveHandler.pm

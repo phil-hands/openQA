@@ -1,3 +1,10 @@
 etc/apache2/vhosts.d/openqa.conf.template
 etc/apache2/vhosts.d/openqa-common.inc
 etc/apache2/vhosts.d/openqa-ssl.conf.template
+
+# ignore openSUSE specific scripts
+usr/share/openqa/script/openqa-auto-update
+usr/share/openqa/script/openqa-bootstrap
+usr/share/openqa/script/openqa-bootstrap-container
+usr/share/openqa/script/openqa-check-devel-repo
+usr/share/openqa/script/openqa-rollback
