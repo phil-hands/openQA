@@ -54,6 +54,7 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	dh_auto_install -- SHELL="/bin/bash"
+    # GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 execute_after_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant
