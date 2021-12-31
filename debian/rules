@@ -41,7 +41,7 @@ override_dh_auto_build:
 	sed -i -e 's%http://timeago\.yarp\.com/jquery\.timeago\.js%_debian/libjs-jquery-timeago/jquery.timeago.js%' assets/assetpack.def
 	ln -s /usr/share/nodejs/popper.js/dist assets/_debian/libjs-popper.js
 	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/popper\.js/1\.12\.9/umd/popper\.js%_debian/libjs-popper.js/umd/popper.js%' assets/assetpack.def
-	ln -s /usr/lib/nodejs/jquery-ujs/src assets/_debian/node-jquery-ujs
+	ln -s /usr/share/nodejs/jquery-ujs/src assets/_debian/node-jquery-ujs
 	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/jquery-ujs/1\.2\.1/rails\.js%_debian/node-jquery-ujs/rails.js%' assets/assetpack.def
 	cp -v -r debian/missing-sources/d3js_4.13.0 assets/_debian/d3js_4.13.0
 	sed -i -e 's%https://d3js\.org/d3\.v4\.js%_debian/d3js_4.13.0/d3.v4.js%' assets/assetpack.def
@@ -53,8 +53,7 @@ override_dh_auto_build:
 	! grep http assets/assetpack.def
 
 override_dh_auto_install:
-	dh_auto_install -- SHELL="/bin/bash"
-    # GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
+	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 execute_after_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant
