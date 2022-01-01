@@ -1,3 +1,9 @@
+openqa (4.6.1640268275.25ac0d7-2) unstable; urgency=medium
+
+  * openqa-client should be Architecture: all
+
+ -- Philip Hands <phil@hands.com>  Sat, 01 Jan 2022 09:55:52 +0100
+
 openqa (4.6.1640268275.25ac0d7-1) unstable; urgency=medium
 
   * New upstream release.
