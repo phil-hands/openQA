@@ -130,7 +130,6 @@ Vcs-Browser: https://salsa.debian.org/debian/openqa
 
 Package: openqa
 Architecture: all
-Built-Using: node-dagre-d3-renderer (= 0.6.4+dfsg-3),
 Depends: ${misc:Depends}, ${perl:Depends},
          openqa-common (>= ${binary:Version}),
          openqa-client (>= ${binary:Version}),
@@ -233,7 +232,7 @@ Description: automatic Operating System testing framework (common files)
  accessed via VNC.
 
 Package: openqa-client
-Architecture: any
+Architecture: all
 Depends: ${misc:Depends},
          ${perl:Depends},
          libjson-perl,
