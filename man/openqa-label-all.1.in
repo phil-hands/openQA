@@ -59,13 +59,6 @@ Increase verbosity level, specify multiple times to increase verbosity.
 .TP
 .BR \-h ", " \-\-help
 Prints help.
-.SH BUGS
-The script currently relies on the
-.I /usr/share/openqa/script/client
-(deprecated)
-to connect to the server's API.
-It should be upgraded to use
-.BR openqa\-cli (1).
 
 .SH AUTHOR
 This manual page was written by Philip Hands <phil@hands.com>, for the Debian
