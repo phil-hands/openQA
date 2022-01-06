@@ -110,10 +110,4 @@ execute_before_dh_auto_clean:
 
 pod2man_opts := --errors=stderr --section=1 --center "openQA Documentation" --release 'openQA $(DEB_VERSION_UPSTREAM)'
 execute_before_dh_installman:
-	mkdir -p scratch/man
-	for src in client load_templates dump_templates openqa-clone-job openqa-label-all openqa-validate-yaml ; do \
-		dst=$$(echo $$src | sed -e 's/_/-/;s/^\(openqa-\)\?/openqa-/') ; \
-		pod2man $(pod2man_opts) --name=$$dst script/$$src scratch/man/$$dst.1 ; \
-	done
-	pod2man $(pod2man_opts) --name=openqa-cli lib/OpenQA/CLI.pm scratch/man/openqa-cli.1
-	sed -e 's/%%VER%%/$(DEB_VERSION_UPSTREAM)/' < man/openqa-label-all.1.in > scratch/man/openqa-label-all.1
+	make build-manpages -- DESTDIR=debian/tmp OPENQA_VERSION=$(DEB_VERSION_UPSTREAM)

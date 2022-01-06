@@ -1,7 +1,7 @@
-scratch/man/openqa-cli.1
-scratch/man/openqa-client.1
-scratch/man/openqa-clone-job.1
-scratch/man/openqa-dump-templates.1
-scratch/man/openqa-load-templates.1
-scratch/man/openqa-validate-yaml.1
-scratch/man/openqa-label-all.1
+build/man1/openqa-cli.1
+build/man1/openqa-client.1
+build/man1/openqa-clone-job.1
+build/man1/openqa-dump-templates.1
+build/man1/openqa-label-all.1
+build/man1/openqa-load-templates.1
+build/man1/openqa-validate-yaml.1
