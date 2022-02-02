@@ -124,7 +124,7 @@ Build-Depends: debhelper-compat (= 13),
                node-jquery-ujs,
 Standards-Version: 4.6.0.1
 Rules-Requires-Root: no
-Homepage: http://open.qa
+Homepage: https://open.qa
 Vcs-Git: https://salsa.debian.org/debian/openqa.git
 Vcs-Browser: https://salsa.debian.org/debian/openqa
 
