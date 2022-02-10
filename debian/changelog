@@ -1,3 +1,15 @@
+openqa (4.6.1640268275.25ac0d7-3) UNRELEASED; urgency=medium
+
+  * Create and install manpages
+  * make use of install-manpages make target
+  * openqa-label-all now uses openqa-cli
+  * openqa-cli requires Time::Moment
+  * replace vhosts.d references in configure-web-proxy
+  * adjust self-references in openqa-*-templates(1)
+  * Commit Debian 3.0 (quilt) metadata
+
+ -- Philip Hands <phil@hands.com>  Thu, 10 Feb 2022 06:08:48 +0100
+
 openqa (4.6.1640268275.25ac0d7-2) unstable; urgency=medium
 
   * openqa-client should be Architecture: all
