@@ -1,6 +1,6 @@
 usr/share/openqa/script/openqa-cli usr/bin/openqa-cli
 usr/share/openqa/script/openqa-clone-job usr/bin/openqa-clone-job
-usr/share/openqa/script/dump_templates usr/bin/openqa-dump-templates
-usr/share/openqa/script/load_templates usr/bin/openqa-load-templates
+usr/share/openqa/script/openqa-dump-templates usr/bin/openqa-dump-templates
+usr/share/openqa/script/openqa-load-templates usr/bin/openqa-load-templates
 usr/share/openqa/script/openqa-validate-yaml usr/bin/openqa-validate-yaml
 usr/share/openqa/script/openqa-label-all usr/bin/openqa-label-all

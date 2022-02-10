@@ -78,7 +78,7 @@ psql -U postgres -d openqa -c "copy api_keys from 'apikeys.csv' with (format csv
 ```
 
 In case you need to migrate job groups, test suites, use dump_templates and
-load_templates scripts accordingly.
+openqa-load-templates scripts accordingly.
 
 [id="debugdevelmode"]
 == Steps to debug developer mode setup
