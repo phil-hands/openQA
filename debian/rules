@@ -8,11 +8,11 @@ include /usr/share/dpkg/pkg-info.mk
 
 override_dh_auto_build:
 	# create links to locally installed assets
+	# and convince assetpack to use local copies of remote assets:
 	mkdir -p assets/_debian
 	ln -s /usr/share/fonts-fork-awesome assets/_debian
 	ln -s /usr/share/fonts-roboto-fontface assets/_debian
 	sed -i -e 's%https://cdn\.jsdelivr\.net/npm/fork-awesome@1\.2\.0/css/fork-awesome\.min\.css%_debian/fonts-fork-awesome/css/fork-awesome.css%' assets/assetpack.def
-	# convince assetpack to use local copies of the fonts:
 	for ext in eot svg ttf woff woff2 ; do \
 		printf '\n! forkawesome-webfont.%s\n< _debian/fonts-fork-awesome/fonts/forkawesome-webfont.%s\n' $$ext $$ext >> assets/assetpack.def ; \
 	done
@@ -50,6 +50,7 @@ override_dh_auto_build:
 	cp -v -r debian/missing-sources/anser_2.0.1 assets/_debian/anser_2.0.1
 	sed -i -e 's%https://raw\.githubusercontent\.com/IonicaBizau/\(anser\)/\(2\.0\.1\)/lib/\(index\.js\)%_debian/\1_\2/\3%' assets/assetpack.def
 	ln -sf /usr/share/javascript/cropper/cropper.css assets/stylesheets/cropper.css
+	# ensure that there are no remote references left
 	! grep http assets/assetpack.def
 
 override_dh_auto_install:
@@ -59,7 +60,9 @@ execute_after_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant
 	find $(CURDIR)/debian/openqa*/usr/share/openqa -type f -print0 | \
 		xargs -r0 sed -i -e '1s%^\(#!/usr/bin/\)env \(perl\|python3\)%\1\2%'
-	sed -i 's#/etc/apache2/vhosts\.d#/etc/apache2/sites-available#' \
+	# apache vhost configs are found in .../sites-available on Debian
+	sed -i 's#\(/etc/apache2/\)vhosts\.d#\1sites-available#' \
+		%(CURDIR)/debian/openqa/usr/share/openqa/script/configure-web-proxy \
 		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
 
 execute_after_dh_fixperms-arch:
