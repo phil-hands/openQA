@@ -15,6 +15,50 @@ upload of upstream version 1.2.3, you could use:
 (If you have dgit, use `dgit clone openqa`, rather than plain `git clone`.)
 
 A single combined diff, containing all the changes, follows.
+--- openqa-4.6.1640268275.25ac0d7.orig/Makefile
++++ openqa-4.6.1640268275.25ac0d7/Makefile
+@@ -50,6 +50,41 @@ help:
+ 	@sed -n 's/\(^[^.#[:space:]A-Z]*\):.*$$/\1/p' Makefile | uniq
+ 	@echo See docs/Contributing.asciidoc for more details
+ 
++OPENQA_VERSION ?= $(shell git log -1 --pretty=4.6.%ct.%h)
++
++man_names = openqa-cli openqa-client openqa-load-templates openqa-dump-templates openqa-clone-job openqa-label-all openqa-validate-yaml
++manpages = $(addprefix $(man_dir)/,$(addsuffix .1,$(man_names)))
++man_dir = build/man1
++
++$(man_dir):
++	mkdir -p $@
++
++define run-pod2man =
++pod2man --errors=stderr --section=1 \
++	--center "openQA Documentation" \
++	--release "openQA $(OPENQA_VERSION)" \
++	--name=$(notdir $(basename $@)) $< $@
++endef
++
++$(man_dir)/%.1: man/%.1.in
++	sed -e 's/%%VER%%/$(OPENQA_VERSION)/' <$< >$@
++
++$(man_dir)/openqa-%.1 $(man_dir)/%.1: script/%
++	$(run-pod2man)
++
++$(man_dir)/openqa-%-templates.1: script/%_templates
++	$(run-pod2man)
++
++$(man_dir)/openqa-cli.1: lib/OpenQA/CLI.pm
++	$(run-pod2man)
++
++.PHONY: build-manpages
++build-manpages: $(man_dir) $(manpages)
++
++.PHONY: clean
++clean:
++	-rm -r build
++
+ .PHONY: install-generic
+ install-generic:
+ 	./tools/generate-packed-assets
 --- openqa-4.6.1640268275.25ac0d7.orig/assets/stylesheets/dashboard.scss
 +++ openqa-4.6.1640268275.25ac0d7/assets/stylesheets/dashboard.scss
 @@ -24,6 +24,7 @@ td div.progress {
@@ -196,7 +240,7 @@ A single combined diff, containing all the changes, follows.
  my $MARKER_REFS = join('|', keys %bugrefs);
 --- /dev/null
 +++ openqa-4.6.1640268275.25ac0d7/man/openqa-label-all.1.in
-@@ -0,0 +1,72 @@
+@@ -0,0 +1,65 @@
 +.\"                                      Hey, EMACS: -*- nroff -*-
 +.\" First parameter, NAME, should be all caps
 +.\" Second parameter, SECTION, should be 1-8, maybe w/ subsection
@@ -258,13 +302,6 @@ A single combined diff, containing all the changes, follows.
 +.TP
 +.BR \-h ", " \-\-help
 +Prints help.
-+.SH BUGS
-+The script currently relies on the
-+.I /usr/share/openqa/script/client
-+(deprecated)
-+to connect to the server's API.
-+It should be upgraded to use
-+.BR openqa\-cli (1).
 +
 +.SH AUTHOR
 +This manual page was written by Philip Hands <phil@hands.com>, for the Debian
@@ -401,6 +438,40 @@ A single combined diff, containing all the changes, follows.
    /var/lib/openqa/cache/ r,
    /var/lib/openqa/cache/** rwk,
    /var/lib/openqa/pool/ r,
+--- openqa-4.6.1640268275.25ac0d7.orig/script/dump_templates
++++ openqa-4.6.1640268275.25ac0d7/script/dump_templates
+@@ -5,11 +5,11 @@
+ 
+ =head1 NAME
+ 
+-dump_templates - dump openQA templates
++openqa-dump-templates - dump openQA templates
+ 
+ =head1 SYNOPSIS
+ 
+-dump_templates [OPTIONS] [TABLES...]
++openqa-dump-templates [OPTIONS] [TABLES...]
+ 
+ =head1 OPTIONS
+ 
+@@ -79,13 +79,13 @@ print help
+ 
+ =over 4
+ 
+-=item dump_templates --host openqa.example.com Products
++=item openqa-dump-templates --host openqa.example.com Products
+ 
+-=item dump_templates --host openqa.example.com --group "openSUSE Tumbleweed" --full
++=item openqa-dump-templates --host openqa.example.com --group "openSUSE Tumbleweed" --full
+ 
+-=item dump_templates --host openqa.example.com --test "gnome"
++=item openqa-dump-templates --host openqa.example.com --test "gnome"
+ 
+-=item dump_templates --host openqa.example.com --machine "64bit"
++=item openqa-dump-templates --host openqa.example.com --machine "64bit"
+ 
+ =back
+ 
 --- openqa-4.6.1640268275.25ac0d7.orig/script/fetchneedles
 +++ openqa-4.6.1640268275.25ac0d7/script/fetchneedles
 @@ -1,19 +1,19 @@
@@ -433,6 +504,22 @@ A single combined diff, containing all the changes, follows.
  
  : "${updateall:="0"}"
  : "${force:="0"}"
+--- openqa-4.6.1640268275.25ac0d7.orig/script/load_templates
++++ openqa-4.6.1640268275.25ac0d7/script/load_templates
+@@ -5,11 +5,11 @@
+ 
+ =head1 NAME
+ 
+-load_templates - load openqa job templates
++openqa-load-templates - load openqa job templates
+ 
+ =head1 SYNOPSIS
+ 
+-load_templates [OPTIONS] FILE
++openqa-load-templates [OPTIONS] FILE
+ 
+ =head1 OPTIONS
+ 
 --- openqa-4.6.1640268275.25ac0d7.orig/script/openqa-validate-yaml
 +++ openqa-4.6.1640268275.25ac0d7/script/openqa-validate-yaml
 @@ -19,6 +19,52 @@
