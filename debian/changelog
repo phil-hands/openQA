@@ -1,14 +1,13 @@
-openqa (4.6.1640268275.25ac0d7-3) UNRELEASED; urgency=medium
+openqa (4.6.1648473912.da11be7-1) unstable; urgency=medium
 
   * Create and install manpages
-  * make use of install-manpages make target
   * openqa-label-all now uses openqa-cli
   * openqa-cli requires Time::Moment
-  * replace vhosts.d references in configure-web-proxy
   * adjust self-references in openqa-*-templates(1)
-  * Commit Debian 3.0 (quilt) metadata
+  * New upstream release.
+  * disable shepherd.js tour (until shepherd.js is packaged)
 
- -- Philip Hands <phil@hands.com>  Thu, 10 Feb 2022 06:08:48 +0100
+ -- Philip Hands <phil@hands.com>  Mon, 23 May 2022 17:39:08 +0200
 
 openqa (4.6.1640268275.25ac0d7-2) unstable; urgency=medium
 
