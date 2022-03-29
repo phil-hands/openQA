@@ -124,7 +124,8 @@ update_docs() {
 
 update_api() {
         mkdir -p api/src
-        curl -o api/src/testapi.pm https://raw.githubusercontent.com/os-autoinst/os-autoinst/master/testapi.pm
+        response=$(curl -o api/src/testapi.pm -sS -w "%{http_code}\n" https://raw.githubusercontent.com/os-autoinst/os-autoinst/master/testapi.pm)
+        [[ $response != 200 ]] && echo "Download of testapi.pm failed" && exit 1
         cd api
         "${scriptroot}"/generate-documentation-genapi
 
@@ -185,8 +186,8 @@ check_asciidoctor() {
         echo "Could not find asciidoctor binary in your path, please install it and run this command again:"
         echo "    sudo gem install asciidoctor pygments.rb"
         [[ ${formats[pdf]} ]] && echo "    sudo gem install asciidoctor-pdf --pre"
-        echo "    sudo zypper install ruby2.6-rubygem-asciidoctor"
-        echo "    sudo zypper install 'perl(Pod::AsciiDoctor)'"
+        echo "or via openSUSE's package manager:"
+        echo "    sudo zypper install 'rubygem(asciidoctor)' 'perl(Pod::AsciiDoctor)'"
         exit 1
     fi
 }

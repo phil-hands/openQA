@@ -141,6 +141,10 @@ subtest 'Test configuration default modes' => sub {
         influxdb => {
             ignored_failed_minion_jobs => '',
         },
+        carry_over => {
+            lookup_depth => 10,
+            state_changes_limit => 3,
+        },
     };
 
     # Test configuration generation with "test" mode
@@ -175,7 +179,7 @@ subtest 'Test configuration override from file' => sub {
     my @data = (
         "[global]\n",
         "suse_mirror=http://blah/\n",
-"recognized_referers = bugzilla.suse.com bugzilla.opensuse.org bugzilla.novell.com bugzilla.microfocus.com progress.opensuse.org github.com\n",
+        "recognized_referers = bugzilla.suse.com bugzilla.opensuse.org progress.opensuse.org github.com\n",
         "[audit]\n",
         "blacklist = job_grab job_done\n",
         "[assets/storage_duration]\n",
@@ -196,9 +200,7 @@ subtest 'Test configuration override from file' => sub {
 
     is_deeply(
         $app->config->{global}->{recognized_referers},
-        [
-            qw(bugzilla.suse.com bugzilla.opensuse.org bugzilla.novell.com bugzilla.microfocus.com progress.opensuse.org github.com)
-        ],
+        [qw(bugzilla.suse.com bugzilla.opensuse.org progress.opensuse.org github.com)],
         'referers parsed correctly'
     );
 
@@ -216,7 +218,7 @@ subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
         [global]
         appname =  openQA  
         hide_asset_types = repo iso  
-        recognized_referers =   bugzilla.suse.com   bugzilla.novell.com   bugzilla.microfocus.com   progress.opensuse.org github.com
+        recognized_referers =   bugzilla.suse.com   progress.opensuse.org github.com
     ';
     $t_dir->child('openqa.ini')->spurt($data);
     OpenQA::Setup::read_config($app);
@@ -224,7 +226,7 @@ subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
     ok($app->config->{global}->{hide_asset_types} eq 'repo iso', 'hide_asset_types');
     is_deeply(
         $app->config->{global}->{recognized_referers},
-        [qw(bugzilla.suse.com bugzilla.novell.com bugzilla.microfocus.com progress.opensuse.org github.com)],
+        [qw(bugzilla.suse.com progress.opensuse.org github.com)],
         'recognized_referers'
     );
 };

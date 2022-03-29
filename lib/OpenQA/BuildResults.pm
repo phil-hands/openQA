@@ -3,18 +3,17 @@
 
 package OpenQA::BuildResults;
 
-use strict;
-use warnings;
+use Mojo::Base -strict, -signatures;
 
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Utils;
+use OpenQA::Log qw(log_error);
 use Date::Format;
 use Sort::Versions;
 use Time::Seconds;
 
-sub init_job_figures {
-    my ($job_result) = @_;
+sub init_job_figures ($job_result) {
 
     # relevant distributions for the build (hash is used as a set)
     $job_result->{distris} = {};
@@ -30,8 +29,7 @@ sub init_job_figures {
     $job_result->{total} = 0;
 }
 
-sub count_job {
-    my ($job, $jr, $labels) = @_;
+sub count_job ($job, $jr, $labels) {
 
     $jr->{total}++;
     if ($job->state eq OpenQA::Jobs::Constants::DONE) {
@@ -69,16 +67,14 @@ sub count_job {
     return;
 }
 
-sub add_review_badge {
-    my ($build_res) = @_;
+sub add_review_badge ($build_res) {
 
     $build_res->{all_passed} = $build_res->{passed} + $build_res->{softfailed} >= $build_res->{total};
     $build_res->{reviewed} = $build_res->{labeled} >= $build_res->{failed};
     $build_res->{commented} = $build_res->{comments} >= $build_res->{failed};
 }
 
-sub filter_subgroups {
-    my ($group, $subgroup_filter) = @_;
+sub filter_subgroups ($group, $subgroup_filter) {
 
     my @group_ids;
     my @children;
@@ -97,8 +93,7 @@ sub filter_subgroups {
     };
 }
 
-sub find_child_groups {
-    my ($group, $subgroup_filter) = @_;
+sub find_child_groups ($group, $subgroup_filter) {
 
     # handle regular (non-parent) groups
     return {
@@ -115,8 +110,7 @@ sub find_child_groups {
     return filter_subgroups($group, $subgroup_filter);
 }
 
-sub compute_build_results {
-    my ($group, $limit, $time_limit_days, $tags, $subgroup_filter) = @_;
+sub compute_build_results ($group, $limit, $time_limit_days, $tags, $subgroup_filter) {
 
     # find relevant child groups taking filter into account
     my $child_groups = find_child_groups($group, $subgroup_filter);
@@ -169,8 +163,11 @@ sub compute_build_results {
     # find relevant builds
     my $jobs_resultset = $group->result_source->schema->resultset('Jobs');
     my @builds = $jobs_resultset->search(\%search_filter, \%search_opts)->all;
+    my %versions_per_build;
     for my $build (@builds) {
-        $build->{key} = join('-', $build->VERSION, $build->BUILD);
+        my ($version, $buildnr) = ($build->VERSION, $build->BUILD);
+        $build->{key} = join('-', $version, $buildnr);
+        $versions_per_build{$buildnr}->{$version} = 1;
     }
     # sort by treating the key as a version number, if job group
     # indicates this is OK (the default). otherwise, list remains
@@ -182,23 +179,25 @@ sub compute_build_results {
     }
 
     my $max_jobs = 0;
-    my $buildnr = 0;
+    my $now = DateTime->now;
     for my $build (@builds) {
         last if defined($limit) && (--$limit < 0);
 
+        my ($version, $buildnr) = ($build->VERSION, $build->BUILD);
         my $jobs = $jobs_resultset->search(
             {
-                VERSION => $build->VERSION,
-                BUILD => $build->BUILD,
+                VERSION => $version,
+                BUILD => $buildnr,
                 group_id => {in => $group_ids},
                 clone_id => undef,
             },
             {order_by => 'me.id DESC'});
         my %jr = (
             key => $build->{key},
-            build => $build->BUILD,
-            version => $build->VERSION,
-            oldest => DateTime->now
+            build => $buildnr,
+            version => $version,
+            version_count => scalar keys %{$versions_per_build{$buildnr}},
+            oldest => $now,
         );
         init_job_figures(\%jr);
         for my $child (@$children) {
@@ -207,7 +206,7 @@ sub compute_build_results {
 
         my %seen;
         my @jobs = map {
-            my $key = $_->TEST . "-" . $_->ARCH . "-" . $_->FLAVOR . "-" . $_->MACHINE;
+            my $key = $_->TEST . "-" . $_->ARCH . "-" . $_->FLAVOR . "-" . ($_->MACHINE // '');
             $seen{$key}++ ? () : $_;
         } $jobs->all;
         my $comment_data = $group->result_source->schema->resultset('Comments')->comment_data_for_jobs(\@jobs);

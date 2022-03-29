@@ -19,8 +19,8 @@ sub exit_code(&) {
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
-use OpenQA::Utils
-  qw(:DEFAULT prjdir sharedir resultdir assetdir imagesdir base_host random_string random_hex download_speed);
+use OpenQA::Utils (qw(:DEFAULT prjdir sharedir resultdir assetdir imagesdir base_host random_string random_hex),
+    qw(download_rate download_speed));
 use OpenQA::Task::SignalGuard;
 use OpenQA::Test::Utils 'redirect_output';
 use OpenQA::Test::TimeLimit '10';
@@ -79,6 +79,10 @@ subtest 'random number generator' => sub {
 };
 
 subtest 'download speed' => sub {
+    is download_rate([1638459407, 528237], [1638459408, 628237], 1024), '930.91';
+    is download_rate([1638459407, 528237], [1638459408, 628237], 1024 * 1024 * 1024), '976128930.91';
+    is download_rate([1638459407, 528237], [1638459407, 528237], 1024), undef;
+
     is download_speed([1638459407, 528237], [1638459408, 628237], 1024), '930.91 Byte/s';
     is download_speed([1638459407, 528237], [1638459408, 628237], 1024 * 1024), '931 KiB/s';
     is download_speed([1638459407, 528237], [1638459408, 628237], 1024 * 1024 * 1024), '931 MiB/s';
@@ -89,6 +93,18 @@ subtest 'download speed' => sub {
     is download_speed([1638459407, 528237], [1638459407, 588237], 123456789), '1.9 GiB/s';
 
     is download_speed([1638459407, 528237], [1638459407, 528237], 1024), '??/s';
+};
+
+subtest 'labels' => sub {
+    is_deeply find_labels(''), [], ' no labels found';
+    is_deeply find_labels('label'), [], ' no labels found';
+    is_deeply find_labels('label-123'), [], ' no labels found';
+    is_deeply find_labels('test label:foo label:bar 123'), ['foo', 'bar'], 'labels found';
+    is_deeply find_labels('test label:force_result:failed'), ['force_result:failed'], 'labels found';
+    is_deeply find_labels('label:force_result:failed'), ['force_result:failed'], 'labels found';
+    is_deeply find_labels('label:force_result:failed  test'), ['force_result:failed'], 'labels found';
+    is_deeply find_labels('label label:foo:label label:bar 123'), ['foo:label', 'bar'], 'labels found';
+    is_deeply find_labels('label label:foo:bnc#123 label:bar 123'), ['foo:bnc#123', 'bar'], 'labels found';
 };
 
 is bugurl('bsc#1234'), 'https://bugzilla.suse.com/show_bug.cgi?id=1234', 'bug url is properly expanded';
@@ -419,7 +435,7 @@ my ($current_term_handler, $current_int_handler) = ($SIG{TERM}, $SIG{INT});
 subtest 'signal handling in Minion jobs' => sub {
     my $job = Test::MockObject->new;
     my $signal_guard = OpenQA::Task::SignalGuard->new($job);
-    $job->set_true($_) for qw(retry note);
+    $job->set_true($_) for qw(retry finish note);
 
     subtest 'signal arrives after lock acquisition' => sub {
         is exit_code { kill INT => $$ }, 0, 'exited when signal arrives after lock acquisition';
@@ -434,6 +450,15 @@ subtest 'signal handling in Minion jobs' => sub {
         $job->called_ok('note');
         $job->called_args_pos_is(0, 3, 'Received signal INT, concluding');
         ok !$job->called('retry'), 'job not retried';
+        $job->clear;
+    };
+    subtest 'signal arrives after abort-flag set' => sub {
+        $signal_guard->abort(1);
+        is exit_code { kill INT => $$ }, 0, 'exited when signal arrives after abort-flag set';
+        $job->called_ok('note');
+        $job->called_args_pos_is(0, 3, 'Received signal INT, aborting');
+        ok !$job->called('retry'), 'job not retried';
+        ok $job->called('finish'), 'job considered finished';
     };
 };
 is $SIG{TERM}, $current_term_handler, 'SIGTERM handler restored after signal guard goes out of scope';

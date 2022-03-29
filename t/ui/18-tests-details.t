@@ -266,7 +266,15 @@ subtest 'reason and log details on incomplete jobs' => sub {
     my $log_element = $driver->find_element_by_xpath('//*[@id="details"]//pre[string-length(text()) > 0]');
     like($log_element->get_attribute('data-src'), qr/autoinst-log.txt/, 'log file embedded');
     like($log_element->get_text(), qr/Crashed\?/, 'log contents loaded');
+    $driver->find_element_by_link_text('Investigation')->click;
+    $driver->find_element('table#investigation_status_entry')
+      ->text_like(qr/cannot provide hints/, 'investigation status content shown as table');
 };
+
+sub update_status {
+    $driver->execute_script('window.enableStatusUpdates = true; updateStatus(); window.enableStatusUpdates = false;');
+    wait_until @_, 10;
+}
 
 subtest 'running job' => sub {
     # assume there's a running job module
@@ -277,8 +285,17 @@ subtest 'running job' => sub {
     # no modules)
     my $job_module_count = $job_modules->search({job_id => 99963})->update({job_id => 99961});
 
+    # assume the text result in the aplay module is missing in the first place (happens in production if the result has
+    # not been uploaded yet when the module data is loaded, see poo#102786)
+    my $aplay_text_result = path($jobs->find(99963)->result_dir, 'aplay-1.txt');
+    $aplay_text_result->remove if -e $aplay_text_result;
+
     $driver->get('/tests/99963');
     like(current_tab, qr/live/i, 'live tab active by default');
+
+    # avoid elements being replaced in the background, we later call updateStatus() manually to avoid wasting time
+    # waiting for the periodic call anyways
+    $driver->execute_script('window.enableStatusUpdates = false');
 
     subtest 'info panel contents' => sub {
         like(
@@ -303,12 +320,23 @@ subtest 'running job' => sub {
     };
     subtest 'test module table is populated (without reload) when test modules become available' => sub {
         $job_modules->search({job_id => 99961})->update({job_id => 99963});
-        $driver->execute_script('updateStatus()');    # avoid wasting time by triggering the status update immediately
-        wait_for_ajax(msg => 'wait for test modules being loaded');
-
-        is($driver->find_element('#module_glibc_i686 .result')->get_text, RUNNING, 'glibc_i686 is running');
-        is(scalar @{$driver->find_elements('#results .result')},
-            $job_module_count, "all $job_module_count job modules rendered");
+        update_status sub { scalar @{$driver->find_elements('#results .result')} >= 1 }, 'test modules shown';
+        is $driver->find_element('#module_glibc_i686 .result')->get_text, RUNNING, 'glibc_i686 is running';
+        is scalar @{$driver->find_elements('#results .result')},
+          $job_module_count, "all $job_module_count job modules rendered";
+    };
+    subtest 'missing text results are attempted to be reloaded' => sub {
+        my $step_detail_element = $driver->find_element('#module_aplay .links');
+        ok $step_detail_element, 'step detail present' or return;
+        like $step_detail_element->get_text, qr/Unable to read/, '"Unable to read…" shown in the first place';
+        # pretend the text result has been uploaded
+        $aplay_text_result->spurt('some text result');
+        update_status sub {
+            $step_detail_element = $driver->find_element('#module_aplay .links');
+            $step_detail_element && $step_detail_element->get_text !~ qr/Unable to read/;
+        }, 'step detail shows no longer "Unable to read"';
+        ok $step_detail_element, 'step detail still present' or return;
+        like $step_detail_element->get_text, qr/some text result/, 'text result finally shown';
     };
 };
 
@@ -325,6 +353,11 @@ subtest 'render bugref links in thumbnail text windows' => sub {
     my @a = $driver->find_elements('#preview_container_in pre a', 'css');
     is((shift @a)->get_attribute('href'), 'https://bugzilla.suse.com/show_bug.cgi?id=1234', 'bugref href correct');
     is((shift @a)->get_attribute('href'), 'https://fate.suse.com/321208', 'regular href correct');
+};
+
+subtest 'number of restarts displayed (two times)' => sub {
+    # still on 99946
+    $driver->find_element_by_id('clones')->text_like(qr/\(restarted already 2 times\)/, 'restarted two times');
 };
 
 subtest 'render text results' => sub {
@@ -435,6 +468,11 @@ subtest 'misc details: title, favicon, go back, go to source view, go to log vie
 };
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
+
+subtest 'scheduled job' => sub {
+    $t->get_ok('/tests/99927/infopanel_ajax')->status_is(200);
+    $t->content_like(qr/scheduled.*, created.*\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d/s, 'creation date displayed');
+};
 
 subtest 'route to latest' => sub {
     $t->get_ok('/tests/latest?distri=opensuse&version=13.1&flavor=DVD&arch=x86_64&test=kde&machine=64bit')
@@ -618,13 +656,22 @@ subtest 'test module flags are displayed correctly' => sub {
     );
 };
 
-subtest 'additional investigation notes provided on new failed' => sub {
+subtest 'number of restarts displayed (zero times)' => sub {
     $driver->get('/tests/99947');
+    $driver->find_element_by_id('clones')->text_unlike(qr/restarted/, 'not restarted');
+};
+
+subtest 'additional investigation notes provided on new failed' => sub {
+    # still on 99947
     wait_for_ajax(msg => 'details tab for job 99947 loaded to test investigation');
-    $driver->find_element('#clones a')->click;
+    $driver->find_element('#clones a')->click;    # navigates to 99982
     $driver->find_element_by_link_text('Investigation')->click;
     $driver->find_element('table#investigation_status_entry')
       ->text_like(qr/No result dir/, 'investigation status content shown as table');
+};
+
+subtest 'number of restarts displayed (one time)' => sub {
+    $driver->find_element_by_id('clones')->text_like(qr/\(restarted already 1 time\)/, 'restarted one time');
 };
 
 subtest 'alert box shown if not already on first bad' => sub {

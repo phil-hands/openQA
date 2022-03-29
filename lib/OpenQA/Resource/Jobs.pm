@@ -37,7 +37,8 @@ sub job_restart {
 
     # duplicate all jobs that are either running or done
     my $force = $args{force};
-    my %duplication_args = map { ($_ => $args{$_}) } qw(prio skip_parents skip_children skip_ok_result_children);
+    my @duplication_arg_keys = (qw(clone prio skip_parents skip_children skip_ok_result_children settings));
+    my %duplication_args = map { ($_ => $args{$_}) } @duplication_arg_keys;
     my $schema = OpenQA::Schema->singleton;
     my $jobs = $schema->resultset('Jobs')->search({id => $jobids, state => {'not in' => [PRISTINE_STATES]}});
     $duplication_args{no_directly_chained_parent} = 1 unless $force;
@@ -46,7 +47,7 @@ sub job_restart {
         my $missing_assets = $job->missing_assets;
         if (@$missing_assets) {
             my $message = "Job $job_id misses the following mandatory assets: " . join(', ', @$missing_assets);
-            if (defined $job->parents->first) {
+            if ($job->count_related('parents')) {
                 $message
                   .= "\nYou may try to retrigger the parent job that should create the assets and will implicitly retrigger this job as well.";
             }

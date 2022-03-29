@@ -9,7 +9,7 @@ use Mojo::Base 'Exporter', -signatures;
 our @EXPORT = qw(get_connect_args client_output client_call prevent_reload
   reload_manually find_status_text wait_for_result_panel
   wait_for_job_running wait_for_developer_console_like
-  wait_for_developer_console_available
+  wait_for_developer_console_available enter_developer_console_cmd
   verify_one_job_displayed_as_scheduled
   schedule_one_job_over_api_and_verify);
 
@@ -61,7 +61,13 @@ sub client_call ($args, $expected_out = undef, $desc = 'client_call') {
     like($out, $expected_out, $desc) or die;
 }
 
-sub find_status_text ($driver) { $driver->find_element('#info_box .card-body')->get_text() }
+sub find_status_text ($driver) {
+    # query text via JavaScript because when using `$driver->find_element('#info_box .card-body')->get_text`
+    # the element might be swapped out by the page's JavaScript under the hood after it has been returned by
+    # `find_element` and before the text is queried via `get_text` leading to the error `getElementText: stale
+    # element reference: element is not attached to the page document`
+    $driver->execute_script('return document.querySelector("#info_box .card-body").innerText');
+}
 
 # uncoverable statement
 sub _fail_with_result_panel_contents ($result_panel_contents, $msg) {
@@ -158,6 +164,11 @@ sub wait_for_developer_console_available ($driver) {
 
     # check initial connection
     wait_for_developer_console_like($driver, qr/Connection opened/, 'connection opened');
+}
+
+sub enter_developer_console_cmd ($driver, $cmd) {
+    $driver->execute_script("document.getElementById('msg').value = '$cmd';");
+    $driver->execute_script('submitWebSocketCommand();');
 }
 
 sub verify_one_job_displayed_as_scheduled ($driver) {

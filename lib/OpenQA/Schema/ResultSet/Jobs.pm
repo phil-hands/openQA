@@ -3,16 +3,14 @@
 
 package OpenQA::Schema::ResultSet::Jobs;
 
-use Mojo::Base -strict, -signatures;
-
-use base 'DBIx::Class::ResultSet';
-
+use Mojo::Base 'DBIx::Class::ResultSet', -signatures;
 use DBIx::Class::Timestamps 'now';
 use Date::Format 'time2str';
 use File::Basename 'basename';
 use IPC::Run;
 use OpenQA::App;
 use OpenQA::Log qw(log_debug log_warning);
+use OpenQA::Schema::Result::Jobs;
 use OpenQA::Schema::Result::JobDependencies;
 use OpenQA::Utils 'testcasedir';
 use Mojo::File 'path';
@@ -122,22 +120,11 @@ sub create_from_settings {
       keys %settings;
     die 'The ' . join(',', @invalid_keys) . ' cannot include / in value' if @invalid_keys;
 
-    # assign group ID
-    my $group;
-    my %group_args;
-    if ($settings{_GROUP_ID}) {
-        $group_args{id} = delete $settings{_GROUP_ID};
-    }
-    if ($settings{_GROUP}) {
-        my $group_name = delete $settings{_GROUP};
-        $group_args{name} = $group_name unless $group_args{id};
-    }
-    if (keys %group_args) {
-        $group = $schema->resultset('JobGroups')->find(\%group_args);
-        if ($group) {
-            $new_job_args{group_id} = $group->id;
-            $new_job_args{priority} = $group->default_priority;
-        }
+    # assign group ID and priority
+    my ($group_args, $group) = OpenQA::Schema::Result::Jobs::extract_group_args_from_settings(\%settings);
+    if ($group) {
+        $new_job_args{group_id} = $group->id;
+        $new_job_args{priority} = $group->default_priority;
     }
 
     # handle dependencies
@@ -184,10 +171,8 @@ sub create_from_settings {
     }
 
     # move important keys from the settings directly to the job
-    for my $key (qw(DISTRI VERSION FLAVOR ARCH TEST MACHINE BUILD)) {
-        my $value = delete $settings{$key};
-        next unless $value;
-        $new_job_args{$key} = $value;
+    for my $key (OpenQA::Schema::Result::Jobs::MAIN_SETTINGS) {
+        if (my $value = delete $settings{$key}) { $new_job_args{$key} = $value }
     }
 
     # assign default for WORKER_CLASS
@@ -210,8 +195,8 @@ sub create_from_settings {
     # associate currently available assets with job
     $job->register_assets_from_settings;
 
-    log_warning('Ignoring invalid group ' . encode_json(\%group_args) . ' when creating new job ' . $job->id)
-      if %group_args && !$group;
+    log_warning('Ignoring invalid group ' . encode_json($group_args) . ' when creating new job ' . $job->id)
+      if keys %$group_args && !$group;
     $job->calculate_blocked_by;
     $txn_guard->commit;
     return $job;
@@ -468,7 +453,7 @@ sub mark_job_linked {
     return undef if !$job || ($referer->path_query =~ /^\/?$/);
     my $comments = $job->comments;
     return undef if $comments->find({text => {like => 'label:linked%'}});
-    my $user = $self->result_source->schema->resultset('Users')->search({username => 'system'})->first;
+    my $user = $self->result_source->schema->resultset('Users')->system({select => ['id']});
     $comments->create_with_event({text => "label:linked Job mentioned in $referer_url", user_id => $user->id});
 }
 

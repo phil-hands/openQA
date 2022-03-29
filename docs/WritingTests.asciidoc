@@ -72,8 +72,7 @@ that boots into the desktop when pressing enter at the boot loader:
 
 [source,perl]
 -------------------------------------------------------------------
-use base "basetest";
-use strict;
+use Mojo::Base "basetest";
 use testapi;
 
 sub run {
@@ -301,20 +300,21 @@ WORKER_CLASS = desktop
 
 === Automatic retries of jobs
 
-You might encounter flaky openQA tests that fail sporadically. While the best
-way to address flaky test code is of course to fix the test code itself. For
-example if certain steps rely on external components over network retries
-within the test modules should be applied. However there can still be cases
-where you might want openQA to automatically retrigger jobs. This can be
-achieved by setting the test variable `RETRY` in the format
-`<retries>[:<description>]` to an integer value with the maximum number of
-retries with an optional, additional description string separated by a colon.
-For example triggering an openQA job with the variable `RETRY=2:bug#42` will
-retrigger an openQA test on failure up to 2 totalling to up to 3 jobs. Note
-that the retry jobs are scheduled immediately and will be executed as soon as
-possible depending on available worker slots. Many factors can change in
-retries impacting the reproducibility, e.g. the used worker host and instance,
-any network related content, etc. By default openQA tests do not retry. The
+You might encounter flaky openQA tests that fail sporadically. The best way to
+address flaky test code is of course to fix the test code itself. For example,
+if certain steps rely on external components over network, retries within the
+test modules should be applied.
+
+However, there can still be cases where you might want openQA to automatically
+retrigger jobs. This can be achieved by setting the test variable `RETRY` in the
+format `<retries>[:<description>]` to an integer value with the maximum number
+of retries and an optional description string separated by a colon. For example
+triggering an openQA job with the variable `RETRY=2:bug#42` will retrigger an
+openQA test on failure up to 2 totalling to up to 3 jobs. Note that the retry
+jobs are scheduled immediately and will be executed as soon as possible
+depending on available worker slots. Many factors can change in retries
+impacting the reproducibility, e.g. the used worker host and instance, any
+network related content, etc. By default openQA tests do not retry. The
 optional, additional description string is used only for reference and has no
 functional impact.
 
@@ -347,34 +347,89 @@ In short, writing multi-machine tests adds a few more layers of complexity:
 3. actual technical realization (i.e. <<Networking.asciidoc#networking,custom networking>>)
 
 ==== Job dependencies
-There are different dependency *types* (see subsequent section). Additionally, dependencies can be machine-specific (see "Inter-machine dependencies" section).
+There are different dependency *types*, most importantly _chained_ and
+_parallel_ dependencies.
 
-===== Dependency types
-There are 3 types of dependencies: `CHAINED`, `DIRECTLY_CHAINED` and `PARALLEL`
+A dependency is always between two jobs where one of the jobs is the _parent_
+and one the _child_. The concept of parent and child jobs is *orthogonal* to
+the concept of types.
+
+A job can have multiple dependencies. So in conclusion, a job can have multiple
+children and multiple parents at the same time and each child/parent-relation
+can be of an arbitrary type.
+
+Additionally, dependencies can be machine-specific (see
+<<WritingTests.asciidoc#_inter_machine_dependencies,Inter-machine dependencies>>
+section).
+
+===== Declaring dependencies
+Dependencies are declared by adding a job setting on the child job specifying
+its parents. There is one variable for each dependency type.
+
+When starting jobs
+<<UsersGuide.asciidoc#_spawning_multiple_jobs_based_on_templates_isos_post,based on templates>>
+the relevant settings are `START_AFTER_TEST`, `START_DIRECTLY_AFTER_TEST` and
+`PARALLEL_WITH`. Details are explained for the different dependency types
+specifically in the subsequent sections. Generally, if declaring a dependency
+does not work as expected, be sure to check the "scheduled product" for the jobs
+(which is linked on the info box of the details page of any created job).
+
+When starting a single set of new jobs, the dependencies must be declared as
+explained in the
+<<UsersGuide.asciidoc#_further_examples_for_advanced_dependency_handling,Further examples for advanced dependency handling>>
+section. The variables mentioned in the subsequent sections do *not* apply.
 
 ====== Chained dependencies
-`CHAINED` and `DIRECTLY_CHAINED` describe when one test case depends on another and both are run sequentially, i.e. KDE test suite is run after and only after Installation test suite is successfully finished and cancelled if fail.
+_Chained_ dependencies declare that one test must only
+run after another test has concluded. For instance, extra tests relying on a
+successfully finished installation should declare a chained dependency on the
+installation test.
 
-The difference between `CHAINED` and `DIRECTLY_CHAINED` dependencies is that `DIRECTLY_CHAINED` means the tests must run directly after another on the same worker slot.
-This can be useful to test efficiently on bare metal SUTs and other self-provisioning environments.
+There are also _directly-chained_ dependencies. They are similar to _chained_
+dependencies but are strictly a distinct type. The difference between _chained_
+and _directly-chained_ dependencies is that directly-chained means the tests
+must run directly after another on the same worker slot. This can be useful to
+test efficiently on bare metal SUTs and other self-provisioning environments.
 
-To define a `CHAINED` dependency add the variable `START_AFTER_TEST` with the name(s) of test suite(s) after which the selected test suite is supposed to run.
-Use comma separated list for multiple test suite dependency. E.g. `START_AFTER_TEST="kde,dhcp-server"`
+Tests that are waiting for their _chained_ parents to finish are shown as
+"blocked" in the web UI. Tests that are waiting for their _directly-chained_
+parents to finish are shown as "assigned" in the web UI.
 
-To define a `DIRECTLY_CHAINED` dependency add the variable `START_DIRECTLY_AFTER_TEST`. It works in the same way as for `CHAINED` dependencies. Mismatching worker classes between jobs to run in direct sequence on the same worker are considered an error.
+To declare a _chained_ dependency add the variable `START_AFTER_TEST` with the
+name(s) of test suite(s) after which the selected test suite is supposed to run.
+Use a comma-separated list for multiple test suite dependencies, e.g.
+`START_AFTER_TEST="kde,dhcp-server"`.
+
+To declare a _directly-chained_ dependency add the variable
+`START_DIRECTLY_AFTER_TEST`. It works in the same way as for _chained_
+dependencies. Mismatching worker classes between jobs to run in direct sequence
+on the same worker are considered an error.
+
+NOTE: The set of all jobs that have direct or indirect _directly-chained_
+dependencies between each other is sometimes called a _directly-chained
+cluster_. All jobs within the cluster will be assigned to a single worker-slot
+at the same time by the scheduler.
 
 ====== Parallel dependencies
-`PARALLEL` describes multi-machine tests. That are test suites scheduled to run at the same time and managed as a group. On top of that, `PARALLEL` also describes
-test suite dependencies, where some test suites (children) run parallel with other test suites (parents) only when parents are running.
+_Parallel_ dependencies declare that tests must be scheduled to run at the same
+time. An example are "multi-machine tests" which usually test some kind of
+server and multiple clients. In this example the client tests should declare a
+parallel dependency on the server tests.
 
-To define a `PARALLEL` dependency, use the `PARALLEL_WITH` variable with the name(s) of test suite(s) which acts as a parent suite(s) to selected test suite.
-In other words, `PARALLEL_WITH` describes "I need this test suite to be running during my run". Use a comma separated list for multiple test suite dependency
+To declare a _parallel_ dependency, use the `PARALLEL_WITH` variable with the
+name(s) of test suite(s) that need other test suite(s) to run at the same time.
+In other words, `PARALLEL_WITH` declares "I need this test suite to be running
+during my run". Use a comma separated list for multiple test suite dependencies
 (e.g. `PARALLEL_WITH="web-server,dhcp-server"`).
-Keep in mind that the parent job _must be running until all children finish_. Otherwise the scheduler will cancel child jobs once parent is done.
 
-Job dependencies are only resolved when using the iso controller to
-create new jobs from job templates. Posting individual jobs manually
-won't work.
+Keep in mind that the parent job _must be running until all children finish_.
+Otherwise the scheduler will cancel child jobs once parent is done.
+
+NOTE: The set of all jobs that have direct or indirect _parallel_ dependencies
+between each other is sometimes called a _parallel cluster_. The scheduler can
+only assign these jobs if there is a sufficient number of free worker-slots. To
+avoid a parallel cluster from starvation its priority is increased gradually and
+eventually workers can be held back for the cluster.
 
 ===== Inter-machine dependencies
 Those dependencies make it possible to create job dependencies between tests which are supposed to run on different machines.
@@ -400,13 +455,39 @@ openQA tries to handle things sensibly when jobs with dependencies either fail, 
 * When a chained or parallel parent fails or is cancelled, all children will be cancelled.
 * When a parent is restarted, all children are also restarted recursively.
 * When a parallel child is restarted, the parent and siblings will also be restarted.
-* When a *regularly* chained child is restarted, the parent is not restarted. This will usually be fine, but be aware that if an asset uploaded by the chained parent has been cleaned up, the child may fail immediately. To deal with this case, just restart the parent to recreate the asset.
+* When a *regularly* chained child is restarted, the parent is not restarted if it passed or softfailed. This will usually be fine, but be aware that if an asset uploaded by the chained parent has been cleaned up, the child may fail immediately. To deal with this case, just restart the parent to recreate the asset.
 * When a *directly* chained child is restarted, all directly chained parents are recursively restarted (but not directly chained siblings). Otherwise it would not be possible to guarantee that the jobs run directly after each other on the same worker.
 * When a parallel *child* fails or is cancelled, the parent and all other children are also cancelled. This behaviour is intended for closely-related clusters of jobs, e.g. high availability tests, where it's sensible to assume the entire test is invalid if any of its components fails. A special variable can be used to change this behaviour. Setting a parallel parent job's PARALLEL_CANCEL_WHOLE_CLUSTER to a false value, i.e. 0, changes this so that, if one of its children fails or is cancelled but the parent has other pending or active children, the parent and the other children will not be cancelled. This behaviour makes more sense if the parent is providing services to the various children but the children themselves are not closely related and a failure of one does not imply that the tests run by the other children and the parent are invalid.
 
 ====== Further notes
 * The API also allows to skip restarting parents via `skip_parents=1` and to skip restarting children via `skip_children=1`. It is also possible to skip restarting only passed and softfailed children via `skip_ok_result_children=1`.
 * Restarting multiple directly chained children individually is not possible because the parent would be restarted twice which is not possible. So one needs to restart the parent job instead. Use the mentioned `skip_ok_result_children=1` to restart only jobs which are not ok.
+
+===== Handling of dependencies when cloning jobs
+Be sure to have ready the <<WritingTests.asciidoc#_job_dependencies,job
+dependencies>> section to have an understanding of different dependency types
+and the distinction between parents and children.
+
+When cloning a job via `openqa-clone-job`, parent jobs are cloned as well by
+default, regardless of the type. Use `--skip-deps` to avoid cloning parent jobs.
+Use `--skip-chained-deps` to avoid cloning parents of the types `CHAINED` and
+`DIRECTLY_CHAINED`.
+
+When cloning a job via `openqa-clone-job`, child jobs of the type `PARALLEL` are
+cloned by default. Use `--clone-children` to clone child jobs of other types as
+well. By default, only direct children are considered (regardless of the type).
+Use `--max-depth` to specify a higher depth (`0` denotes infinity). Be aware
+that this affects siblings as well when cloning parents (as explained in the
+previous paragraph).
+
+As a consequence it makes a difference which job of the dependency tree
+is cloned, especially with default parameters. Examples:
+
+* Cloning a _chained child_ (e.g. an "extra" test) will clone its parents (e.g.
+an "installation" test) as well but *not* vice versa.
+* To clone a parallel cluster, the _parallel parent_ should be cloned (e.g. the
+"server" test). When cloning a parallel child, only _that_ child and the parent
+will be cloned but not the siblings (e.g. the other "client" tests).
 
 ===== Examples
 ====== Specify machine explicitly
@@ -693,8 +774,7 @@ Getting information about parents and children
 ====
 [source,perl]
 --------------------------------------------------------------------------------
-use base "basetest";
-use strict;
+use Mojo::Base "basetest";
 use testapi;
 use mmapi;
 
@@ -810,8 +890,7 @@ The actual test 'child' job, will then have to set `PARALLEL_WITH=supportserver-
 ====
 [source,perl]
 --------------------------------------------------------------------------------
-use strict;
-use base 'basetest';
+use Mojo::Base 'basetest';
 use testapi;
 
 sub run {
@@ -907,8 +986,7 @@ following.
 [source,perl]
 --------------------------------------------------------------------------------
 use 5.018;
-use warnings;
-use base 'opensusebasetest';
+use Mojo::Base 'opensusebasetest';
 use testapi;
 use utils;
 
@@ -1286,10 +1364,17 @@ script can be used. Within the openQA repository the script is located at
 `/usr/share/openqa/script/`.  This tool can be used to create a new job that
 adds, removes or changes settings.
 
+This example adds or overrides `FOO` to be `bar`, removes `BAZ` and appends
+`:PR-123` to `TEST`:
+
 [source,sh]
 --------------------------------------------------------------------------------
-openqa-clone-job --from localhost --host localhost 42 FOO=bar BAZ=
+openqa-clone-job --from localhost --host localhost 42 FOO=bar BAZ= TEST+=:PR-123
 --------------------------------------------------------------------------------
+
+NOTE: When cloning children via `--clone-children` as well, the children are also
+affected. Parent jobs (which are cloned as well by default) are _not_ affected
+unless the `--parental-inheritance` flag is used.
 
 If you do not want a cloned job to start up in the same job group as the job
 you cloned from, e.g. to not pollute build results, the job group can be
@@ -1488,8 +1573,7 @@ The test modules foo.pm and bar.pm will be downloaded into the root of the pool 
 A valid test module format looks like this:
 
 ----
-use base 'consoletest';
-use strict;
+use Mojo::Base 'consoletest';
 use testapi;
 
 sub run {

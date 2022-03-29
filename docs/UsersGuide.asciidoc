@@ -393,13 +393,13 @@ releases, jobs for which long-lasting bug reports exist, etc.
 === Filtering test results and builds ===
 
 At the top of the test results overview page is a form which allows filtering tests by result,
-architecture and TODO-status.
+architecture and TODO-status. "TODO" means that tests still <<#_review_badges,require review>>.
 
 image::images/filter_form.png[Filter form]
 
 There is also a similar form at the bottom of the index page which allows filtering builds by
 group and customizing the limits.
-
+Also the 'All tests' table allows filtering by the TODO-status.
 
 === Highlighting job dependencies in 'All tests' table
 
@@ -962,6 +962,32 @@ Single jobs can be spawned using the `jobs post` API route. All necessary
 settings on a job must be supplied in the API request. The "openQA client" has
 examples for this.
 
+===== Further examples for advanced dependency handling =====
+
+It is possible to spawn a single set of jobs using just one API call, e.g.:
+
+```
+openqa-cli api -X POST jobs TEST:0=first-job TEST:1=second-job _START_AFTER:1=0
+```
+
+The suffixes `0` and `1` are actually freely chosen and are merely used to
+specify which parameters belong to which job and how they depend on each other.
+
+This creates a job with `TEST=first-job` and one with `TEST=second-job` and the
+second job will be started after the first. Of course other types of
+dependencies are possible as well (via `_PARALLEL` and `_START_DIRECTLY_AFTER`).
+Note that this kind of call will return the resulting job ID for each suffix
+that has been used, e.g.:
+
+```
+{"ids":{"0":2531,"1":2530}}
+```
+
+To use colons within a settings key, just add a trailing `:`, e.g.:
+
+```
+openqa-cli api -X POST jobs TEST=test KEY:WITH:COLONS:=example
+```
 
 ==== Spawning multiple jobs based on templates - isos post ====
 
@@ -1010,10 +1036,16 @@ Example for `_DEPRIORITIZEBUILD` and `_DEPRIORITIZE_LIMIT`.
 
 [source,sh]
 --------------------------------------------------------------------------------
-openqa-cli api -X POST isos ISO=my_iso.iso DISTRI=my_distri FLAVOR=sweet \
-         ARCH=my_arch VERSION=42 BUILD=1234 \
+openqa-cli api -X POST isos async=0 ISO=my_iso.iso DISTRI=my_distri \
+         FLAVOR=sweet ARCH=my_arch VERSION=42 BUILD=1234 \
          _DEPRIORITIZEBUILD=1 _DEPRIORITIZE_LIMIT=120 \
 --------------------------------------------------------------------------------
+
+*NOTE* By default scheduling products is done synchronously within the requests,
+corresponding to the parameter `async=0`. Use `async=1` to avoid possible
+timeouts by performing the task in background.
+This is recommended on big instances but means that the results (and
+possible errors) need to be polled via `openqa-cli api isos/$scheduled_product_id`.
 
 ==== Remarks ====
 
@@ -1108,8 +1140,8 @@ and uncompressed as.
 
 Assets may be shared between the web-UI and the workers by having them literally use a shared
 filesystem (this used to be the only option), or by having the workers download them from the
-server when needed and cache them locally. See 'Asset Caching' in the<<Installing.asciidoc,Installing>>
-guide for more on this.
+server when needed and cache them locally. Checkout the documentation about
+<<Installing.asciidoc#asset-caching,asset caching>> for more on this.
 
 `HDD_n` assets can be 'stored' or 'published' by a job, and `UEFI_PFLASH_VARS` assets can be
 'published'. These both mean that if the job completes successfully, the resulting state of those
@@ -1128,11 +1160,11 @@ same name" without conflicting. Of course, that would seem to make it hard for o
 the 'stored' image - but for "chained" jobs, the reverse operation is done transparently. This
 all means that a 'parent' job template can specify `STORE_HDD_1=somename.qcow2` and its 'child'
 job template(s) can specify `HDD_1=somename.qcow2`, and everything will work, without multiple
-runs of the same jobs overwriting the asset. For more on "chained" jobs, see  'Job dependencies'
-in the <<WritingTests.asciidoc,Writing Tests>> guide.
+runs of the same jobs overwriting the asset. For more on "chained" jobs, see the documentation
+of <<WritingTests.asciidoc#_job_dependencies,job dependencies>>.
 
-When using this mechanism you will often also want to use the 'Variable expansion' mechanism
-described in the <<GettingStarted.asciidoc,Getting Started>> guide.
+When using this mechanism you will often also want to use the
+<<UsersGuide.asciidoc#_variable_expansion,variable expansion>> mechanism.
 
 [id="asset_cleanup"]
 === Asset cleanup ===

@@ -3,18 +3,13 @@
 
 package OpenQA::Schema::Result::Jobs;
 
-use strict;
-use warnings;
-
-use Mojo::Base -strict, -signatures;
-use base 'DBIx::Class::Core';
-
+use Mojo::Base 'DBIx::Class::Core', -signatures;
 use Try::Tiny;
 use Mojo::JSON 'encode_json';
 use Fcntl;
 use DateTime;
 use OpenQA::Constants qw(WORKER_COMMAND_ABORT WORKER_COMMAND_CANCEL);
-use OpenQA::Log qw(log_info log_debug log_warning log_error);
+use OpenQA::Log qw(log_trace log_debug log_info log_warning log_error);
 use OpenQA::Utils (
     qw(parse_assets_from_settings locate_asset),
     qw(resultdir assetdir read_test_modules find_bugref random_string),
@@ -23,10 +18,12 @@ use OpenQA::Utils (
 use OpenQA::App;
 use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
+use OpenQA::Setup;
 use OpenQA::ScreenshotDeletion;
 use File::Basename qw(basename dirname);
 use File::Copy::Recursive qw();
 use File::Spec::Functions 'catfile';
+use DBI qw(:sql_types);
 use File::Path ();
 use DBIx::Class::Timestamps 'now';
 use File::Temp 'tempdir';
@@ -38,6 +35,7 @@ use Text::Diff;
 use OpenQA::File;
 use OpenQA::Parser 'parser';
 use OpenQA::WebSockets::Client;
+use Scalar::Util qw(looks_like_number);
 # The state and results constants are duplicated in the Python client:
 # if you change them or add any, please also update const.py.
 
@@ -46,6 +44,9 @@ use OpenQA::WebSockets::Client;
 # other keys with the '@' character
 use constant SCENARIO_KEYS => (qw(DISTRI VERSION FLAVOR ARCH TEST));
 use constant SCENARIO_WITH_MACHINE_KEYS => (SCENARIO_KEYS, 'MACHINE');
+
+# job settings which are defined directly as column of the jobs table
+use constant MAIN_SETTINGS => qw(DISTRI VERSION FLAVOR ARCH TEST MACHINE BUILD);
 
 __PACKAGE__->table('jobs');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime FilterColumn Timestamps));
@@ -225,9 +226,7 @@ __PACKAGE__->filter_column(
         filter_from_storage => 'add_result_dir_prefix',
     });
 
-sub sqlt_deploy_hook {
-    my ($self, $sqlt_table) = @_;
-
+sub sqlt_deploy_hook ($self, $sqlt_table) {
     $sqlt_table->add_index(name => 'idx_jobs_state', fields => ['state']);
     $sqlt_table->add_index(name => 'idx_jobs_result', fields => ['result']);
     $sqlt_table->add_index(name => 'idx_jobs_build_group', fields => [qw(BUILD group_id)]);
@@ -235,9 +234,7 @@ sub sqlt_deploy_hook {
 }
 
 # override to straighten out job modules and screenshot references
-sub delete {
-    my ($self) = @_;
-
+sub delete ($self) {
     $self->modules->delete;
 
     # delete all screenshot references (screenshots left unused are deleted later in the job limit task)
@@ -280,8 +277,7 @@ sub archive ($self, $signal_guard = undef) {
     return $archived_result_dir;
 }
 
-sub name {
-    my ($self) = @_;
+sub name ($self) {
     return $self->{_name} if $self->{_name};
     my %formats = (BUILD => 'Build%s',);
     my @name_keys = qw(DISTRI VERSION FLAVOR ARCH BUILD TEST);
@@ -294,36 +290,29 @@ sub name {
     return $self->{_name};
 }
 
-sub label {
-    my ($self) = @_;
-
+sub label ($self) {
     my $test = $self->TEST;
     my $machine = $self->MACHINE;
     return $machine ? "$test\@$machine" : $test;
 }
 
-sub scenario {
-    my ($self) = @_;
-
+sub scenario ($self) {
     my $test_suite_name = $self->settings_hash->{TEST_SUITE_NAME} || $self->TEST;
     return $self->result_source->schema->resultset('TestSuites')->find({name => $test_suite_name});
 }
 
-sub scenario_hash {
-    my ($self) = @_;
+sub scenario_hash ($self) {
     my %scenario = map { lc $_ => $self->get_column($_) } SCENARIO_WITH_MACHINE_KEYS;
     return \%scenario;
 }
 
-sub scenario_name {
-    my ($self) = @_;
+sub scenario_name ($self) {
     my $scenario = join('-', map { $self->get_column($_) } SCENARIO_KEYS);
     if (my $machine = $self->MACHINE) { $scenario .= "@" . $machine }
     return $scenario;
 }
 
-sub scenario_description {
-    my ($self) = @_;
+sub scenario_description ($self) {
     my $description = $self->settings_hash->{JOB_DESCRIPTION};
     return $description if defined $description;
     my $scenario = $self->scenario or return undef;
@@ -331,18 +320,9 @@ sub scenario_description {
 }
 
 # return 0 if we have no worker
-sub worker_id {
-    my ($self) = @_;
-    if ($self->worker) {
-        return $self->worker->id;
-    }
-    return 0;
-}
+sub worker_id ($self) { $self->worker ? $self->worker->id : 0 }
 
-sub reschedule_state {
-    my $self = shift;
-    my $state = shift // OpenQA::Jobs::Constants::SCHEDULED;
-
+sub reschedule_state ($self, $state = OpenQA::Jobs::Constants::SCHEDULED) {
     # cleanup
     $self->set_property('JOBTOKEN');
     $self->release_networks();
@@ -360,16 +340,12 @@ sub reschedule_state {
     log_debug('Job ' . $self->id . " reset to state $state");
 
     # free the worker
-    if (my $worker = $self->worker) {
-        $self->worker->update({job_id => undef});
-    }
+    if (my $worker = $self->worker) { $worker->update({job_id => undef}) }
 }
 
-sub log_debug_job { log_debug('[Job#' . shift->id . '] ' . shift) }
+sub log_debug_job ($self, $msg) { log_debug('[Job#' . $self->id . '] ' . $msg) }
 
-sub set_assigned_worker {
-    my ($self, $worker) = @_;
-
+sub set_assigned_worker ($self, $worker) {
     my $job_id = $self->id;
     my $worker_id = $worker->id;
     $self->update(
@@ -381,8 +357,7 @@ sub set_assigned_worker {
     log_debug("Assigned job '$job_id' to worker ID '$worker_id'");
 }
 
-sub prepare_for_work {
-    my ($self, $worker, $worker_properties) = @_;
+sub prepare_for_work ($self, $worker = undef, $worker_properties = {}) {
     return undef unless $worker;
 
     $self->log_debug_job('Prepare for being processed by worker ' . $worker->id);
@@ -391,7 +366,6 @@ sub prepare_for_work {
     $job_hashref = $self->to_hash(assets => 1);
 
     # set JOBTOKEN for test access to API
-    $worker_properties //= {};
     my $job_token = $worker_properties->{JOBTOKEN} // random_string();
     $worker->set_property(JOBTOKEN => $job_token);
     $job_hashref->{settings}->{JOBTOKEN} = $job_token;
@@ -420,19 +394,18 @@ sub prepare_for_work {
     return $job_hashref;
 }
 
-sub ws_send {
-    my $self = shift;
-    return undef unless my $worker = shift;
+sub ws_send ($self, $worker = undef) {
+    return undef unless $worker;
     my $hashref = $self->prepare_for_work($worker);
     $hashref->{assigned_worker_id} = $worker->id;
     return OpenQA::WebSockets::Client->singleton->send_job($hashref);
 }
 
-sub settings_hash {
-    my ($self) = @_;
+sub settings_hash ($self, $prefetched = undef) {
     return $self->{_settings} if defined $self->{_settings};
     my $settings = $self->{_settings} = {};
-    for ($self->settings->all()) {
+    my $all = $prefetched || [$self->settings->all];
+    for (@$all) {
         # handle multi-value WORKER_CLASS
         if (defined $settings->{$_->key}) {
             $settings->{$_->key} .= ',' . $_->value;
@@ -461,15 +434,9 @@ sub remove_result_dir_prefix ($self, $result_dir) {
     return $result_dir ? basename($result_dir) : undef;
 }
 
-sub set_prio {
-    my ($self, $prio) = @_;
-    $self->update({priority => $prio});
-}
+sub set_prio ($self, $prio) { $self->update({priority => $prio}) }
 
-sub _hashref {
-    my $obj = shift;
-    my @fields = @_;
-
+sub _hashref ($obj, @fields) {
     my %hashref = ();
     foreach my $field (@fields) {
         my $ref = ref($obj->$field);
@@ -488,8 +455,9 @@ sub _hashref {
     return \%hashref;
 }
 
-sub to_hash {
-    my ($job, %args) = @_;
+sub to_hash ($job, %args) {
+    my $dependencies = delete $args{dependencies};    # prefetched
+    my $settings = delete $args{settings};    # prefetched
     my $j = _hashref($job, qw(id name priority state result clone_id t_started t_finished group_id blocked_by_id));
     my $job_group;
     if ($j->{group_id}) {
@@ -499,13 +467,16 @@ sub to_hash {
     if ($job->assigned_worker_id) {
         $j->{assigned_worker_id} = $job->assigned_worker_id;
     }
-    if (my $origin = $job->origin) {
+    if (exists $args{origin}) {
+        $j->{origin_id} = $args{origin} if $args{origin};
+    }
+    elsif (my $origin = $job->origin) {
         $j->{origin_id} = $origin->id;
     }
     if (my $reason = $job->reason) {
         $j->{reason} = $reason;
     }
-    $j->{settings} = $job->settings_hash;
+    $j->{settings} = $job->settings_hash($settings);
     # hashes are left for script compatibility with schema version 38
     $j->{test} = $job->TEST;
     if ($args{assets}) {
@@ -513,7 +484,8 @@ sub to_hash {
         push @{$j->{assets}->{$_->type}}, $_->name for @$assets;
     }
     if ($args{deps}) {
-        $j = {%$j, %{$job->dependencies}};
+        my @args = $dependencies ? ($dependencies->{children} || [], $dependencies->{parents} || []) : ();
+        $j = {%$j, %{$job->dependencies(@args)}};
     }
     if ($args{details}) {
         my $test_modules = read_test_modules($job);
@@ -543,26 +515,21 @@ sub to_hash {
 Checks if a given job can be duplicated - not cloned yet and in correct state.
 
 =cut
-sub can_be_duplicated {
-    my ($self) = @_;
-    return (!defined $self->clone_id) && !(grep { $self->state eq $_ } PRISTINE_STATES);
+sub can_be_duplicated ($self) {
+    (!defined $self->clone_id) && !(grep { $self->state eq $_ } PRISTINE_STATES);
 }
 
-sub _compute_asset_names_considering_parent_jobs {
-    my ($parent_job_ids, $asset_name) = @_;
-    return [$asset_name, map { sprintf("%08d-%s", $_, $asset_name) } @$parent_job_ids];
+sub _compute_asset_names_considering_parent_jobs ($parent_job_ids, $asset_name) {
+    [$asset_name, map { sprintf("%08d-%s", $_, $asset_name) } @$parent_job_ids]
 }
 
-sub _strip_parent_job_id {
-    my ($parent_job_ids, $asset_name) = @_;
+sub _strip_parent_job_id ($parent_job_ids, $asset_name) {
     return $asset_name unless $asset_name =~ m/^(\d{8})-/;
     $asset_name =~ s/^\d{8}-// if grep { $_ == $1 } @$parent_job_ids;
     return $asset_name;
 }
 
-sub missing_assets {
-    my ($self) = @_;
-
+sub missing_assets ($self) {
     my $assets_settings = parse_assets_from_settings($self->settings_hash);
     return [] unless keys %$assets_settings;
 
@@ -589,12 +556,24 @@ sub missing_assets {
     return [sort keys %missing_assets];
 }
 
-sub is_ok {
-    my ($self) = @_;
-
+sub is_ok ($self) {
     return 0 unless my $result = $self->result;
     return 1 if grep { $_ eq $result } OK_RESULTS;
     return 0;
+}
+
+sub extract_group_args_from_settings ($settings) {
+    my ($group, %group_args);
+    if (exists $settings->{_GROUP_ID}) {
+        if (my $id = delete $settings->{_GROUP_ID}) { $group_args{id} = $id }
+        else { $group = 0 }
+    }
+    if (exists $settings->{_GROUP}) {
+        if (my $name = delete $settings->{_GROUP}) { $group_args{name} //= $name }
+        else { $group = 0 }
+    }
+    $group = OpenQA::Schema->singleton->resultset('JobGroups')->find(\%group_args) if keys %group_args;
+    return (\%group_args, $group);
 }
 
 =head2 _create_clone
@@ -610,9 +589,7 @@ sub is_ok {
 Internal function, needs to be executed in a transaction to perform
 optimistic locking on clone_id
 =cut
-sub _create_clone {
-    my ($self, $cluster_job_info, $prio, $skip_ok_result_children) = @_;
-
+sub _create_clone ($self, $cluster_job_info, $clone, $prio, $skip_ok_result_children, $settings) {
     # Skip cloning 'ok' jobs which are only pulled in as children if that flag is set
     return ()
       if $skip_ok_result_children
@@ -620,43 +597,43 @@ sub _create_clone {
       && $cluster_job_info->{ok};
 
     # Duplicate settings (with exceptions)
+    my %spec_settings = %$settings;
+    my %main_settings = map { $_ => (delete $spec_settings{$_}) // $self->$_ } MAIN_SETTINGS;
+    if (my $test_suffix = delete $spec_settings{'TEST+'}) { $main_settings{TEST} .= $test_suffix }
+    my ($group_args, $group) = extract_group_args_from_settings(\%spec_settings);
+    die "Specified _GROUP/_GROUP_ID settings are invalid\n" if keys %$group_args && !$group;
     my @settings = grep { $_->key !~ /^(NAME|TEST|JOBTOKEN)$/ } $self->settings->all;
-    my @new_settings = map { {key => $_->key, value => $_->value} } @settings;
+    my @new_settings = map {
+        my $key = $_->key;
+        my $value = (delete $spec_settings{$key}) // $_->value;
+        {key => $key, value => $value}
+    } @settings;
+    push @new_settings, {key => $_, value => $spec_settings{$_}} for keys %spec_settings;
 
     my $rset = $self->result_source->resultset;
-    my $new_job = $rset->create(
-        {
-            TEST => $self->TEST,
-            VERSION => $self->VERSION,
-            ARCH => $self->ARCH,
-            FLAVOR => $self->FLAVOR,
-            MACHINE => $self->MACHINE,
-            BUILD => $self->BUILD,
-            DISTRI => $self->DISTRI,
-            group_id => $self->group_id,
-            settings => \@new_settings,
-            # assets are re-created in job_grab
-            priority => $prio || $self->priority
-        });
+    $main_settings{group_id} = defined $group ? ($group ? $group->id : undef) : ($self->group_id);
+    $main_settings{settings} = \@new_settings;
+    $main_settings{priority} = $prio || $self->priority;
+    my $new_job = $rset->create(\%main_settings);    # assets are re-created in job_grab
 
     # Perform optimistic locking on clone_id. If the job is not longer there
     # or it already has a clone, rollback the transaction (new_job should
     # not be created, somebody else was faster at cloning)
     my $orig_id = $self->id;
-    my $affected_rows = $rset->search({id => $orig_id, clone_id => undef})->update({clone_id => $new_job->id});
-    die "Job $orig_id already has clone " . $rset->find($orig_id)->clone_id . "\n" unless $affected_rows == 1;
+    if ($clone) {
+        my $affected_rows = $rset->search({id => $orig_id, clone_id => undef})->update({clone_id => $new_job->id});
+        die "Job $orig_id already has clone " . $rset->find($orig_id)->clone_id . "\n" unless $affected_rows == 1;
+    }
 
     # Needed to load default values from DB
     $new_job->discard_changes;
     return ($orig_id => $new_job);
 }
 
-sub _create_clones {
-    my ($self, $jobs, $prio, $skip_ok_result_children) = @_;
-
+sub _create_clones ($self, $jobs, @clone_args) {
     # create the clones
     my $rset = $self->result_source->resultset;
-    my %clones = map { $rset->find($_)->_create_clone($jobs->{$_}, $prio, $skip_ok_result_children) } sort keys %$jobs;
+    my %clones = map { $rset->find($_)->_create_clone($jobs->{$_}, @clone_args) } sort keys %$jobs;
 
     # create dependencies
     for my $job (sort keys %clones) {
@@ -665,9 +642,10 @@ sub _create_clones {
 
         # recreate dependencies if exists for cloned parents/children
         for my $p (@{$info->{parallel_parents}}) {
+            $p = $clones{$p}->id if defined $clones{$p};
             $res->parents->find_or_create(
                 {
-                    parent_job_id => $clones{$p}->id,
+                    parent_job_id => $p,
                     dependency => OpenQA::JobDependencies::Constants::PARALLEL,
                 });
         }
@@ -729,15 +707,14 @@ sub _create_clones {
 
 # internal (recursive) function for duplicate - returns hash of all jobs in the
 # cluster of the current job (in no order but with relations)
-sub cluster_jobs {
-    my $self = shift;
+sub cluster_jobs ($self, @args) {
     my %args = (
         jobs => {},
         # set to 1 when called on a cluster job being cancelled or failing;
         # affects whether we include parallel parents with
         # PARALLEL_CANCEL_WHOLE_CLUSTER set if they have other pending children
         cancelmode => 0,
-        @_
+        @args
     );
 
     my $jobs = $args{jobs};
@@ -780,14 +757,20 @@ sub cluster_jobs {
 
         if ($dep_type eq OpenQA::JobDependencies::Constants::CHAINED) {
             push(@{$job->{chained_parents}}, $parent_id);
-            # we don't duplicate up the chain, only down
+            # duplicate only up the chain if the parent job wasn't ok
+            # notes: - We skip the children here to avoid considering "direct siblings".
+            #        - Going up the chain is not required/wanted when cancelling.
+            unless ($skip_parents || $args{cancelmode}) {
+                my $parent_result = $p->result;
+                $p->cluster_jobs(jobs => $jobs, skip_children => 1)
+                  if !$parent_result || !OpenQA::Jobs::Constants::is_ok_result($parent_result);
+            }
             next;
         }
         elsif ($dep_type eq OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED) {
             push(@{$job->{directly_chained_parents}}, $parent_id);
-            # duplicate also up the chain to ensure this job ran directly after its directly chained parent
-            # notes: - We skip the children here to avoid considering "direct siblings".
-            #        - Going up the chain is not required/wanted when cancelling.
+            # duplicate always up the chain to ensure this job ran directly after its directly chained parent
+            # notes: same as for CHAINED dependencies
             unless ($skip_parents || $args{cancelmode}) {
                 next if exists $jobs->{$parent_id};
                 die "Direct parent $parent_id needs to be cloned as well for the directly chained dependency "
@@ -831,9 +814,7 @@ sub cluster_jobs {
 }
 
 # internal (recursive) function used by cluster_jobs to invoke itself for all children
-sub _cluster_children {
-    my ($self, $jobs, $skip_parents, $no_directly_chained_parent) = @_;
-
+sub _cluster_children ($self, $jobs, $skip_parents = undef, $no_directly_chained_parent = undef) {
     my $schema = $self->result_source->schema;
     my $current_job_info = $jobs->{$self->id};
 
@@ -905,10 +886,7 @@ for DIRECTLY_CHAINED dependencies:
  + if child is clone, find the latest clone and clone it
 
 =cut
-sub duplicate {
-    my ($self, $args) = @_;
-    $args ||= {};
-
+sub duplicate ($self, $args = {}) {
     # If the job already has a clone, none is created
     my ($orig_id, $clone_id) = ($self->id, $self->clone_id);
     my $state = $self->state;
@@ -927,9 +905,9 @@ sub duplicate {
         return $error;
     }
     log_debug('Duplicating jobs: ' . dump($jobs));
+    my @args = ($jobs, $args->{clone} // 1, $args->{prio}, $args->{skip_ok_result_children}, $args->{settings} // {});
     eval {
-        $self->result_source->schema->txn_do(
-            sub { $self->_create_clones($jobs, $args->{prio}, $args->{skip_ok_result_children}) });
+        $self->result_source->schema->txn_do(sub { $self->_create_clones(@args) });
     };
     if (my $error = $@) {
         chomp $error;
@@ -959,10 +937,7 @@ Handle individual job restart including dependent jobs and asset dependencies. N
 the caller is responsible to notify the workers about the new job.
 
 =cut
-sub auto_duplicate {
-    my ($self, $args) = @_;
-    $args //= {};
-
+sub auto_duplicate ($self, $args = {}) {
     my $clones = $self->duplicate($args);
     return $clones unless ref $clones eq 'HASH';
 
@@ -989,8 +964,7 @@ sub auto_duplicate {
     return $dup;
 }
 
-sub abort {
-    my $self = shift;
+sub abort ($self) {
     my $worker = $self->worker;
     return 0 unless $worker;
 
@@ -1000,9 +974,7 @@ sub abort {
     return 1;
 }
 
-sub set_running {
-    my $self = shift;
-
+sub set_running ($self) {
     $self->update({state => RUNNING, t_started => now()}) if $self->state eq ASSIGNED && $self->result eq NONE;
 
     if ($self->state eq RUNNING) {
@@ -1015,8 +987,7 @@ sub set_running {
     }
 }
 
-sub set_property {
-    my ($self, $key, $value) = @_;
+sub set_property ($self, $key, $value = undef) {
     my $r = $self->settings->find({key => $key});
     if (defined $value) {
         if ($r) {
@@ -1037,9 +1008,7 @@ sub set_property {
 }
 
 # calculate overall result looking at the job modules
-sub calculate_result {
-    my ($self) = @_;
-
+sub calculate_result ($self) {
     my $overall;
     for my $m ($self->modules->all) {
         # this condition might look a bit odd, but the effect is to
@@ -1062,8 +1031,7 @@ sub calculate_result {
     return $overall || INCOMPLETE;
 }
 
-sub save_screenshot {
-    my ($self, $screen) = @_;
+sub save_screenshot ($self, $screen) {
     return unless length($screen->{name});
 
     my $tmpdir = $self->worker->get_property('WORKER_TMPDIR');
@@ -1076,8 +1044,7 @@ sub save_screenshot {
     unlink($tmpdir . "/$current") if $current;
 }
 
-sub append_log {
-    my ($self, $log, $file_name) = @_;
+sub append_log ($self, $log, $file_name) {
     return unless length($log->{data});
 
     my $path = $self->worker->get_property('WORKER_TMPDIR');
@@ -1092,8 +1059,7 @@ sub append_log {
     }
 }
 
-sub update_backend {
-    my ($self, $backend_info) = @_;
+sub update_backend ($self, $backend_info) {
     $self->update(
         {
             backend => $backend_info->{backend},
@@ -1106,9 +1072,7 @@ sub update_result ($self, $result) {
     return $res;
 }
 
-sub insert_module {
-    my ($self, $tm, $skip_jobs_update) = @_;
-
+sub insert_module ($self, $tm, $skip_jobs_update = undef) {
     # prepare query to insert job module
     my $insert_sth = $self->{_insert_job_module_sth};
     $insert_sth = $self->{_insert_job_module_sth} = $self->result_source->schema->storage->dbh->prepare(
@@ -1138,8 +1102,7 @@ END_SQL
     return 1;
 }
 
-sub insert_test_modules {
-    my ($self, $testmodules) = @_;
+sub insert_test_modules ($self, $testmodules) {
     return undef unless scalar @$testmodules;
 
     # insert all test modules and update job module statistics uxing txn to avoid inconsistent job module
@@ -1152,9 +1115,7 @@ sub insert_test_modules {
         });
 }
 
-sub custom_module {
-    my ($self, $module, $output) = @_;
-
+sub custom_module ($self, $module, $output) {
     my $parser = parser('Base');
     $parser->include_results(1) if $parser->can("include_results");
 
@@ -1167,29 +1128,24 @@ sub custom_module {
     $self->account_result_size('custom module ' . $module->test->name, $parser->write_output($self->result_dir));
 }
 
-sub modules_with_job_prefetched {
-    my ($self) = @_;
-    return $self->result_source->schema->resultset('JobModules')
+sub modules_with_job_prefetched ($self) {
+    $self->result_source->schema->resultset('JobModules')
       ->search({job_id => $self->id}, {prefetch => 'job', order_by => 'me.id'});
 }
 
-sub _delete_returning_size {
-    my ($file_path) = @_;
+sub _delete_returning_size ($file_path) {
     return 0 unless my @lstat = lstat $file_path;    # file does not exist
     return 0 unless unlink $file_path;    # don't return size when unable to delete file
     return $lstat[7];
 }
 
-sub _delete_returning_size_from_array {
-    my ($array_of_collections) = @_;
+sub _delete_returning_size_from_array ($array_of_collections) {
     my $deleted_size = 0;
     $deleted_size += $_->reduce(sub { $a + _delete_returning_size($b) }, 0) for @$array_of_collections;
     return $deleted_size;
 }
 
-sub delete_logs {
-    my ($self) = @_;
-
+sub delete_logs ($self) {
     my $result_dir = $self->result_dir;
     return undef unless $result_dir;
     my @files = (
@@ -1204,9 +1160,7 @@ sub delete_logs {
     return $deleted_size;
 }
 
-sub delete_videos {
-    my ($self) = @_;
-
+sub delete_videos ($self) {
     my $result_dir = $self->result_dir;
     return 0 unless $result_dir;
 
@@ -1216,9 +1170,7 @@ sub delete_videos {
     return $deleted_size;
 }
 
-sub delete_results {
-    my ($self) = @_;
-
+sub delete_results ($self) {
     # delete the entire results directory
     my $deleted_size = 0;
     my $result_dir = $self->result_dir;
@@ -1241,9 +1193,7 @@ sub delete_results {
     return $deleted_size;
 }
 
-sub exclusively_used_screenshot_ids {
-    my ($self) = @_;
-
+sub exclusively_used_screenshot_ids ($self) {
     my $job_id = $self->id;
     my $sth = $self->result_source->schema->storage->dbh->prepare(
         <<'END_SQL'
@@ -1290,15 +1240,12 @@ my %JOB_MODULE_STATISTICS_COLUMN_BY_JOB_MODULE_RESULT = (
     OpenQA::Jobs::Constants::SKIPPED => 'externally_skipped_module_count',
 );
 
-sub _get_job_module_statistics_column_by_job_module_result {
-    my ($job_module_result) = @_;
+sub _get_job_module_statistics_column_by_job_module_result ($job_module_result = undef) {
     return undef unless defined $job_module_result;
     return $JOB_MODULE_STATISTICS_COLUMN_BY_JOB_MODULE_RESULT{$job_module_result};
 }
 
-sub update_module {
-    my ($self, $name, $raw_result, $known_md5_sums, $known_file_names) = @_;
-
+sub update_module ($self, $name, $raw_result = undef, $known_md5_sums = undef, $known_file_names = undef) {
     # find the module
     # note: The name is not strictly unique so use additional query parameters to consistently consider the
     #       most recent module.
@@ -1329,16 +1276,13 @@ sub progress_info ($self) {
     return {modcount => $processed + $pending, moddone => $processed};
 }
 
-sub account_result_size {
-    my ($self, $result_name, $size) = @_;
+sub account_result_size ($self, $result_name, $size) {
     my $job_id = $self->id;
-    log_debug("Accounting size of $result_name for job $job_id: $size");
+    log_trace("Accounting size of $result_name for job $job_id: $size");
     $self->update({result_size => \"coalesce(result_size, 0) + $size"});
 }
 
-sub store_image {
-    my ($self, $asset, $md5, $thumb) = @_;
-
+sub store_image ($self, $asset, $md5, $thumb = undef) {
     my ($storepath, $thumbpath) = OpenQA::Utils::image_md5_filename($md5);
     $storepath = $thumbpath if ($thumb);
     my $prefixdir = dirname($storepath);
@@ -1349,13 +1293,12 @@ sub store_image {
     if (!$thumb) {
         my $dbpath = OpenQA::Utils::image_md5_filename($md5, 1);
         $self->result_source->schema->resultset('Screenshots')->create_screenshot($dbpath);
-        log_debug("Stored image: $storepath");
+        log_trace("Stored image: $storepath");
     }
     return $storepath;
 }
 
-sub parse_extra_tests {
-    my ($self, $asset, $type, $script) = @_;
+sub parse_extra_tests ($self, $asset, $type, $script = undef) {
 
     return unless ($type eq 'JUnit'
         || $type eq 'XUnit'
@@ -1391,20 +1334,16 @@ sub parse_extra_tests {
     return 1;
 }
 
-sub create_artefact {
-    my ($self, $asset, $ulog) = @_;
-
+sub create_artefact ($self, $asset, $ulog) {
     my $storepath = $self->create_result_dir;
     $storepath .= '/ulogs' if $ulog;
     my $target = join('/', $storepath, $asset->filename);
     $asset->move_to($target);
     $self->account_result_size("artefact $target", $asset->size);
-    log_debug("Created artefact: $target");
+    log_trace("Created artefact: $target");
 }
 
-sub create_asset {
-    my ($self, $asset, $scope, $local) = @_;
-
+sub create_asset ($self, $asset, $scope, $local = undef) {
     my $fname = $asset->filename;
 
     # FIXME: pass as parameter to avoid guessing
@@ -1486,14 +1425,9 @@ sub create_asset {
     return 0, $fname, $type, $last;
 }
 
-sub has_failed_modules {
-    my ($self) = @_;
-    return $self->modules->count({result => 'failed'}, {rows => 1});
-}
+sub has_failed_modules ($self) { $self->modules->count({result => 'failed'}) }
 
-sub failed_modules {
-    my ($self) = @_;
-
+sub failed_modules ($self) {
     my $fails = $self->modules->search({result => 'failed'}, {select => ['name'], order_by => 't_updated'});
     my @failedmodules;
 
@@ -1503,8 +1437,7 @@ sub failed_modules {
     return \@failedmodules;
 }
 
-sub update_status {
-    my ($self, $status) = @_;
+sub update_status ($self, $status) {
     my $ret = {result => 1};
 
     # that is a bit of an abuse as we don't have anything of the
@@ -1560,8 +1493,7 @@ sub _parent_job_ids ($self) {
     return [map { $_->parent_job_id } @parents];
 }
 
-sub register_assets_from_settings {
-    my ($self) = @_;
+sub register_assets_from_settings ($self) {
     my $settings = $self->settings_hash;
 
     my %assets = %{parse_assets_from_settings($settings)};
@@ -1616,9 +1548,7 @@ sub reevaluate_children_asset_settings ($self, $include_self = 0, $visited = {})
     $_->child->reevaluate_children_asset_settings(1, $visited) for $self->children->search(\%CHAINED_DEPENDENCY_QUERY);
 }
 
-sub _asset_find {
-    my ($name, $type, $parents) = @_;
-
+sub _asset_find ($name, $type, $parents) {
     # add undef to parents so that we check regular assets too
     for my $parent (@$parents, undef) {
         my $fname = $parent ? sprintf("%08d-%s", $parent, $name) : $name;
@@ -1627,9 +1557,7 @@ sub _asset_find {
     return undef;
 }
 
-sub allocate_network {
-    my ($self, $name) = @_;
-
+sub allocate_network ($self, $name) {
     my $vlan = $self->_find_network($name);
     return $vlan if $vlan;
     #allocate new
@@ -1676,11 +1604,7 @@ sub allocate_network {
     }
 }
 
-sub _find_network {
-    my ($self, $name, $seen) = @_;
-
-    $seen //= {};
-
+sub _find_network ($self, $name, $seen = {}) {
     return if $seen->{$self->id};
     $seen->{$self->id} = 1;
 
@@ -1706,11 +1630,7 @@ sub _find_network {
     }
 }
 
-sub release_networks {
-    my ($self) = @_;
-
-    $self->networks->delete;
-}
+sub release_networks ($self) { $self->networks->delete }
 
 sub needle_dir ($self) {
     unless ($self->{_needle_dir}) {
@@ -1722,9 +1642,7 @@ sub needle_dir ($self) {
 }
 
 # return the last X complete jobs of the same scenario
-sub _previous_scenario_jobs {
-    my ($self, $rows) = @_;
-
+sub _previous_scenario_jobs ($self, $rows = undef) {
     my $schema = $self->result_source->schema;
     my $conds = [{'me.state' => 'done'}, {'me.result' => [COMPLETE_RESULTS]}, {'me.id' => {'<', $self->id}}];
     for my $key (SCENARIO_WITH_MACHINE_KEYS) {
@@ -1742,9 +1660,7 @@ sub _relevant_module_result_for_carry_over_evaluation ($module_result) {
 }
 
 # internal function to compare two failure reasons
-sub _failure_reason {
-    my ($self) = @_;
-
+sub _failure_reason ($self) {
     my %failed_modules;
     my $modules = $self->modules;
     while (my $m = $modules->next) {
@@ -1759,14 +1675,14 @@ sub _failure_reason {
     return keys %failed_modules ? (join(',', sort keys %failed_modules) || $self->result) : 'GOOD';
 }
 
-sub _carry_over_candidate {
-    my ($self) = @_;
-
+sub _carry_over_candidate ($self) {
     my $current_failure_reason = $self->_failure_reason;
+    my $app = OpenQA::App->singleton;
+    my $config = $app ? $app->config->{carry_over} : OpenQA::Setup::carry_over_defaults;
     my $prev_failure_reason = '';
     my $state_changes = 0;
-    my $lookup_depth = 10;
-    my $state_changes_limit = 3;
+    my $lookup_depth = $config->{lookup_depth};
+    my $state_changes_limit = $config->{state_changes_limit};
 
     # we only do carryover for jobs with some kind of (soft) failure
     return if $current_failure_reason eq 'GOOD';
@@ -1804,12 +1720,8 @@ carry over bugrefs (i.e. special comments) from previous jobs to current
 result in the same scenario.
 
 =cut
-sub carry_over_bugrefs {
-    my ($self) = @_;
-
-    if (my $group = $self->group) {
-        return undef unless $group->carry_over_bugrefs;
-    }
+sub carry_over_bugrefs ($self) {
+    if (my $group = $self->group) { return undef unless $group->carry_over_bugrefs }
 
     my $prev = $self->_carry_over_candidate;
     return undef if !$prev;
@@ -1832,9 +1744,7 @@ sub carry_over_bugrefs {
     return undef;
 }
 
-sub bugref {
-    my ($self) = @_;
-
+sub bugref ($self) {
     my $comments = $self->comments->search({}, {order_by => {-desc => 'me.id'}});
     while (my $comment = $comments->next) {
         if (my $bugref = $comment->bugref) {
@@ -1844,9 +1754,7 @@ sub bugref {
     return undef;
 }
 
-sub store_column {
-    my ($self, $columnname, $value) = @_;
-
+sub store_column ($self, $columnname, $value) {
     # handle transition to the final state
     if ($columnname eq 'state' && grep { $value eq $_ } FINAL_STATES) {
         # make sure we do not overwrite a t_finished from fixtures
@@ -1859,23 +1767,19 @@ sub store_column {
     return $self->SUPER::store_column($columnname, $value);
 }
 
-sub enqueue_finalize_job_results {
-    my ($self, $carried_over) = @_;
-
+sub enqueue_finalize_job_results ($self, $carried_over = undef) {
     my $gru = eval { OpenQA::App->singleton->gru };    # gru might not be present within tests
     $gru->enqueue(finalize_job_results => [$self->id, $carried_over], {priority => -10}) if $gru;
 }
 
 # used to stop jobs with some kind of dependency relationship to another
 # job that failed or was cancelled, see cluster_jobs(), cancel() and done()
-sub _job_stop_cluster {
-    my ($self, $job) = @_;
-
+sub _job_stop_cluster ($self, $job) {
     # skip ourselves
     return 0 if $job == $self->id;
     my $rset = $self->result_source->resultset;
 
-    $job = $rset->search({id => $job, result => NONE})->first;
+    $job = $rset->search({id => $job, result => NONE}, {rows => 1})->first;
     return 0 unless $job;
 
     if ($job->state eq SCHEDULED || $job->state eq ASSIGNED) {
@@ -1892,16 +1796,12 @@ sub _job_stop_cluster {
     return 1;
 }
 
-sub test_uploadlog_list {
-    # get a list of uploaded logs
-    my ($self) = @_;
+sub test_uploadlog_list ($self) {
     return [] unless my $testresdir = $self->result_dir();
     return [map { s#.*/##r } glob "$testresdir/ulogs/*"];
 }
 
-sub test_resultfile_list {
-    # get a list of existing resultfiles
-    my ($self) = @_;
+sub test_resultfile_list ($self) {
     return [] unless my $testresdir = $self->result_dir;
 
     my @filelist = (COMMON_RESULT_FILES, qw(backend.json serial0.txt));
@@ -1921,23 +1821,19 @@ sub test_resultfile_list {
     return $filelist_existing;
 }
 
-sub has_autoinst_log {
-    my ($self) = @_;
-
+sub has_autoinst_log ($self) {
     return 0 unless my $result_dir = $self->result_dir;
     return -e "$result_dir/autoinst-log.txt";
 }
 
-sub git_log_diff {
-    my ($self, $dir, $refspec_range) = @_;
+sub git_log_diff ($self, $dir, $refspec_range) {
     my $res = run_cmd_with_log_return_error(
         ['git', '-C', $dir, 'log', '--stat', '--pretty=oneline', '--abbrev-commit', '--no-merges', $refspec_range]);
     # regardless of success or not the output contains the information we need
     return "\n" . $res->{stderr} if $res->{stderr};
 }
 
-sub git_diff {
-    my ($self, $dir, $refspec_range) = @_;
+sub git_diff ($self, $dir, $refspec_range) {
     my $timeout = OpenQA::App->singleton->config->{global}->{job_investigate_git_timeout} // 20;
     my $res = run_cmd_with_log_return_error(['timeout', $timeout, 'git', '-C', $dir, 'diff', '--stat', $refspec_range]);
     return "\n" . $res->{stderr} if $res->{stderr};
@@ -1949,15 +1845,14 @@ Find pointers for investigation on failures, e.g. what changed vs. a "last
 good" job in the same scenario.
 
 =cut
-sub investigate {
-    my ($self, %args) = @_;
+sub investigate ($self, %args) {
     my @previous = $self->_previous_scenario_jobs;
     return {error => 'No previous job in this scenario, cannot provide hints'} unless @previous;
     my %inv;
     return {error => 'No result directory available for current job'} unless $self->result_dir();
     my $ignore = OpenQA::App->singleton->config->{global}->{job_investigate_ignore};
     for my $prev (@previous) {
-        if ($prev->result eq 'failed') {
+        if ($prev->should_show_investigation) {
             $inv{first_bad} = {type => 'link', link => '/tests/' . $prev->id, text => $prev->id};
             next;
         }
@@ -1993,8 +1888,7 @@ sub investigate {
     return \%inv;
 }
 
-sub packages_diff {
-    my ($self, $prev, $ignore) = @_;
+sub packages_diff ($self, $prev, $ignore) {
     my $current_file = path($self->result_dir, 'worker_packages.txt');
     return unless -e $current_file;
     my $prev_file = path($prev->result_dir, 'worker_packages.txt');
@@ -2004,18 +1898,49 @@ sub packages_diff {
     return join("\n", grep { !/(^@@|$ignore)/ } split(/\n/, $diff_packages));
 }
 
-sub ancestors ($self) {
-    my $o = $self->origin;
-    return $o ? 1 + $o->ancestors : 0;
+sub ancestors ($self, $limit = -1) {
+    my $ancestors = $self->{_ancestors};
+    return $ancestors if defined $ancestors;
+    my $sth = $self->result_source->schema->storage->dbh->prepare('
+        with recursive orig_id as (
+            select ? as orig_id, 0 as level
+            union all
+            select id as orig_id, orig_id.level + 1 as level from jobs join orig_id on orig_id.orig_id = jobs.clone_id where (? < 0 or level < ?))
+        select level from orig_id order by level desc limit 1;');
+    $sth->bind_param(1, $self->id, SQL_INTEGER);
+    $sth->bind_param(2, $limit, SQL_INTEGER);
+    $sth->bind_param(3, $limit, SQL_INTEGER);
+    $sth->execute;
+    $self->{_ancestors} = $sth->fetchrow_array;
+}
+
+sub descendants ($self, $limit = -1) {
+    my $descendants = $self->{_descendants};
+    return $descendants if defined $descendants;
+    my $sth = $self->result_source->schema->storage->dbh->prepare('
+        with recursive clone_id as (
+            select ? as clone_id, -1 as level
+            union all
+            select jobs.clone_id as clone_id, clone_id.level + 1 as level from jobs join clone_id on clone_id.clone_id = jobs.id where (? < 0 or level < ?))
+        select level from clone_id order by level desc limit 1;');
+    $sth->bind_param(1, $self->id, SQL_INTEGER);
+    $sth->bind_param(2, $limit, SQL_INTEGER);
+    $sth->bind_param(3, $limit, SQL_INTEGER);
+    $sth->execute;
+    $self->{_descendants} = $sth->fetchrow_array;
 }
 
 sub handle_retry ($self) {
     return undef unless my $retry = $self->settings_hash->{RETRY};
     # strip any optional descriptions after a colon
     $retry =~ s/:.*//;
+    return 0 unless looks_like_number $retry;
     my $ancestors = $self->ancestors;
-    log_debug('handle_retry: Found retry job ' . $self->id . ", try '$ancestors' of up to '$retry' retries");
-    return $ancestors < $retry;
+    return 0 if $ancestors >= $retry;
+    my $system_user_id = $self->result_source->schema->resultset('Users')->system->id;
+    my $msg = "Restarting because RETRY is set to $retry (and only restarted $ancestors times so far)";
+    $self->comments->create({text => $msg, user_id => $system_user_id});
+    return 1;
 }
 
 =head2 done
@@ -2031,9 +1956,7 @@ if result is not set (expected default situation) result is computed from the re
 test modules
 
 =cut
-sub done {
-    my ($self, %args) = @_;
-
+sub done ($self, %args) {
     # read specified result or calculate result from module results if none specified
     my $result;
     if ($args{newbuild}) {
@@ -2079,9 +2002,6 @@ sub done {
     elsif ($reason_unknown && !defined $reason && $result eq INCOMPLETE) {
         $new_val{reason} = 'no test modules scheduled/uploaded';
     }
-    elsif (!$self->is_ok) {
-        $restart = $self->handle_retry;
-    }
     $self->update(\%new_val);
     # bugrefs are there to mark reasons of failure - the function checks itself though
     my $carried_over = $self->carry_over_bugrefs;
@@ -2095,9 +2015,9 @@ sub done {
         }
     }
     $self->unblock;
-    $self->auto_duplicate if $restart;
+    $self->auto_duplicate if $restart || (!$self->is_ok && $self->handle_retry);
 
-    return $result;
+    return $new_val{result} // $self->result;
 }
 
 sub cancel ($self, $result, $reason = undef) {
@@ -2118,9 +2038,7 @@ sub cancel ($self, $result, $reason = undef) {
     return $count;
 }
 
-sub dependencies {
-    my ($self, $children_list, $parents_list) = @_;
-
+sub dependencies ($self, $children_list = undef, $parents_list = undef) {
     # make arrays for returning parents/children by the dependency type
     my @dependency_names = OpenQA::JobDependencies::Constants::display_names;
     my %parents = map { $_ => [] } @dependency_names;
@@ -2150,23 +2068,18 @@ sub dependencies {
     return {parents => \%parents, has_parents => $has_parents, parents_ok => $parents_ok, children => \%children};
 }
 
-sub result_stats {
-    my ($self) = @_;
-
-    return {
+sub result_stats ($self) {
+    {
         passed => $self->passed_module_count,
         softfailed => $self->softfailed_module_count,
         failed => $self->failed_module_count,
         none => $self->skipped_module_count,
         skipped => $self->externally_skipped_module_count,
-    };
+    }
 }
 
-sub blocked_by_parent_job {
-    my ($self) = @_;
-
+sub blocked_by_parent_job ($self) {
     my $cluster_jobs = $self->cluster_jobs;
-
     my $job_info = $cluster_jobs->{$self->id};
     my @possibly_blocked_jobs = ($self->id, @{$job_info->{parallel_parents}}, @{$job_info->{parallel_children}});
 
@@ -2187,48 +2100,32 @@ sub blocked_by_parent_job {
     return undef;
 }
 
-sub calculate_blocked_by {
-    my ($self) = @_;
-    $self->update({blocked_by_id => $self->blocked_by_parent_job});
-}
+sub calculate_blocked_by ($self) { $self->update({blocked_by_id => $self->blocked_by_parent_job}) }
 
-sub unblock {
-    my ($self) = @_;
+sub unblock ($self) { $_->calculate_blocked_by for $self->blocking }
 
-    for my $j ($self->blocking) {
-        $j->calculate_blocked_by;
-    }
-}
-
-sub has_dependencies {
-    my ($self) = @_;
-
+sub has_dependencies ($self) {
     my $id = $self->id;
     my $dependencies = $self->result_source->schema->resultset('JobDependencies');
     return defined $dependencies->search({-or => {child_job_id => $id, parent_job_id => $id}}, {rows => 1})->first;
 }
 
-sub has_modules {
-    my ($self) = @_;
-
-    return defined $self->modules->search(undef, {rows => 1})->first;
+sub is_child_of ($self, $job_id) {
+    my $id = $self->id;
+    my $dependencies = $self->result_source->schema->resultset('JobDependencies');
+    return defined $dependencies->search({parent_job_id => $job_id, child_job_id => $self->id}, {rows => 1})->first;
 }
 
-sub should_show_autoinst_log {
-    my ($self) = @_;
+sub has_modules ($self) { $self->modules->count() }
 
-    return $self->state eq DONE && !$self->has_modules && $self->has_autoinst_log;
+sub should_show_autoinst_log ($self) { $self->state eq DONE && !$self->has_modules && $self->has_autoinst_log }
+
+sub should_show_investigation ($self) {
+    OpenQA::Jobs::Constants::meta_state($self->state) ne OpenQA::Jobs::Constants::FINAL
+      || !OpenQA::Jobs::Constants::is_ok_result($self->result);
 }
 
-sub should_show_investigation {
-    my ($self) = @_;
-
-    return $self->state ne DONE || $self->result eq FAILED;
-}
-
-sub status {
-    my ($self) = @_;
-
+sub status ($self) {
     my $state = $self->state;
     my $meta_state = OpenQA::Jobs::Constants::meta_state($state);
     return OpenQA::Jobs::Constants::meta_result($self->result) if $meta_state eq OpenQA::Jobs::Constants::FINAL;
@@ -2236,9 +2133,7 @@ sub status {
     return $meta_state;
 }
 
-sub status_info {
-    my ($self) = @_;
-
+sub status_info ($self) {
     my $info = $self->state;
     $info .= ' with result ' . $self->result if grep { $info eq $_ } FINAL_STATES;
     return $info;
@@ -2251,8 +2146,9 @@ sub should_skip_review ($self, $overall, $reviewed) {
         && !$self->has_failed_modules);
 }
 
-sub _overview_result_done {
-    my ($self, $jobid, $job_labels, $aggregated, $failed_modules, $actually_failed_modules, $todo) = @_;
+sub _overview_result_done ($self, $jobid, $job_labels, $aggregated, $failed_modules, $actually_failed_modules,
+    $todo = undef)
+{
     return undef
       if $failed_modules && !OpenQA::Utils::any_array_item_contained_by_hash($actually_failed_modules, $failed_modules);
 
@@ -2277,9 +2173,7 @@ sub _overview_result_done {
     };
 }
 
-sub overview_result {
-    my ($self, $job_labels, $aggregated, $failed_modules, $actually_failed_modules, $todo) = @_;
-
+sub overview_result ($self, $job_labels, $aggregated, $failed_modules, $actually_failed_modules, $todo = undef) {
     my $jobid = $self->id;
     if ($self->state eq OpenQA::Jobs::Constants::DONE) {
         return $self->_overview_result_done($jobid, $job_labels, $aggregated, $failed_modules,
@@ -2306,9 +2200,7 @@ sub overview_result {
     return $result;
 }
 
-sub video_file_paths {
-    my ($self) = @_;
-
+sub video_file_paths ($self) {
     return Mojo::Collection->new unless my $testresdir = $self->result_dir;
     return find_video_files($testresdir);
 }

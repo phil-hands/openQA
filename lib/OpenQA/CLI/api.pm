@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::CLI::api;
-use Mojo::Base 'OpenQA::Command';
+use Mojo::Base 'OpenQA::Command', -signatures;
 
 use Mojo::File 'path';
 use Mojo::JSON qw(decode_json);
@@ -15,8 +15,7 @@ has usage => sub {
     shift->extract_usage =~ s/\$search_criteria/$search_criteria/r;
 };
 
-sub command {
-    my ($self, @args) = @_;
+sub command ($self, @args) {
 
     my $data = $self->data_from_stdin;
 
@@ -53,7 +52,7 @@ sub command {
     $retries //= $ENV{OPENQA_CLI_RETRIES} // 0;
     do {
         $tx = $client->start($tx);
-        my $res_code = $tx->res->code;
+        my $res_code = $tx->res->code // 0;
         return $self->handle_result($tx, {pretty => $pretty, quiet => $quiet, verbose => $verbose})
           unless $res_code =~ /50[23]/ && $retries > 0;
         print "Request failed, hit error $res_code, retrying up to $retries more times after waiting ...\n";
@@ -100,9 +99,19 @@ sub command {
     openqa-cli api -X POST jobs ISO=foo.iso DISTRI=my-distri \
       FLAVOR=my-flavor VERSION=42 BUILD=42 TEST=my-test
 
-    # Trigger jobs on ISO "foo.iso"
-    openqa-cli api --o3 -X POST isos ISO=foo.iso DISTRI=my-distri \
-      FLAVOR=my-flavor ARCH=my-arch VERSION=42 BUILD=1234
+    # Trigger a single set of jobs (see
+    # https://open.qa/docs/#_spawning_single_new_jobs_jobs_post for details)
+    openqa-cli api -X POST jobs \
+      TEST:0=first-job TEST:1=second-job _START_AFTER:1=0
+
+    # Trigger jobs on ISO "foo.iso" creating a "scheduled product" (see
+    # https://open.qa/docs/#_spawning_multiple_jobs_based_on_templates_isos_post
+    # for details, e.g for considering to use the `async` flag)
+    openqa-cli api --o3 -X POST isos ISO=foo.iso \
+      DISTRI=my-distri FLAVOR=my-flavor ARCH=my-arch VERSION=42 BUILD=1234
+
+    # Track scheduled product
+    openqa-cli api --o3 isos/1234
 
     # Change group id for job
     openqa-cli api --json --data '{"group_id":1}' -X PUT jobs/639172

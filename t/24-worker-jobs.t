@@ -8,6 +8,7 @@ use Test::Warnings ':report_warnings';
 
 BEGIN {
     $ENV{OPENQA_UPLOAD_DELAY} = 0;
+    $ENV{OPENQA_WORKER_ACCEPT_ATTEMPTS} = 2;
 }
 
 use FindBin;
@@ -33,6 +34,7 @@ use OpenQA::Test::FakeWebSocketTransaction;
 use OpenQA::Test::TimeLimit '10';
 use OpenQA::Worker::WebUIConnection;
 use OpenQA::Jobs::Constants;
+use OpenQA::Test::FakeWorker;
 use OpenQA::Test::Utils 'mock_io_loop';
 use OpenQA::UserAgent;
 
@@ -81,16 +83,11 @@ sub wait_until_uploading_logs_and_assets_concluded {
     wait_for_job($job, 'job concluded uploading logs an assets', 'uploading_logs_and_assets_concluded');
 }
 
-# Fake worker, client and engine
+# Fake client and engine
 {
-    package Test::FakeWorker;
-    use Mojo::Base -base;
-    has instance_number => 1;
-    has settings => sub { OpenQA::Worker::Settings->new(1, {}) };
-    has pool_directory => undef;
-}
-{
-    package Test::FakeClient;    # uncoverable statement count:2
+    # uncoverable statement count:1
+    # uncoverable statement count:2
+    package Test::FakeClient;
     use Mojo::Base -base;
     has worker_id => 1;
     has webui_host => 'not relevant here';
@@ -104,6 +101,7 @@ sub wait_until_uploading_logs_and_assets_concluded {
     has last_error => undef;
     has fail_job_duplication => 0;
     has configured_retries => 5;
+    has fake_result => undef;
     sub send {
         my ($self, $method, $path, %args) = @_;
         my $params = $args{params};
@@ -117,7 +115,9 @@ sub wait_until_uploading_logs_and_assets_concluded {
             $self->last_error('fake API error');
             return Mojo::IOLoop->next_tick(sub { $args{callback}->(0) });
         }
-        Mojo::IOLoop->next_tick(sub { $args{callback}->({}) }) if $args{callback} && $args{callback} ne 'no';
+        my %cb_args;
+        $cb_args{result} = $self->fake_result if $self->fake_result && $path =~ qr/set_done/;
+        Mojo::IOLoop->next_tick(sub { $args{callback}->(\%cb_args) }) if $args{callback} && $args{callback} ne 'no';
     }
     sub reset_last_error { shift->last_error(undef) }
     sub send_status { push(@{shift->sent_messages}, @_) }
@@ -130,7 +130,9 @@ sub wait_until_uploading_logs_and_assets_concluded {
     sub evaluate_error { OpenQA::Worker::WebUIConnection::evaluate_error(@_) }
 }
 {
-    package Test::FakeEngine;    # uncoverable statement count:2
+    # uncoverable statement count:1
+    # uncoverable statement count:2
+    package Test::FakeEngine;
     use Mojo::Base -base;
     has pid => 1;
     has errored => 0;
@@ -139,7 +141,7 @@ sub wait_until_uploading_logs_and_assets_concluded {
 }
 
 my $isotovideo = Test::FakeEngine->new;
-my $worker = Test::FakeWorker->new;
+my $worker = OpenQA::Test::FakeWorker->new(settings => OpenQA::Worker::Settings->new(1, {}));
 my $pool_directory = tempdir('poolXXXX');
 my $testresults_dir = $pool_directory->child('testresults')->make_path;
 $testresults_dir->child('test_order.json')->spurt('[]');
@@ -219,11 +221,14 @@ subtest 'Format reason' => sub {
 };
 
 subtest 'Lost WebSocket connection' => sub {
+    $worker->is_executing_single_job(0);    # fake directly chained cluster so we have multiple attempts
     my $job = OpenQA::Worker::Job->new($worker, $disconnected_client, {id => 1, URL => $engine_url});
     my $event_data;
     $job->on(status_changed => sub ($job, $data) { $event_data = $data });
+    ok !$job->accept, 'acceptance does not work without ws connection';
+    is $job->status, 'accepting', 'job status is still accepting as there are retry attempts remaining';
     $job->accept;
-    is $job->status, 'stopped', 'job has been stopped';
+    is $job->status, 'stopped', 'job has been stopped as retry attepts have been exhausted';
     is $event_data->{reason}, WORKER_SR_API_FAILURE, 'reason';
     like $event_data->{error_message}, qr/Unable to accept.*websocket connection to not relevant here has been lost./,
       'error message';
@@ -250,10 +255,11 @@ subtest 'Interrupted WebSocket connection' => sub {
 subtest 'Interrupted WebSocket connection (before we can tell the WebUI that we want to work on it)' => sub {
     is_deeply $client->websocket_connection->sent_messages, [], 'no WebSocket calls yet';
 
+    $worker->is_executing_single_job(1);
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 2, URL => $engine_url});
     $job->accept;
     is $job->status, 'accepting', 'job is now being accepted';
-    $job->client->websocket_connection->emit_finish;
+    $job->stop_if_out_of_acceptance_attempts;
     is $job->status, 'stopped', 'job is abandoned if unable to confirm to the web UI that we are working on it';
     like(
         exception { $job->start },
@@ -543,14 +549,15 @@ subtest 'Successful job' => sub {
 
     my %settings = (EXTERNAL_VIDEO_ENCODER_CMD => 'ffmpeg …', GENERAL_HW_CMD_DIR => '/some/path', FOO => 'bar');
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 4, URL => $engine_url, settings => \%settings});
+    $client->fake_result(SOFTFAILED);
     $worker->settings->global_settings->{EXTERNAL_VIDEO_ENCODER_BAR} = 'foo';
     $job->accept;
     is $job->status, 'accepting', 'job is now being accepted';
     wait_until_job_status_ok($job, 'accepted');
 
-    my ($stop_reason, $is_uploading);
+    my ($stop_reason, $job_ok, $is_uploading);
     $job->once(uploading_results_concluded => sub ($job, $result) { $is_uploading = $job->is_uploading_results });
-    $job->on(status_changed => sub ($job, $result) { $stop_reason = $result->{reason} });
+    $job->on(status_changed => sub ($job, $result) { $stop_reason = $result->{reason}; $job_ok = $result->{ok} });
     my $assets_public = $pool_directory->child('assets_public')->make_path;
     $assets_public->child('test.txt')->spurt('Works!');
 
@@ -569,6 +576,7 @@ subtest 'Successful job' => sub {
 
     is $is_uploading, 0, 'uploading results concluded';
     is $stop_reason, 'done', 'job stopped because it is done';
+    ok $job_ok, 'job considered successful';
     is $job->status, 'stopped', 'job is stopped successfully';
     is $job->is_uploading_results, 0, 'uploading results concluded';
 
@@ -624,6 +632,7 @@ subtest 'Successful job' => sub {
 
     # assume asset upload would have failed
     $job_mock->redefine(_upload_log_file_or_asset => sub ($job, $params) { $params->{ulog} });
+    $client->fake_result(INCOMPLETE);
     $job->_set_status(running => {});
     $job->stop(WORKER_SR_DONE);
     wait_until_job_status_ok($job, 'stopped');
@@ -636,6 +645,7 @@ subtest 'Successful job' => sub {
         ],
         'expected REST-API calls happened (last API call is actually useless and could be avoided)'
     ) or diag explain $client->sent_messages;
+    ok defined $job_ok && !$job_ok, 'job not considered successful';
     is $client->register_called, 1, 're-registration attempted';
     $client->register_called(0)->sent_messages([])->websocket_connection->sent_messages([]);
 
@@ -1249,6 +1259,8 @@ subtest 'handling timeout' => sub {
     $job->_handle_timeout($engine);
     is $job->status, 'stopping', 'stop has been triggered';
     is $event_data->{reason}, WORKER_SR_TIMEOUT, 'stop reason is timeout';
+    combined_like { wait_until_job_status_ok($job, 'stopped') } qr/stopped because it exceeded MAX_JOB_TIME/,
+      'timeout logged';
 };
 
 subtest 'ignoring known images and files' => sub {
@@ -1302,7 +1314,8 @@ subtest 'override job reason when qemu terminated with known issues by parsing a
 'terminated prematurely: Encountered corrupted state file: No space left on device, see log output for details',
             log_file_content =>
 '[debug] Unable to serialize fatal error: Can\'t write to file "base_state.json": No space left on device at /usr/lib/os-autoinst/bmwqemu.pm line 86.',
-            base_state_content => 'foo boo'
+            base_state_content => 'foo boo',
+            log_message => qr/Found.*but failed to parse the JSON/
         });
     foreach my $known_issue (@known_issues) {
         my $job = OpenQA::Worker::Job->new($worker, $client, {id => 12, URL => $engine_url});
@@ -1315,8 +1328,10 @@ subtest 'override job reason when qemu terminated with known issues by parsing a
             });
         $job->accept;
         wait_until_job_status_ok($job, 'accepted');
-        $job->start;
-        wait_until_job_status_ok($job, 'stopped');
+        combined_like sub {
+            $job->start;
+            wait_until_job_status_ok($job, 'stopped');
+        }, $known_issue->{log_message} // qr//, 'message logged';
         my $result = @{$client->sent_messages}[-1];
         is $result->{result}, 'incomplete', 'job result is incomplete';
         like $result->{reason}, qr/$known_issue->{reason}/, "The job incomplete with reason: $known_issue->{reason}";

@@ -9,7 +9,7 @@ use OpenQA::Constants qw(JOBS_OVERVIEW_SEARCH_CRITERIA);
 use OpenQA::Schema;
 use OpenQA::Utils qw(bugurl human_readable_size render_escaped_refs href_to_bugref);
 use OpenQA::Events;
-use OpenQA::Jobs::Constants qw(EXECUTION_STATES PRE_EXECUTION_STATES);
+use OpenQA::Jobs::Constants qw(EXECUTION_STATES PRE_EXECUTION_STATES ABORTED_RESULTS FAILED NOT_COMPLETE_RESULTS);
 
 sub register ($self, $app, $config) {
     $app->helper(
@@ -196,6 +196,16 @@ sub register ($self, $app, $config) {
         });
 
     $app->helper(
+        help_popover_todo => sub ($c) {
+            $c->help_popover(
+                'Help for the <em>TODO</em>-filter',
+                '<p>Shows only jobs that need to be labeled for the black review badge to show up</p>',
+                'http://open.qa/docs/#_review_badges',
+                'documentation about review badges'
+            );
+        });
+
+    $app->helper(
         # emit_event helper, adds user, connection to events
         emit_event => sub {
             my ($self, $event, $data) = @_;
@@ -210,7 +220,11 @@ sub register ($self, $app, $config) {
             return $c->tag('span', title => $text, $text);
         });
 
-    my @unfinished_states = (EXECUTION_STATES, PRE_EXECUTION_STATES);
+    my %progress_bar_query_by_key = (
+        unfinished => [state => [EXECUTION_STATES, PRE_EXECUTION_STATES]],
+        skipped => [result => [ABORTED_RESULTS]],
+        failed => [result => [FAILED, NOT_COMPLETE_RESULTS]],
+    );
     $app->helper(
         build_progress_bar_section => sub ($c, $key, $res, $max, $params, $class = '') {
             return '' unless $res;
@@ -218,7 +232,7 @@ sub register ($self, $app, $config) {
             my $text = "$res $key";
             my $link_or_text = $url
               ? sub {
-                $url->query($key eq 'unfinished' ? (state => \@unfinished_states) : (result => $key));
+                $url->query(@{$progress_bar_query_by_key{$key} // [result => $key]});
                 $c->tag('a', href => $url->query($params->{query_params}), $text);
               }
               : $text;
@@ -334,6 +348,11 @@ sub register ($self, $app, $config) {
             my ($c, $value) = @_;
             return exists $c->app->config->{settings_ui_links}->{$value};
         });
+
+    $app->helper(
+        render_testfile => sub ($c, $name) {
+            $c->param('filename') ? $c->render($name) : $c->reply->not_found;
+        });
 }
 
 # returns the search args for the job overview according to the parameter of the specified controller
@@ -342,6 +361,7 @@ sub _compose_job_overview_search_args ($c) {
 
     my $v = $c->validation;
     $v->optional($_, 'not_empty') for JOBS_OVERVIEW_SEARCH_CRITERIA;
+    $v->optional('groupid')->num(0, undef);
     $v->optional('modules', 'comma_separated');
     $v->optional('limit', 'not_empty')->num(0, undef);
 
@@ -383,6 +403,9 @@ sub _compose_job_overview_search_args ($c) {
         my @search_terms = (@group_id_search, @group_name_search);
         @groups = $schema->resultset('JobGroups')->search(\@search_terms)->all;
     }
+    # add flash message if optional "groupid" parameter is invalid
+    $c->stash(flash_error => 'Specified "groupid" is invalid and therefore ignored.')
+      if $c->param('groupid') && !$v->is_valid('groupid');
 
     # determine build number
     if (!$search_args{build}) {
