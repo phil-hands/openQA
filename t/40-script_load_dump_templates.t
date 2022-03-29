@@ -26,7 +26,7 @@ sub test_once {
 sub dump_templates {
     # Report failure at the callsite instead of the test function
     local $Test::Builder::Level = $Test::Builder::Level + 1;
-    test_cmd(path(curfile->dirname, '../script/dump_templates')->realpath, @_);
+    test_cmd(path(curfile->dirname, '../script/openqa-dump-templates')->realpath, @_);
 }
 
 sub decode { Cpanel::JSON::XS->new->relaxed->decode(path(shift)->slurp); }

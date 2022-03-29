@@ -20,6 +20,7 @@ use OpenQA::Test::TimeLimit '30';
 use OpenQA::WebSockets::Client;
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
+use OpenQA::Test::FullstackUtils qw(find_status_text);
 
 sub prepare_database {
     my $schema = OpenQA::Test::Database->new->create(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
@@ -91,22 +92,20 @@ sub assert_sent_commands {
 }
 
 # checks whether the flash messages of the specified kind are present
-sub assert_flash_messages {
-    my ($kind, $expected_messages, $test_name) = @_;
+sub assert_flash_messages ($kind, $expected_messages, $test_name) {
     my $kind_selector = $kind eq 'any' ? 'alert' : '.alert-' . $kind;
-
     my @flash_messages = $driver->find_elements("#developer-flash-messages $kind_selector > span");
-    is(
-        scalar @flash_messages,
-        scalar @$expected_messages,
-        "correct number of $kind flash messages present ($test_name)"
-    );
 
-    my $index = 0;
-    for my $expected_message (@$expected_messages) {
-        like($flash_messages[$index]->get_text(), $expected_message, $test_name,) if ($expected_message);
-        $index += 1;
-    }
+    subtest $test_name => sub {
+        is scalar @flash_messages, scalar @$expected_messages, "number of $kind messages";
+        my $index = 0;
+        for my $expected_message (@$expected_messages) {
+            my $text = $flash_messages[$index]->get_text;
+            like $text, $expected_message, "message text ($index)" if $expected_message;
+            unlike $text, qr/<.*>/, "no html tags rendered ($index)";
+            $index += 1;
+        }
+    };
 }
 
 sub js_variable {
@@ -151,8 +150,7 @@ $driver->execute_script(
 );
 
 subtest 'devel UI hidden when running, but modules not initialized' => sub {
-    my $info_panel = $driver->find_element('#info_box .card-body');
-    my $info_text = $info_panel->get_text();
+    my $info_text = find_status_text $driver;
     like($info_text, qr/State\: running.*Assigned worker\: remotehost\:1/s, 'job is running');
     element_hidden('#developer-global-session-info');
     element_hidden('#developer-vnc-notice');

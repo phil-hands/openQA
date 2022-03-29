@@ -390,13 +390,13 @@ sub setup_share_dir {
 
     my $iso_file_path = abs_path('../os-autoinst/t/data/Core-7.2.iso') or die 'Core-7.2.iso not found';
     my $iso_link_path = path($sharedir, 'factory', 'iso')->child('Core-7.2.iso')->to_string();
-    symlink($iso_file_path, $iso_link_path) || die "can't symlink $iso_link_path -> $iso_file_path";
+    symlink($iso_file_path, $iso_link_path) || die "can't symlink $iso_link_path -> $iso_file_path: $!";
 
     path($sharedir, 'tests')->make_path;
 
     my $tests_dir_path = abs_path('../os-autoinst/t/data/tests/') or die 'tests dir not found';
     my $tests_link_path = path($sharedir, 'tests')->child('tinycore');
-    symlink($tests_dir_path, $tests_link_path) || die "can't symlink $tests_link_path -> $tests_dir_path";
+    symlink($tests_dir_path, $tests_link_path) || die "can't symlink $tests_link_path -> $tests_dir_path: $!";
 
     return $sharedir;
 }
@@ -405,6 +405,7 @@ sub setup_fullstack_temp_dir {
     my ($test_name) = @_;
     my $tempdir = $ENV{OPENQA_FULLSTACK_TEMP_DIR} ? path($ENV{OPENQA_FULLSTACK_TEMP_DIR}) : tempdir;
     my $basedir = $tempdir->child($test_name);
+    $basedir->remove_tree({keep_root => 1});
     my $configdir = path($basedir, 'config')->make_path;
     my $datadir = path($FindBin::Bin, 'data');
 

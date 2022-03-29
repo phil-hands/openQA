@@ -22,7 +22,7 @@ use Test::Output 'combined_like';
 use OpenQA::Test::Case;
 use File::Which 'which';
 use File::Path ();
-use Data::Dumper 'Dumper';
+use Mojo::Util qw(dumper);
 use Date::Format 'time2str';
 use Fcntl ':mode';
 use Mojo::File qw(path tempdir);
@@ -137,7 +137,7 @@ $t->app->minion->add_task(
 my $dbh = $schema->storage->dbh;
 my $initial_aessets = $dbh->selectall_arrayref('select * from assets order by id;');
 note('initially existing assets:');
-note(Dumper($initial_aessets));
+note(dumper($initial_aessets));
 
 sub find_kept_assets_with_last_jobs {
     my $last_used_jobs = $assets->search(
@@ -580,7 +580,10 @@ subtest 'Gru manual task' => sub {
     $ids = $t->app->gru->enqueue('gru_manual_task', ['die']);
     ok $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'inactive', 'minion job is inactive';
-    like warning { perform_minion_jobs($t->app->minion) }, qr/About to throw/, 'minion job has the right output';
+    combined_like {
+        like warning { perform_minion_jobs($t->app->minion) }, qr/About to throw/, 'minion job has the right output'
+    }
+    qr/Gru job error: Thrown fail/, 'exception logged';
     ok !$schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task no longer exists';
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'failed', 'minion job is finished';
     like $t->app->minion->job($ids->{minion_id})->info->{result}, qr/Thrown fail/,

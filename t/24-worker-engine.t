@@ -19,13 +19,16 @@ use Test::MockModule;
 use Test::MockObject;
 use Test::Output qw(combined_like combined_unlike);
 use OpenQA::Worker::Engines::isotovideo;
+use OpenQA::Test::FakeWorker;
 use Mojo::File qw(path tempdir);
 use Mojo::JSON 'decode_json';
 use OpenQA::Utils qw(testcasedir productdir needledir locate_asset base_host);
 
 # define fake packages for testing asset caching
 {
-    package Test::FakeJob;    # uncoverable statement count:2
+    # uncoverable statement count:1
+    # uncoverable statement count:2
+    package Test::FakeJob;
     use Mojo::Base -base;
     has id => 42;
     has worker => undef;
@@ -33,21 +36,18 @@ use OpenQA::Utils qw(testcasedir productdir needledir locate_asset base_host);
     sub is_stopped_or_stopping { 0 }
 }
 {
-    package Test::FakeRequest;    # uncoverable statement count:2
+    # uncoverable statement count:1
+    # uncoverable statement count:2
+    package Test::FakeRequest;
     use Mojo::Base -base;
     has minion_id => 13;
 }
 
-# Fake worker, client
+# Fake client
 {
-    package Test::FakeWorker;    # uncoverable statement count:2
-    use Mojo::Base -base;
-    has instance_number => 1;
-    has settings => sub { OpenQA::Worker::Settings->new(1, {}) };
-    has pool_directory => undef;
-}
-{
-    package Test::FakeClient;    # uncoverable statement count:2
+    # uncoverable statement count:1
+    # uncoverable statement count:2
+    package Test::FakeClient;
     use Mojo::Base -base;
     has worker_id => 1;
     has webui_host => 'localhost';
@@ -218,13 +218,40 @@ subtest 'problems when caching assets' => sub {
     Mojo::IOLoop->start;
     is $error->{error}, 'Failed to download FOO to some/path', 'asset not found';
     is $error->{category}, WORKER_EC_ASSET_FAILURE, 'category set so problem is treated as asset failure';
+};
 
-    my $asset_uri = $FindBin::Bin;    # just pass something existing here
-    my %vars;
+subtest '_handle_asset_processed' => sub {
+    my %fake_status = (status => 'processed', output => 'Download of "FOO" failed: 404 Not Found');
+    my $module = Test::MockModule->new('OpenQA::Worker::Engines::isotovideo');
+    $module->mock(
+        '_link_asset',
+        sub ($asset, $pooldir) {
+            return {basename => 'path2', absolute_path => 'some/path2'};
+        });
+    my $cache_client_mock = _mock_cache_service_client \%fake_status;
+    $cache_client_mock->redefine(asset_exists => 1);
+    $cache_client_mock->redefine(asset_path => 'some/path2');
+    $cache_client_mock->redefine(asset_request => Test::FakeRequest->new);
+
+    my $error = 'not called';
+    my $cb = sub ($err) { $error = $err; Mojo::IOLoop->stop };
+    my $job = Test::FakeJob->new;
+    my @assets = ('ISO_1');
+    my $vars = {ISO_1 => 'FOO'};
+    my @args = ($job, $vars, \@assets, {ISO_1 => 'iso'}, 'webuihost', undef, $cb);
+
+    $cache_client_mock->redefine(enqueue => 0);
+
+    OpenQA::Worker::Engines::isotovideo::cache_assets(OpenQA::CacheService::Client->new, @args);
+    Mojo::IOLoop->start;
+    is $vars->{ISO_1}, 'path2', 'path was correctly set';
+
+    my $asset_uri = 'path2';
+    $vars = {};
     my $status = OpenQA::CacheService::Response::Status->new(data => {});
-    @args = (OpenQA::CacheService::Client->new, 'UEFI_PFLASH_VARS', $asset_uri, $status, \%vars, undef, undef);
+    @args = (OpenQA::CacheService::Client->new, 'UEFI_PFLASH_VARS', $asset_uri, $status, $vars, undef, undef);
     is OpenQA::Worker::Engines::isotovideo::_handle_asset_processed(@args), undef, 'no error for UEFI_PFLASH_VARS';
-    is $vars{UEFI_PFLASH_VARS}, $asset_uri, 'specified asset URI set to vars';
+    is $vars->{UEFI_PFLASH_VARS}, $asset_uri, 'specified asset URI set to vars';
 };
 
 subtest 'syncing tests' => sub {
@@ -232,7 +259,7 @@ subtest 'syncing tests' => sub {
     my $cache_client_mock = _mock_cache_service_client \%fake_status;
     $cache_client_mock->redefine(rsync_request => Test::FakeRequest->new(result => 'exit code 10'));
 
-    my $worker = Test::FakeWorker->new;
+    my $worker = OpenQA::Test::FakeWorker->new;
     my $result = 'not called';
     my $cb = sub ($res) { $result = $res; Mojo::IOLoop->stop };
     my @args = (Test::FakeJob->new(worker => $worker), {ISO_1 => 'iso'}, 'cache-dir/webuihost', 'rsync-source', 2, $cb);
@@ -257,7 +284,7 @@ subtest 'syncing tests' => sub {
 
 subtest 'symlink testrepo' => sub {
     my $pool_directory = tempdir('poolXXXX');
-    my $worker = Test::FakeWorker->new(pool_directory => $pool_directory);
+    my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
 
     subtest 'error case: CASEDIR missing' => sub {
@@ -348,7 +375,7 @@ subtest 'symlink testrepo' => sub {
 
 subtest 'behavior with ABSOLUTE_TEST_CONFIG_PATHS=1' => sub {
     my $pool_directory = tempdir('poolXXXX');
-    my $worker = Test::FakeWorker->new(pool_directory => $pool_directory);
+    my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
     my @settings = (DISTRI => 'fedora', JOBTOKEN => 'token000', ABSOLUTE_TEST_CONFIG_PATHS => 1);
 
@@ -382,7 +409,7 @@ subtest 'behavior with ABSOLUTE_TEST_CONFIG_PATHS=1' => sub {
 
 subtest 'symlink asset' => sub {
     my $pool_directory = tempdir('poolXXXX');
-    my $worker = Test::FakeWorker->new(pool_directory => $pool_directory);
+    my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
     my $settings
       = {JOBTOKEN => 'token000', ISO => 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso', HDD_1 => 'foo.qcow2'};

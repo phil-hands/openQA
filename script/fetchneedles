@@ -6,7 +6,7 @@
 : "${dist:="debian"}"
 : "${giturl:="https://salsa.debian.org/qa/openqa/openqa-tests-debian.git"}"
 : "${branch:="debian"}"
-: "${email:="openqa@$(hostname -f)"}"
+: "${email:="openqa@$HOST"}"
 : "${username:="openQA web UI"}"
 : "${product:="$dist"}"
 

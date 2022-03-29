@@ -257,6 +257,7 @@ subtest 'prevent restarting parents' => sub {
         });
     # restart the two jobs 99963 and 99938; one has a parallel parent (99961) and one a directly chained parent (99937)
     $t->post_ok('/api/v1/jobs/restart?force=1&skip_parents=1', form => {jobs => [99963, 99938]})->status_is(200);
+    $t->json_is('/result' => [{99938 => 99983}, {99963 => 99984}], 'response') or diag explain $t->tx->res->json;
     # check whether jobs have been restarted but not their parents
     isnt($jobs->find(99963)->clone_id, undef, 'job with parallel parent has been cloned');
     isnt($jobs->find(99938)->clone_id, undef, 'job with directly chained parent has been cloned');
@@ -279,25 +280,45 @@ subtest 'restart jobs (forced)' => sub {
     $t->get_ok('/api/v1/jobs');
     my @new_jobs = @{$t->tx->res->json->{jobs}};
     my %new_jobs = map { $_->{id} => $_ } @new_jobs;
-    is($new_jobs{99981}->{state}, 'cancelled');
-    is($new_jobs{99927}->{state}, 'scheduled');
-    like($new_jobs{99939}->{clone_id}, qr/\d/, 'job cloned');
-    like($new_jobs{99946}->{clone_id}, qr/\d/, 'job cloned');
-    like($new_jobs{99963}->{clone_id}, qr/\d/, 'job cloned');
-    like($new_jobs{99981}->{clone_id}, qr/\d/, 'job cloned');
+    is $new_jobs{99981}->{state}, CANCELLED, 'running job has been cancelled';
+    is $new_jobs{99927}->{state}, SCHEDULED, 'scheduled job is still scheduled';
+    for my $orig_id (99939, 99946, 99963, 99981) {
+        my $orig_job = $new_jobs{$orig_id};
+        my $clone_id = $orig_job->{clone_id};
+        next unless like $clone_id, qr/\d+/, "job $orig_id cloned";
+        is $new_jobs{$clone_id}->{group_id}, $orig_job->{group_id}, "group of $orig_id taken over";
+    }
 
     $t->get_ok('/api/v1/jobs' => form => {scope => 'current'});
     is(scalar(@{$t->tx->res->json->{jobs}}), 15, 'job count stay the same');
 };
 
-subtest 'restart single job' => sub {
+subtest 'restart single job passing settings' => sub {
     is($jobs->find(99926)->clone_id, undef, 'job has not been cloned yet');
-    $t->post_ok('/api/v1/jobs/99926/restart')->status_is(200);
+    my $url = '/api/v1/jobs/99926/restart?';
+    my $params = 'set=_GROUP%3D0&set=TEST%2B%3D%3Ainvestigate&set=ARCH%3Di386&set=FOO%3Dbar&set=FLAVOR%3D';
+    $t->post_ok($url . 'set=_GROUP')->status_is(400, 'parameter without value does not pass validation');
+    $t->post_ok($url . $params)->status_is(200);
     $t->json_is('/warnings' => undef, 'no warnings generated');
     $t->json_is('/errors' => undef, 'no errors generated');
-    isnt($jobs->find(99926)->clone_id, undef, 'job has been cloned');
     my $event = OpenQA::Test::Case::find_most_recent_event($schema, 'job_restart');
-    is($event->{id}, 99926, 'restart produces event');
+    is $event->{id}, 99926, 'restart produces event';
+    my $clone = $jobs->find(99926)->clone;
+    isnt $clone, undef, 'job has been cloned' or return;
+    is $clone->group_id, undef, 'group has NOT been taken over due to _GROUP=0 parameter';
+    is $clone->TEST, 'minimalx:investigate', 'appending to TEST variable via TEST+=:investigate parameter';
+    is $clone->ARCH, 'i386', 'existing setting overridden via ARCH=i386 parameter';
+    is $clone->FLAVOR, '', 'existing setting cleared via FLAVOR= parameter';
+    is $clone->settings_hash->{FOO}, 'bar', 'new setting added via FOO=bar parameter';
+    $jobs->find(80000)->update({group_id => 1002});
+    $t->post_ok('/api/v1/jobs/restart?set=_GROUP_ID%3D0&prio=42&jobs=80000&clone=0')->status_is(200);
+    my $restarted_id = [values %{($t->tx->res->json->{result} // [])->[0] // {}}]->[0];
+    isnt $restarted_id, undef, 'job has been restarted' or diag explain $t->tx->res->json and return;
+    is $jobs->find(80000)->clone_id, undef, '2nd job is not considered cloned' or return;
+    my $restarted = $jobs->find($restarted_id);
+    isnt $restarted_id, undef, 'restarted job actually present' or return;
+    is $restarted->group_id, undef, 'group has NOT been taken over due to _GROUP_ID=0 parameter';
+    is $restarted->priority, 42, 'prio set';
 };
 
 subtest 'duplicate route' => sub {
@@ -670,6 +691,8 @@ subtest 'get job status' => sub {
     $t->get_ok('/api/v1/experimental/jobs/80000/status')->status_is(200)->json_is('/id' => 80000, 'id present')
       ->json_is('/state' => 'done', 'status done')->json_is('/result' => 'passed', 'result passed')
       ->json_is('/blocked_by_id' => undef, 'blocked_by_id undef');
+    $t->get_ok('/api/v1/experimental/jobs/999999999/status')->status_is(404)
+      ->json_is('/error_status' => 404, 'Status code correct')->json_is('/error' => 'Job does not exist');
 };
 
 subtest 'cancel job' => sub {
@@ -716,6 +739,7 @@ subtest 'json representation of group overview (actually not part of the API)' =
             distris => {'opensuse' => 1},
             unfinished => 1,
             version => 'Factory',
+            version_count => 1,
             escaped_version => 'Factory',
             build => '0048',
             escaped_build => '0048',
@@ -723,7 +747,7 @@ subtest 'json representation of group overview (actually not part of the API)' =
             key => 'Factory-0048',
         },
         'Build 0048 exported'
-    );
+    ) or diag explain $b48;
 };
 
 $t->get_ok('/dashboard_build_results.json?limit_builds=10')->status_is(200);
@@ -750,6 +774,7 @@ is_deeply(
         softfailed => 0,
         all_passed => 1,
         version => '13.1',
+        version_count => 1,
         escaped_version => '13_1',
         build => '0092',
         escaped_build => '0092',
@@ -771,18 +796,21 @@ my %jobs_post_params = (
 );
 
 subtest 'WORKER_CLASS correctly assigned when posting job' => sub {
+    my $id;
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
-    is($jobs->find($t->tx->res->json->{id})->settings_hash->{WORKER_CLASS},
-        'qemu_x86_64', 'default WORKER_CLASS assigned (with arch fallback)');
+    ok $id = $t->tx->res->json->{id}, 'id returned (0)' or diag explain $t->tx->res->json;
+    is $jobs->find($id)->settings_hash->{WORKER_CLASS}, 'qemu_x86_64',
+      'default WORKER_CLASS assigned (with arch fallback)';
 
     $jobs_post_params{ARCH} = 'aarch64';
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
-    is($jobs->find($t->tx->res->json->{id})->settings_hash->{WORKER_CLASS},
-        'qemu_aarch64', 'default WORKER_CLASS assigned');
+    ok $id = $t->tx->res->json->{id}, 'id returned (1)' or diag explain $t->tx->res->json;
+    is $jobs->find($id)->settings_hash->{WORKER_CLASS}, 'qemu_aarch64', 'default WORKER_CLASS assigned';
 
     $jobs_post_params{WORKER_CLASS} = 'svirt';
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
-    is($jobs->find($t->tx->res->json->{id})->settings_hash->{WORKER_CLASS}, 'svirt', 'specified WORKER_CLASS assigned');
+    ok $id = $t->tx->res->json->{id}, 'id returned (2)' or diag explain $t->tx->res->json;
+    is $jobs->find($id)->settings_hash->{WORKER_CLASS}, 'svirt', 'specified WORKER_CLASS assigned';
 };
 
 subtest 'default priority correctly assigned when posting job' => sub {
@@ -827,6 +855,53 @@ subtest 'Job with JOB_TEMPLATE_NAME' => sub {
         'job template name reflected in scenario name'
     );
     delete $jobs_post_params{JOB_TEMPLATE_NAME};
+};
+
+subtest 'posting multiple jobs at once' => sub {
+    my %jobs_post_params = (
+        'TEST:0' => 'root-job',
+        'TEST:1' => 'follow-up-job-1',
+        '_START_AFTER:1' => '0',
+        'TEST:2' => 'follow-up-job-2',
+        '_START_AFTER:2' => '0',
+        'TEST:3' => 'parallel-job',
+        '_PARALLEL:3' => '1,2'
+    );
+    $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200, 'posted multiple jobs');
+    my $json = $t->tx->res->json;
+    diag explain $json or return unless $t->success;
+    my $ids = $json->{ids};
+    is ref $ids, 'HASH', 'mapping of suffixes to IDs returned' or diag explain $json;
+    ok my $root_job_id = $ids->{0}, 'root-job created';
+    ok my $follow_up_job_1_id = $ids->{1}, 'follow-up-job-1 created';
+    ok my $follow_up_job_2_id = $ids->{2}, 'follow-up-job-2 created';
+    ok my $parallel_job_id = $ids->{3}, 'parallel-job created';
+    ok my $root_job = $jobs->find($root_job_id), 'root job actually exists';
+    ok my $follow_up_job_1 = $jobs->find($follow_up_job_1_id), 'follow-up job 1 job actually exists';
+    ok my $follow_up_job_2 = $jobs->find($follow_up_job_2_id), 'follow-up job 2 job actually exists';
+    my @d = map { $_ => [] }
+      qw(chained_children chained_parents directly_chained_children directly_chained_parents parallel_children parallel_parents);
+    push @d, ok => 0, state => SCHEDULED;
+    is $root_job->TEST, 'root-job', "name of root job ($root_job_id) correct";
+    is $follow_up_job_1->TEST, 'follow-up-job-1', "name of follow-up 1 ($follow_up_job_1_id) correct";
+    is $follow_up_job_2->TEST, 'follow-up-job-2', "name of follow-up 2 ($follow_up_job_2_id) correct";
+    is $jobs->find($parallel_job_id)->TEST, 'parallel-job', "name of parallel job ($parallel_job_id) correct";
+    my %expected_cluster = (
+        $parallel_job_id => {@d, parallel_parents => [sort $follow_up_job_1_id, $follow_up_job_2_id]},
+        $follow_up_job_1_id => {@d, chained_parents => [$root_job_id], parallel_children => [$parallel_job_id]},
+        $follow_up_job_2_id => {@d, chained_parents => [$root_job_id], parallel_children => [$parallel_job_id]},
+        $root_job_id => {@d, chained_children => [sort $follow_up_job_1_id, $follow_up_job_2_id]});
+    my $created_cluster = $root_job->cluster_jobs;
+    for my $job_id (keys %$created_cluster) {
+        # ensure the dependencies are always sorted in the same way
+        my $deps = $created_cluster->{$job_id};
+        delete $deps->{is_parent_or_initial_job};
+        $deps->{parallel_parents} = [sort @{$deps->{parallel_parents}}];
+        $deps->{chained_children} = [sort @{$deps->{chained_children}}];
+    }
+    is_deeply $created_cluster, \%expected_cluster, 'expected cluster created' or diag explain $created_cluster;
+    is $follow_up_job_1->blocked_by_id, $root_job_id, 'blocked by computed (0)';
+    is $follow_up_job_2->blocked_by_id, $root_job_id, 'blocked by computed (1)';
 };
 
 subtest 'handle settings when posting job' => sub {
@@ -904,8 +979,10 @@ subtest 'handle settings when posting job' => sub {
 };
 
 subtest 'do not re-generate settings when cloning job' => sub {
-    my $job_settings = $jobs->search({test => 'autoupgrade'})->first->settings_hash;
+    my %attrs = (rows => 1, order_by => {-desc => 'id'});
+    my $job_settings = $jobs->find({test => 'autoupgrade'}, \%attrs)->settings_hash;
     clone_job_apply_settings([qw(BUILD_SDK= ISO_MAXSIZE=)], 0, $job_settings, {});
+    $job_settings->{is_clone_job} = 1;
     $t->post_ok('/api/v1/jobs', form => $job_settings)->status_is(200);
     my $new_job_settings = $jobs->find($t->tx->res->json->{id})->settings_hash;
     delete $job_settings->{is_clone_job};
@@ -1229,8 +1306,9 @@ subtest 'marking job as done' => sub {
     subtest 'obsolete job via newbuild parameter' => sub {
         $jobs->find(99961)->update({state => RUNNING, result => NONE, reason => undef});
         $t->post_ok('/api/v1/jobs/99961/set_done?newbuild=1')->status_is(200);
+        $t->json_is('/result' => OBSOLETED, 'post yields incomplete result');
         $t->get_ok('/api/v1/jobs/99961')->status_is(200);
-        $t->json_is('/job/result' => OBSOLETED, 'post yields result');
+        $t->json_is('/job/result' => OBSOLETED, 'get yields result');
         is_deeply(
             OpenQA::Test::Case::find_most_recent_event($schema, 'job_done'),
             {id => 99961, result => OBSOLETED, reason => undef, newbuild => 1},
@@ -1242,7 +1320,7 @@ subtest 'marking job as done' => sub {
     my %cache_failure_params = (result => INCOMPLETE, reason => $cache_failure_reason);
     subtest 'job is currently running' => sub {
         $jobs->find(99961)->update({state => RUNNING, result => NONE, reason => undef});
-        $t->post_ok('/api/v1/jobs/99961/set_done?result=incomplet')->status_is(400, 'invalid reason rejected');
+        $t->post_ok('/api/v1/jobs/99961/set_done?result=incomplet')->status_is(400, 'invalid result rejected');
         $t->json_like('/error', qr/result invalid/, 'error message returned');
         $t->post_ok('/api/v1/jobs/99961/set_done?result=incomplete&reason=test&worker_id=1');
         $t->status_is(400, 'set_done with worker_id rejected if job no longer assigned');
@@ -1255,13 +1333,16 @@ subtest 'marking job as done' => sub {
         $t->json_like('/error', qr/Refusing.*because.*assigned to worker 1/, 'error message returned');
         $t->post_ok('/api/v1/jobs/99961/set_done?result=failed&reason=test&worker_id=1');
         $t->status_is(200, 'set_done accepted with correct worker_id');
+        $t->json_is('/result' => FAILED, 'post yields failed result (explicitely specified)');
         my $job = $jobs->find(99961);
         is $job->clone_id, undef, 'job not cloned when reason does not match configured regex';
         is $job->result, FAILED, 'result is failure (as passed via param)';
         $schema->txn_rollback;
 
         $schema->txn_begin;
-        $t->post_ok('/api/v1/jobs/99961/set_done');
+        $t->post_ok('/api/v1/jobs/99961/set_done')->status_is(200);
+        $t->json_is('/result' => INCOMPLETE, 'post yields incomplete result (calculated)');
+        $t->success or diag explain $t->tx->res->json;
         $job = $jobs->find(99961);
         is $job->result, INCOMPLETE, 'result is incomplete (no modules and no reason explicitely specified)';
         is $job->reason, 'no test modules scheduled/uploaded', 'reason for incomplete set';
@@ -1277,6 +1358,7 @@ subtest 'marking job as done' => sub {
     };
     subtest 'job is already done with reason, not overriding existing result and reason' => sub {
         $t->post_ok('/api/v1/jobs/99961/set_done?result=passed&reason=foo')->status_is(200);
+        $t->json_is('/result' => INCOMPLETE, 'post yields result (old result as not overridden)');
         $t->get_ok('/api/v1/jobs/99961')->status_is(200);
         $t->json_is('/job/result' => INCOMPLETE, 'result unchanged');
         $t->json_is('/job/reason' => $cache_failure_reason, 'reason unchanged');
@@ -1292,6 +1374,7 @@ subtest 'marking job as done' => sub {
     };
     subtest 'job is already done, no parameters specified' => sub {
         $t->post_ok('/api/v1/jobs/99961/set_done')->status_is(200);
+        $t->json_is('/result' => INCOMPLETE, 'post yields incomplete result (already existing result)');
         $t->get_ok('/api/v1/jobs/99961')->status_is(200);
         $t->json_is('/job/result' => INCOMPLETE, 'previous result not lost');
         $t->json_is('/job/reason' => $reason_cutted, 'previous reason not lost');

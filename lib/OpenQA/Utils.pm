@@ -2,11 +2,8 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Utils;
+use Mojo::Base -strict, -signatures;
 
-use strict;
-use warnings;
-
-use Mojo::Base -signatures;
 use Carp;
 use Cwd 'abs_path';
 use Filesys::Df qw(df);
@@ -28,14 +25,63 @@ use OpenQA::Constants qw(VIDEO_FILE_NAME_START VIDEO_FILE_NAME_REGEX FRAGMENT_RE
 use OpenQA::Log qw(log_info log_debug log_warning log_error);
 use Config::Tiny;
 use Time::HiRes qw(tv_interval);
-
-# avoid boilerplate "$VAR1 = " in dumper output
-$Data::Dumper::Terse = 1;
+use File::Basename;
+use File::Spec;
+use File::Spec::Functions qw(catfile catdir);
+use Fcntl;
+use Mojo::JSON qw(encode_json decode_json);
+use Mojo::Util 'xml_escape';
 
 my $FRAG_REGEX = FRAGMENT_REGEX;
 
+my (%BUGREFS, %BUGURLS, $MARKER_REFS, $MARKER_URLS);
+BEGIN {
+    %BUGREFS = (
+        bnc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
+        bsc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
+        boo => 'https://bugzilla.opensuse.org/show_bug.cgi?id=',
+        bgo => 'https://bugzilla.gnome.org/show_bug.cgi?id=',
+        bmo => 'https://bugzilla.mozilla.org/show_bug.cgi?id=',
+        brc => 'https://bugzilla.redhat.com/show_bug.cgi?id=',
+        bko => 'https://bugzilla.kernel.org/show_bug.cgi?id=',
+        poo => 'https://progress.opensuse.org/issues/',
+        gh => 'https://github.com/',
+        kde => 'https://bugs.kde.org/show_bug.cgi?id=',
+        fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
+        jsc => 'https://jira.suse.de/browse/',
+        deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
+        bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
+    );
+    %BUGURLS = (
+        'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
+        $BUGREFS{bsc} => 'bsc',
+        $BUGREFS{boo} => 'boo',
+        $BUGREFS{bgo} => 'bgo',
+        $BUGREFS{bmo} => 'bmo',
+        $BUGREFS{brc} => 'brc',
+        $BUGREFS{bko} => 'bko',
+        $BUGREFS{poo} => 'poo',
+        $BUGREFS{gh} => 'gh',
+        $BUGREFS{kde} => 'kde',
+        $BUGREFS{fdo} => 'fdo',
+        $BUGREFS{jsc} => 'jsc',
+        $bugrefs{deb} => 'deb',
+    );
+
+    $MARKER_REFS = join('|', keys %BUGREFS);
+    $MARKER_URLS = join('|', keys %BUGURLS);
+}
+
+# <marker>[#<project/repo>]#<id>
+use constant BUGREF_REGEX =>
+  qr{(?:^|(?<=\s|,))(?<match>(?<marker>$MARKER_REFS)\#?(?<repo>[a-zA-Z/-]+)?\#(?<id>([A-Z]+-)?\d+))(?![\w\"])};
+
+use constant LABEL_REGEX => qr/\blabel:(?<match>([\w:#]+))\b/;
+
 our $VERSION = sprintf "%d.%03d", q$Revision: 1.12 $ =~ /(\d+)/g;
 our @EXPORT = qw(
+  LABEL_REGEX
+  BUGREF_REGEX
   locate_needle
   needledir
   productdir
@@ -46,9 +92,9 @@ our @EXPORT = qw(
   run_cmd_with_log
   run_cmd_with_log_return_error
   parse_assets_from_settings
+  find_labels
   find_bugref
   find_bugrefs
-  bugref_regex
   bugurl
   bugref_to_href
   href_to_bugref
@@ -83,6 +129,7 @@ our @EXPORT = qw(
   fix_top_level_help
   looks_like_url_with_scheme
   check_df
+  download_rate
   download_speed
 );
 
@@ -106,13 +153,6 @@ if ($0 =~ /\.t$/) {
     my ($tdirname) = $0 =~ qr/((.*\/t\/|^t\/)).+$/;
     $ENV{OPENQA_BASEDIR} ||= $tdirname . 'data';
 }
-
-use File::Basename;
-use File::Spec;
-use File::Spec::Functions qw(catfile catdir);
-use Fcntl;
-use Mojo::JSON qw(encode_json decode_json);
-use Mojo::Util 'xml_escape';
 
 sub prjdir { ($ENV{OPENQA_BASEDIR} || '/var/lib') . '/openqa' }
 
@@ -372,61 +412,24 @@ sub locate_asset {
     return $args{mustexist} ? undef : _relative_or_absolute($trans, $args{relative});
 }
 
-my %bugrefs = (
-    bnc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
-    bsc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
-    boo => 'https://bugzilla.opensuse.org/show_bug.cgi?id=',
-    bgo => 'https://bugzilla.gnome.org/show_bug.cgi?id=',
-    brc => 'https://bugzilla.redhat.com/show_bug.cgi?id=',
-    bko => 'https://bugzilla.kernel.org/show_bug.cgi?id=',
-    poo => 'https://progress.opensuse.org/issues/',
-    gh => 'https://github.com/',
-    kde => 'https://bugs.kde.org/show_bug.cgi?id=',
-    fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
-    jsc => 'https://jira.suse.de/browse/',
-    deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
-    bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
-);
-my %bugurls = (
-    'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
-    $bugrefs{bsc} => 'bsc',
-    $bugrefs{boo} => 'boo',
-    $bugrefs{bgo} => 'bgo',
-    $bugrefs{brc} => 'brc',
-    $bugrefs{bko} => 'bko',
-    $bugrefs{poo} => 'poo',
-    $bugrefs{gh} => 'gh',
-    $bugrefs{kde} => 'kde',
-    $bugrefs{fdo} => 'fdo',
-    $bugrefs{jsc} => 'jsc',
-    $bugrefs{deb} => 'deb',
-);
-
-my $MARKER_REFS = join('|', keys %bugrefs);
-my $MARKER_URLS = join('|', keys %bugurls);
-
-sub bugref_regex {
-    my $repo_re = qr{[a-zA-Z/-]+};
-    # <marker>[#<project/repo>]#<id>
-    return qr{(?<![\(\[\"\>])(?<match>(?<marker>$MARKER_REFS)\#?(?<repo>$repo_re)?\#(?<id>([A-Z]+-)?\d+))(?![\w\"])};
+sub find_labels {
+    my $text = shift // '';
+    my @labels;
+    push @labels, $+{match} while $text =~ /${\LABEL_REGEX}/g;
+    return \@labels;
 }
 
 sub find_bugref {
     my ($text) = @_;
     $text //= '';
-    $text =~ bugref_regex;
+    $text =~ BUGREF_REGEX;
     return $+{match};
 }
 
 sub find_bugrefs {
-    my ($text) = @_;
-    $text //= '';
+    my $text = shift // '';
     my @bugrefs;
-    my $bugref_regex = bugref_regex;
-
-    while ($text =~ /$bugref_regex/g) {
-        push(@bugrefs, $+{match});
-    }
+    push @bugrefs, $+{match} while $text =~ /${\BUGREF_REGEX}/g;
     return \@bugrefs;
 }
 
@@ -436,13 +439,13 @@ sub bugurl {
     # calling https://github.com/os-autoinst/openQA/issues/966 will yield the
     # same page as https://github.com/os-autoinst/openQA/pull/966 and vice
     # versa for both an issue as well as pull request
-    $bugref =~ bugref_regex;
-    return $bugrefs{$+{marker}} . ($+{repo} ? "$+{repo}/issues/" : '') . $+{id};
+    $bugref =~ BUGREF_REGEX;
+    return $BUGREFS{$+{marker}} . ($+{repo} ? "$+{repo}/issues/" : '') . $+{id};
 }
 
 sub bugref_to_href {
     my ($text) = @_;
-    my $regex = bugref_regex;
+    my $regex = BUGREF_REGEX;
     $text =~ s{$regex}{<a href="@{[bugurl($+{match})]}">$+{match}</a>}gi;
     return $text;
 }
@@ -453,7 +456,7 @@ sub href_to_bugref {
     # <repo> is optional, e.g. for github. For github issues and pull are
     # interchangeable, see comment in 'bugurl', too
     $regex = qr{(?<!["\(\[])(?<url_root>$regex)((?<repo>.*)/(issues|pull)/)?(?<id>([A-Z]+-)?\d+)(?![\w])};
-    $text =~ s{$regex}{@{[$bugurls{$+{url_root}} . ($+{repo} ? '#' . $+{repo} : '')]}#$+{id}}gi;
+    $text =~ s{$regex}{@{[$BUGURLS{$+{url_root}} . ($+{repo} ? '#' . $+{repo} : '')]}#$+{id}}gi;
     return $text;
 }
 
@@ -934,11 +937,15 @@ sub check_df ($dir) {
     return ($available_bytes, $total_bytes);
 }
 
-sub download_speed ($start, $end, $bytes) {
+sub download_rate ($start, $end, $bytes) {
     my $interval = tv_interval($start, $end);
-    return '??/s' if $interval == 0;
+    return undef if $interval == 0;
+    return sprintf('%.2f', $bytes / $interval);
+}
 
-    my $rate = sprintf('%.2f', $bytes / $interval);
+sub download_speed ($start, $end, $bytes) {
+    my $rate = download_rate($start, $end, $bytes);
+    return '??/s' unless defined $rate;
     my $human = human_readable_size($rate);
     return "$human/s";
 }

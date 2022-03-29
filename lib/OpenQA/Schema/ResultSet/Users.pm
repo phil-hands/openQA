@@ -3,8 +3,7 @@
 
 package OpenQA::Schema::ResultSet::Users;
 
-use Mojo::Base -strict, -signatures;
-use base 'DBIx::Class::ResultSet';
+use Mojo::Base 'DBIx::Class::ResultSet', -signatures;
 
 sub create_user ($self, $id, %attrs) {
     return unless $id;
@@ -21,5 +20,7 @@ sub create_user ($self, $id, %attrs) {
     $user->insert;
     return $user;
 }
+
+sub system ($self, $attrs = undef) { $self->find({username => 'system', provider => ''}, $attrs) }
 
 1;

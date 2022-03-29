@@ -3,10 +3,8 @@
 
 package OpenQA::Schema::ResultSet::DeveloperSessions;
 
-use strict;
-use warnings;
 
-use base 'DBIx::Class::ResultSet';
+use Mojo::Base 'DBIx::Class::ResultSet';
 
 use Try::Tiny;
 use OpenQA::Constants qw(WORKER_COMMAND_DEVELOPER_SESSION_START);
@@ -22,7 +20,7 @@ sub register {
     my ($result, $worker_id, $is_session_already_existing) = $schema->txn_do(
         sub {
             # refuse if no worker assigned
-            my $worker = $schema->resultset('Workers')->search({job_id => $job_id})->first;
+            my $worker = $schema->resultset('Workers')->find({job_id => $job_id});
             return unless ($worker);
 
             my $session = $self->find({job_id => $job_id});

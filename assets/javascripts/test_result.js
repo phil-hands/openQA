@@ -62,7 +62,7 @@ const tabConfiguration = {
   investigation: {
     descriptiveName: 'investigation info',
     conditionForShowingNavItem: function () {
-      return testStatus.state === 'done' && testStatus.result === 'failed';
+      return testStatus.state === 'done' && (testStatus.result === 'failed' || testStatus.result === 'incomplete');
     },
     renderContents: renderInvestigationTab
   },
@@ -1020,7 +1020,7 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
           tr.node().className = 'current';
         } else {
           var testNameLink = testNameTd.append('a');
-          testNameLink.attr('href', '/tests/' + node.id);
+          testNameLink.attr('href', '/tests/' + node.id + '#dependencies');
           testNameLink.text(node.label);
         }
 
@@ -1042,11 +1042,13 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
   });
 
   // insert edges
-  edges.forEach(edge => {
-    if (nodeIDs[edge.from] && nodeIDs[edge.to]) {
-      g.setEdge(edge.from, edge.to, {});
-    }
-  });
+  edges
+    .sort((a, b) => a.from - b.from || a.to - b.to)
+    .forEach(edge => {
+      if (nodeIDs[edge.from] && nodeIDs[edge.to]) {
+        g.setEdge(edge.from, edge.to, {});
+      }
+    });
 
   // insert clusters
   Object.keys(cluster).forEach(clusterId => {

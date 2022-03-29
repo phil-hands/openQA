@@ -8,10 +8,13 @@ use Carp 'croak';
 use Capture::Tiny 'capture_merged';
 use Mojo::URL;
 use OpenQA::Log qw(log_error);
-use OpenQA::Utils qw(base_host human_readable_size check_df download_speed);
+use OpenQA::Utils qw(base_host human_readable_size check_df download_rate download_speed);
 use OpenQA::Downloader;
 use Mojo::File 'path';
 use Time::HiRes qw(gettimeofday);
+
+# Only consider files larger than 250 MB for metrics (rates for smaller files are unrealistic)
+use constant METRICS_DOWNLOAD_SIZE => $ENV{OPENQA_METRICS_DOWNLOAD_SIZE} // 262144000;
 
 has downloader => sub { OpenQA::Downloader->new };
 has [qw(location log sqlite min_free_percentage)];
@@ -21,8 +24,7 @@ sub _perform_integrity_check {
     return shift->sqlite->db->query('pragma integrity_check')->arrays->flatten->to_array;
 }
 
-sub _check_database_integrity {
-    my ($self) = @_;
+sub _check_database_integrity ($self) {
     my $integrity_errors = $self->_perform_integrity_check;
     my $log = $self->log;
     if (scalar @$integrity_errors == 1 && ($integrity_errors->[0] // '') eq 'ok') {
@@ -34,15 +36,12 @@ sub _check_database_integrity {
     return $integrity_errors;
 }
 
-sub _kill_db_accessing_processes {
-    my ($self, @db_files) = @_;    # uncoverable statement
+sub _kill_db_accessing_processes ($self, @db_files) {
     qx{fuser -k @db_files; rm -f @db_files};    # uncoverable statement
     die 'Killing DB accessing processes failed when trying to cleanup' unless $? == 0;    # uncoverable statement
 }
 
-sub repair_database {
-    my ($self, $db_file) = @_;
-    $db_file //= $self->_locate_db_file;
+sub repair_database ($self, $db_file = $self->_locate_db_file) {
     return undef unless -e $db_file;
 
     # perform integrity check and test migration; try to provoke an error
@@ -85,9 +84,7 @@ sub init {
 
 sub _realpath { path(shift->location)->realpath }
 
-sub _locate_db_file {
-    my ($self) = @_;
-
+sub _locate_db_file ($self) {
     my $location = $self->_realpath;
     return ($location->child('cache.sqlite'), $location);
 }
@@ -105,9 +102,7 @@ sub refresh {
     return $self;
 }
 
-sub get_asset {
-    my ($self, $host, $job, $type, $asset) = @_;
-
+sub get_asset ($self, $host, $job, $type, $asset) {
     my $host_location = $self->_realpath->child(base_host($host));
     $host_location->make_path unless -d $host_location;
     $asset = $host_location->child(path($asset)->basename);
@@ -148,6 +143,8 @@ sub get_asset {
             die qq{Updating the cache for "$asset" failed, this should never happen} unless $ok;
             my $cache_size = human_readable_size($self->{cache_real_size});
             my $speed = download_speed($start, $end, $size);
+            $self->_update_metric('download_rate', int(download_rate($start, $end, $size) // 0))
+              if $size > METRICS_DOWNLOAD_SIZE;
             $log->info(qq{Download of "$asset" successful ($speed), new cache size is $cache_size});
         },
         on_failed => sub {
@@ -159,15 +156,12 @@ sub get_asset {
     $downloader->download($url, $asset, $options);
 }
 
-sub asset {
-    my ($self, $asset) = @_;
+sub asset ($self, $asset) {
     my $results = $self->sqlite->db->select('assets', [qw(etag size last_use pending)], {filename => $asset})->hashes;
     return $results->first || {};
 }
 
-sub track_asset {
-    my ($self, $asset) = @_;
-
+sub track_asset ($self, $asset) {
     eval {
         my $db = $self->sqlite->db;
         my $tx = $db->begin('exclusive');
@@ -179,9 +173,19 @@ sub track_asset {
     if (my $err = $@) { $self->log->error("Tracking asset failed: $err") }
 }
 
-sub _update_asset_last_use {
-    my ($self, $asset) = @_;
+sub metrics ($self) {
+    return {map { $_->{name} => $_->{value} } $self->sqlite->db->query("SELECT * FROM metrics")->hashes->each};
+}
 
+sub _update_metric ($self, $name, $value) {
+    my $db = $self->sqlite->db;
+    my $tx = $db->begin('exclusive');
+    my $sql = 'INSERT INTO metrics (name, value) VALUES ($1, $2) ON CONFLICT DO UPDATE SET value = $2';
+    $db->query($sql, $name, $value);
+    $tx->commit;
+}
+
+sub _update_asset_last_use ($self, $asset) {
     my $db = $self->sqlite->db;
     my $tx = $db->begin('exclusive');
     my $sql = "UPDATE assets set last_use = strftime('%s','now'), pending = 0 where filename = ?";
@@ -191,9 +195,7 @@ sub _update_asset_last_use {
     return 1;
 }
 
-sub _update_asset {
-    my ($self, $asset, $etag, $size) = @_;
-
+sub _update_asset ($self, $asset, $etag, $size) {
     my $log = $self->log;
     my $db = $self->sqlite->db;
     my $tx = $db->begin('exclusive');
@@ -208,9 +210,7 @@ sub _update_asset {
     return 1;
 }
 
-sub purge_asset {
-    my ($self, $asset) = @_;
-
+sub purge_asset ($self, $asset) {
     my $log = $self->log;
     my $db = $self->sqlite->db;
     my $tx = $db->begin('exclusive');
@@ -240,9 +240,7 @@ sub _cache_sync {
     }
 }
 
-sub asset_lookup {
-    my ($self, $asset) = @_;
-
+sub asset_lookup ($self, $asset) {
     my $results = $self->sqlite->db->select('assets', [qw(filename etag last_use size)], {filename => $asset});
 
     if ($results->arrays->size == 0) {
@@ -274,9 +272,7 @@ sub _exceeds_limit ($self, $needed) {
     return 0;
 }
 
-sub _check_limits {
-    my ($self, $needed, $to_preserve) = @_;
-
+sub _check_limits ($self, $needed, $to_preserve = undef) {
     my $limit = $self->limit;
     my $log = $self->log;
 
@@ -304,9 +300,7 @@ sub _check_limits {
     }
 }
 
-sub _delete_pending_assets {
-    my ($self) = @_;
-
+sub _delete_pending_assets ($self) {
     my $log = $self->log;
     eval {
         my $results = $self->sqlite->db->select('assets', [qw(filename pending)], {pending => '1'});

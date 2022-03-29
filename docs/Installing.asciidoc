@@ -663,8 +663,9 @@ interrupting currently running jobs:
 
 [source,sh]
 --------------------------------------------------------------------------------
-# prevent worker services from restarting
-systemctl mask openqa-worker-auto-restart@{1..28}
+# prevent worker services from restarting and being automatically reloaded
+systemctl stop openqa-reload-worker-auto-restart@{1..28}.{service,path}
+systemctl mask openqa-worker-auto-restart@{1..28}.service
 # ensure idling worker services stop now (`--kill-who=main` ensures only the
 # worker receives the signal and *not* isotovideo)
 systemctl kill --kill-who=main --signal HUP openqa-worker-auto-restart@{1..28}
@@ -1117,7 +1118,7 @@ e.g.:
 +
 [source,sh]
 ----
-sudo systemctl stop openqa-webui openqa-scheduler openqa-livehandler openqa-gru
+sudo systemctl stop openqa-{webui,websockets,scheduler,livehandler,gru}
 sudo systemctl stop postgresql
 ----
 
@@ -1152,7 +1153,7 @@ sudo ln --force --no-dereference --relative --symbolic /var/lib/pgsql/data.$newv
 [source,sh]
 ----
 sudo systemctl start postgresql
-sudo systemctl start openqa-webui openqa-scheduler openqa-livehandler openqa-gru
+sudo systemctl start openqa-{webui,websockets,scheduler,livehandler,gru}
 ----
 +
 NOTE: There is no need to take care of starting the new version of the PostgreSQL service.
