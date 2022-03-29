@@ -65,7 +65,7 @@ BEGIN {
         $BUGREFS{kde} => 'kde',
         $BUGREFS{fdo} => 'fdo',
         $BUGREFS{jsc} => 'jsc',
-        $bugrefs{deb} => 'deb',
+        $BUGREFS{deb} => 'deb',
     );
 
     $MARKER_REFS = join('|', keys %BUGREFS);
