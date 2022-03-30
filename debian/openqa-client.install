@@ -3,6 +3,8 @@ usr/share/openqa/script/client
 usr/share/openqa/script/clone_job.pl
 usr/share/openqa/script/openqa-dump-templates
 usr/share/openqa/script/openqa-load-templates
+usr/share/openqa/script/dump_templates
+usr/share/openqa/script/load_templates
 usr/share/openqa/script/openqa-cli
 usr/share/openqa/script/openqa-clone-job
 usr/share/openqa/script/openqa-clone-custom-git-refspec
