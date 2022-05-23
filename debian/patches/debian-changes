@@ -15,8 +15,8 @@ upload of upstream version 1.2.3, you could use:
 (If you have dgit, use `dgit clone openqa`, rather than plain `git clone`.)
 
 A single combined diff, containing all the changes, follows.
---- openqa-4.6.1640268275.25ac0d7.orig/Makefile
-+++ openqa-4.6.1640268275.25ac0d7/Makefile
+--- openqa-4.6.1648473912.da11be7.orig/Makefile
++++ openqa-4.6.1648473912.da11be7/Makefile
 @@ -50,6 +50,41 @@ help:
  	@sed -n 's/\(^[^.#[:space:]A-Z]*\):.*$$/\1/p' Makefile | uniq
  	@echo See docs/Contributing.asciidoc for more details
@@ -59,18 +59,18 @@ A single combined diff, containing all the changes, follows.
  .PHONY: install-generic
  install-generic:
  	./tools/generate-packed-assets
---- openqa-4.6.1640268275.25ac0d7.orig/assets/stylesheets/dashboard.scss
-+++ openqa-4.6.1640268275.25ac0d7/assets/stylesheets/dashboard.scss
-@@ -24,6 +24,7 @@ td div.progress {
-         // don' use flex box because it leads to undesired overflow behavior
-         display: inline;
-         overflow: hidden;
-+        padding-top: 10px;
-         a {
-             display: block;
-             width: 100%;
---- openqa-4.6.1640268275.25ac0d7.orig/assets/stylesheets/openqa.scss
-+++ openqa-4.6.1640268275.25ac0d7/assets/stylesheets/openqa.scss
+--- openqa-4.6.1648473912.da11be7.orig/assets/assetpack.def
++++ openqa-4.6.1648473912.da11be7/assets/assetpack.def
+@@ -149,7 +149,6 @@
+ < https://cdnjs.cloudflare.com/ajax/libs/chosen/1.7.0/chosen.jquery.js
+ < https://cdnjs.cloudflare.com/ajax/libs/jquery-ujs/1.2.1/rails.js
+ < javascripts/disable_animations.js [mode==test]
+-< https://shepherdjs.dev/dist/js/shepherd.js
+ 
+ ! anser.js
+ < javascripts/anser-import.js
+--- openqa-4.6.1648473912.da11be7.orig/assets/stylesheets/openqa.scss
++++ openqa-4.6.1648473912.da11be7/assets/stylesheets/openqa.scss
 @@ -3,8 +3,11 @@
  @import "bootswatch_litera_theme.scss";
  @import "openqa_theme.scss";
@@ -84,9 +84,14 @@ A single combined diff, containing all the changes, follows.
 +}
  
  // include Bootstrap 4
- @import "../cache/raw.githubusercontent.com/twbs/bootstrap/v4.1.1/scss/bootstrap.scss";
---- openqa-4.6.1640268275.25ac0d7.orig/assets/stylesheets/openqa_theme.scss
-+++ openqa-4.6.1640268275.25ac0d7/assets/stylesheets/openqa_theme.scss
+ @import "../cache/raw.githubusercontent.com/twbs/bootstrap/v4.6.1/scss/bootstrap.scss";
+@@ -21,4 +24,3 @@
+ @import "comments.scss";
+ @import "overview.scss";
+ @import "parent_group_overview.scss";
+-@import "shepherd.scss";
+--- openqa-4.6.1648473912.da11be7.orig/assets/stylesheets/openqa_theme.scss
++++ openqa-4.6.1648473912.da11be7/assets/stylesheets/openqa_theme.scss
 @@ -6,7 +6,6 @@ $grid-breakpoints: (
      xl: 1000px
  );
@@ -95,8 +100,236 @@ A single combined diff, containing all the changes, follows.
  $default-font:                "Roboto", "Helvetica Neue", Helvetica, Arial, sans-serif;
  $icon-font-path:              '/fonts/';
  $default-font-color:          #666666;
---- openqa-4.6.1640268275.25ac0d7.orig/etc/apache2/vhosts.d/openqa-ssl.conf.template
-+++ openqa-4.6.1640268275.25ac0d7/etc/apache2/vhosts.d/openqa-ssl.conf.template
+--- openqa-4.6.1648473912.da11be7.orig/docs/GettingStarted.asciidoc
++++ openqa-4.6.1648473912.da11be7/docs/GettingStarted.asciidoc
+@@ -340,17 +340,20 @@ The personal configuration should be sto
+ the `client.conf`, i.e. sections for each machine, e.g. `localhost`.
+ 
+ [[get-testing]]
+-== Testing openSUSE or Fedora
++== Testing openSUSE, Fedora or Debian
+ 
+-An easy way to start using openQA is to start testing openSUSE or Fedora as they
++An easy way to start using openQA is to start testing openSUSE, Fedora or Debian as they
+ have everything setup and prepared to ease the initial deployment. If you want
+ to play deeper, you can configure the whole openQA manually from scratch, but
+ this document should help you to get started faster.
+ 
+ === Getting tests
+ 
+-First you need to get actual tests. You can get openSUSE tests and needles (the
+-expected results) from
++First you need to get actual tests.
++
++==== OpenSUSE
++
++You can get openSUSE tests and needles (the expected results) from
+ https://github.com/os-autoinst/os-autoinst-distri-opensuse[GitHub]. It belongs
+ into the `/var/lib/openqa/tests/opensuse` directory. To make it easier, you can just
+ run
+@@ -363,6 +366,8 @@ run
+ Which will download the tests to the correct location and will set the correct
+ rights as well.
+ 
++==== Fedora
++
+ Fedora's tests are also in https://pagure.io/fedora-qa/os-autoinst-distri-fedora[git]. To
+ use them, you may do:
+ 
+@@ -377,6 +382,31 @@ cd ..
+ chown -R geekotest fedora/
+ --------------------------------------------------------------------------------
+ 
++==== Debian
++
++Debian's tests are in https://salsa.debian.org/qa/openqa/openqa-tests-debian.git[git]. To use them, you may do:
++
++NOTE: Roland: Phil, 'fetchneedles' is distributed as part of openqa-common. When I ran it for the first time, it tried to create '/var/lib/openqa/.ssh/known_hosts'. That was possible only after I did 'chown geekotest /var/lib/openqa'. What is the preferred workflow? Use 'fetchneedles' or run the commands directly? i.e. can the Debian instruction become: 'run fetchneedles, just like openSUSE?'
++NOTE: Roland: Phil, can 'python3-jsonschema' become a dependency of openqa-common? (i.e. to allow 'fifloader.py' to run)
++
++[source,sh]
++--------------------------------------------------------------------------------
++# Run as root. Method 1 with fetchneedles
++apt-get install python3-jsonschema ## Can this be integrated in the package openqa-common?
++/usr/share/openqa/script/fetchneedles
++cd /var/lib/openqa/share/tests/debian
++./fifloader.py templates.fif.json --load --clean ## Can this be integrated into fetchneedles?
++
++# Run as root Method 2 without fetchneedles
++apt-get install python3-jsonschema
++cd /var/lib/openqa/share/tests
++git clone https://salsa.debian.org/qa/openqa/openqa-tests-debian.git debian
++cd debian
++./fifloader.py templates.fif.json --load --clean
++cd ..
++chown -R geekotest debian/
++--------------------------------------------------------------------------------
++
+ === Getting openQA configuration
+ 
+ To get everything configured to actually run the tests, there are plenty of
+@@ -396,6 +426,9 @@ consider reading its help page (`--help`
+ 
+ For Fedora, similarly, you can call:
+ 
++NOTE: Roland: Fedora team, this is outdated. There is no file 'templates' in your repo any more.
++NOTE: Roland: It is probably as in Debian: './fifloader.py templates.fif.json --load --update'
++
+ [source,sh]
+ --------------------------------------------------------------------------------
+ /var/lib/openqa/share/tests/fedora/templates [--apikey API_KEY] [--apisecret API_SECRET]
+@@ -407,6 +440,13 @@ https://pagure.io/fedora-qa/createhdds[c
+ repository can be used to create these. See the documentation in that repo
+ for more information.
+ 
++For Debian, you can call:
++
++[source,sh]
++--------------------------------------------------------------------------------
++./fifloader.py templates.fif.json --load --update
++--------------------------------------------------------------------------------
++
+ === Adding a new ISO to test
+ 
+ To start testing a new ISO put it in `/var/lib/openqa/share/factory/iso` and call
+@@ -446,6 +486,22 @@ openqa-cli api -X POST isos \
+          BUILD=Rawhide-20160308.n.0
+ --------------------------------------------------------------------------------
+ 
++For Debian, a sample run might be:
++
++NOTE: Roland: should these 3 examples be simplified? They are nearly duplicates
++
++[source,sh]
++--------------------------------------------------------------------------------
++# Run the first test
++openqa-cli api -X POST isos \
++         ISO=debian-testing-amd64-netinst.iso \
++         DISTRI=debian \
++         VERSION=testing \
++         FLAVOR=netinst-iso \
++         ARCH=x86_64 \
++         BUILD=20220310_0422-testing-amd64
++--------------------------------------------------------------------------------
++
+ More details on triggering tests can also be found in the
+ <<UsersGuide.asciidoc#usersguide,Users Guide>>.
+ 
+--- openqa-4.6.1648473912.da11be7.orig/docs/Installing.asciidoc
++++ openqa-4.6.1648473912.da11be7/docs/Installing.asciidoc
+@@ -131,6 +131,7 @@ The easiest way to install openQA is fro
+ - For openSUSE, packages are available for Leap and Tumbleweed
+ - For Fedora, packages are available in the official repositories for Fedora 23
+ and later.
++- For Debian, packages are available in the official repositories for Debian Bookworm and later.
+ 
+ === Development version repository
+ 
+@@ -172,6 +173,9 @@ zypper in openQA
+ 
+ # Fedora
+ dnf install openqa openqa-httpd
++
++# Debian
++apt-get install openqa
+ -------------------------------------------------------------------------------
+ 
+ To install the openQA worker package use the following.
+@@ -180,6 +184,9 @@ To install the openQA worker package use
+ -------------------------------------------------------------------------------
+ # openSUSE
+ zypper in openQA-worker
++
++# Debian
++apt-get install openqa-worker
+ -------------------------------------------------------------------------------
+ 
+ Different convenience packages exist for convenience in openSUSE, for example:
+@@ -234,28 +241,43 @@ detailed setup instructions with all the
+ === Apache proxy
+ 
+ It is required to run openQA behind an http proxy (apache, nginx, etc..). See the
+-*openqa.conf.template* config file in */etc/apache2/vhosts.d* (openSUSE) or
+-`/etc/httpd/conf.d` (Fedora). To make everything work correctly on openSUSE, you
++*openqa.conf.template* config file in */etc/apache2/vhosts.d* (openSUSE),
++`/etc/httpd/conf.d` (Fedora) or `/etc/apache2/sites-available/openqa.conf.template` (Debian).
++To make everything work correctly on openSUSE or Debian, you
+ need to enable the 'headers', 'proxy', 'proxy_http', 'proxy_wstunnel' and 'rewrite'
+-modules using the command 'a2enmod'. This is not necessary on Fedora.
++modules using the command 'a2enmod'. On Debian you'll additionally need 'expires'.
++
++This is not necessary on Fedora.
+ 
+ [source,sh]
+ --------------------------------------------------------------------------------
+-# openSUSE Only
++# openSUSE
++# You can check what modules are enabled by using 'a2enmod -l'
++a2enmod headers
++a2enmod proxy
++a2enmod proxy_http
++a2enmod proxy_wstunnel
++a2enmod rewrite
++
++# Debian
+ # You can check what modules are enabled by using 'a2enmod -l'
+ a2enmod headers
+ a2enmod proxy
+ a2enmod proxy_http
+ a2enmod proxy_wstunnel
+ a2enmod rewrite
++a2enmod expires
+ --------------------------------------------------------------------------------
+ 
+-For a basic setup, you can copy *openqa.conf.template* to *openqa.conf* and modify the `ServerName` if required
+-setting. This will direct all HTTP traffic to openQA.
++For a basic setup, you can copy *openqa.conf.template* to *openqa.conf* and modify the `ServerName` setting if required. This will direct all HTTP traffic to openQA.
+ 
+ [source,sh]
+ --------------------------------------------------------------------------------
++# openSUSE
+ cp /etc/apache2/vhosts.d/openqa.conf.template /etc/apache2/vhosts.d/openqa.conf
++
++# Debian
++cp /etc/apache2/sites-available/openqa.conf.template /etc/apache2/sites-enabled/openqa.conf
+ --------------------------------------------------------------------------------
+ 
+ === TLS/SSL
+@@ -738,16 +760,19 @@ configure where the shared storage is mo
+ [source,ini]
+ --------------------------------------------------------------------------------
+ [global]
+-HOST = openqa.opensuse.org openqa.fedora.fedoraproject.org
++HOST = openqa.opensuse.org openqa.fedoraproject.org openqa.debian.net
+ 
+ [openqa.opensuse.org]
+ SHARE_DIRECTORY = /var/lib/openqa/opensuse
+ 
+ [openqa.fedoraproject.org]
+ SHARE_DIRECTORY = /var/lib/openqa/fedora
++
++[openqa.debian.net]
++SHARE_DIRECTORY = /var/lib/openqa/debian
+ --------------------------------------------------------------------------------
+ 
+-Configuring `SHARE_DIRECTORY` is not a hard requirement. Worker will try following
++Configuring `SHARE_DIRECTORY` is not a hard requirement. Workers will try following
+ directories prior registering with openQA instance:
+ 
+ 1. `SHARE_DIRECTORY`
+@@ -756,8 +781,8 @@ directories prior registering with openQ
+ 4. `/var/lib/openqa`
+ 5. fail if none of above is available
+ 
+-Once worker registers to openQA instance it checks for available job and starts
+-accepting websockets commands. Worker accepts jobs as they will come in, there
++Once a worker registers to an openQA instance it checks for available jobs and starts
++accepting websockets commands. Workers accept jobs as they will come in, there
+ is no priority, or other ordering, support at the moment.
+ It is possible to mix local openQA instance with remote instances or use only
+ remote instances.
+--- openqa-4.6.1648473912.da11be7.orig/etc/apache2/vhosts.d/openqa-ssl.conf.template
++++ openqa-4.6.1648473912.da11be7/etc/apache2/vhosts.d/openqa-ssl.conf.template
 @@ -1,12 +1,12 @@
  # sample apache config file for the ssl enabled openqa vhost.
  # At the very minimum you need to set the ServerName.
@@ -123,8 +356,8 @@ A single combined diff, containing all the changes, follows.
 -</IfDefine>
 -</IfDefine>
 -
---- openqa-4.6.1640268275.25ac0d7.orig/etc/apache2/vhosts.d/openqa.conf.template
-+++ openqa-4.6.1640268275.25ac0d7/etc/apache2/vhosts.d/openqa.conf.template
+--- openqa-4.6.1648473912.da11be7.orig/etc/apache2/vhosts.d/openqa.conf.template
++++ openqa-4.6.1648473912.da11be7/etc/apache2/vhosts.d/openqa.conf.template
 @@ -17,6 +17,7 @@
  # a2enmod proxy_http
  # a2enmod proxy_wstunnel
@@ -133,8 +366,8 @@ A single combined diff, containing all the changes, follows.
  
  <VirtualHost *:80>
  
---- openqa-4.6.1640268275.25ac0d7.orig/etc/openqa/workers.ini
-+++ openqa-4.6.1640268275.25ac0d7/etc/openqa/workers.ini
+--- openqa-4.6.1648473912.da11be7.orig/etc/openqa/workers.ini
++++ openqa-4.6.1648473912.da11be7/etc/openqa/workers.ini
 @@ -36,7 +36,7 @@
  # packages against the list of packages during the previous last good job.
  # Configuring this variable provides a command line to list the packages and
@@ -144,8 +377,8 @@ A single combined diff, containing all the changes, follows.
  
  # The section ids are the instance of the workers.
  # The key/value pairs will appear in vars.json
---- openqa-4.6.1640268275.25ac0d7.orig/lib/OpenQA/CLI.pm
-+++ openqa-4.6.1640268275.25ac0d7/lib/OpenQA/CLI.pm
+--- openqa-4.6.1648473912.da11be7.orig/lib/OpenQA/CLI.pm
++++ openqa-4.6.1648473912.da11be7/lib/OpenQA/CLI.pm
 @@ -32,8 +32,8 @@ openqa-cli - provides command-line acces
      # Show details for job from arbitrary host
      openqa-cli api --host http://openqa.example.com jobs/408
@@ -165,9 +398,9 @@ A single combined diff, containing all the changes, follows.
  
    Configuration:
      API key and secret are read from "client.conf" if not specified via CLI
---- openqa-4.6.1640268275.25ac0d7.orig/lib/OpenQA/CLI/api.pm
-+++ openqa-4.6.1640268275.25ac0d7/lib/OpenQA/CLI/api.pm
-@@ -77,8 +77,8 @@ sub command {
+--- openqa-4.6.1648473912.da11be7.orig/lib/OpenQA/CLI/api.pm
++++ openqa-4.6.1648473912.da11be7/lib/OpenQA/CLI/api.pm
+@@ -76,8 +76,8 @@ sub command ($self, @args) {
      # Show details for job from arbitrary host
      openqa-cli api --host http://openqa.example.com jobs/408
  
@@ -178,7 +411,7 @@ A single combined diff, containing all the changes, follows.
  
      # List all jobs (CAUTION: this might time out for a large instance)
      openqa-cli api --host openqa.example.com jobs
-@@ -135,6 +135,7 @@ sub command {
+@@ -144,6 +144,7 @@ sub command ($self, @args) {
      -j, --json                    Request content is JSON
          --osd                     Set target host to http://openqa.suse.de
          --o3                      Set target host to https://openqa.opensuse.org
@@ -186,9 +419,9 @@ A single combined diff, containing all the changes, follows.
          --param-file <param=file> Load content of params from files instead of
                                    from command line arguments. Multiple params
                                    may be specified by adding the option
---- openqa-4.6.1640268275.25ac0d7.orig/lib/OpenQA/CLI/archive.pm
-+++ openqa-4.6.1640268275.25ac0d7/lib/OpenQA/CLI/archive.pm
-@@ -37,8 +37,8 @@ sub command {
+--- openqa-4.6.1648473912.da11be7.orig/lib/OpenQA/CLI/archive.pm
++++ openqa-4.6.1648473912.da11be7/lib/OpenQA/CLI/archive.pm
+@@ -36,8 +36,8 @@ sub command ($self, @args) {
  
    Usage: openqa-cli archive [OPTIONS] JOB PATH
  
@@ -199,7 +432,7 @@ A single combined diff, containing all the changes, follows.
  
      # Download assets and test results from arbitrary host
      openqa-cli archive --host http://openqa.example.com 407 /tmp/foo
-@@ -56,6 +56,7 @@ sub command {
+@@ -55,6 +55,7 @@ sub command ($self, @args) {
      -l, --asset-size-limit <num>   Asset size limit in bytes
          --osd                      Set target host to http://openqa.suse.de
          --o3                       Set target host to https://openqa.opensuse.org
@@ -207,9 +440,9 @@ A single combined diff, containing all the changes, follows.
      -t, --with-thumbnails          Download thumbnails as well
  
  =cut
---- openqa-4.6.1640268275.25ac0d7.orig/lib/OpenQA/Command.pm
-+++ openqa-4.6.1640268275.25ac0d7/lib/OpenQA/Command.pm
-@@ -96,7 +96,8 @@ sub run {
+--- openqa-4.6.1648473912.da11be7.orig/lib/OpenQA/Command.pm
++++ openqa-4.6.1648473912.da11be7/lib/OpenQA/Command.pm
+@@ -87,7 +87,8 @@ sub run ($self, @args) {
        'apisecret=s' => sub { $self->apisecret($_[1]) },
        'host=s' => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
        'o3' => sub { $self->host('https://openqa.opensuse.org') },
@@ -219,27 +452,27 @@ A single combined diff, containing all the changes, follows.
  
      return $self->command(@args);
  }
---- openqa-4.6.1640268275.25ac0d7.orig/lib/OpenQA/Utils.pm
-+++ openqa-4.6.1640268275.25ac0d7/lib/OpenQA/Utils.pm
-@@ -384,6 +384,8 @@ my %bugrefs = (
-     kde => 'https://bugs.kde.org/show_bug.cgi?id=',
-     fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
-     jsc => 'https://jira.suse.de/browse/',
-+    deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
-+    bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
- );
- my %bugurls = (
-     'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
-@@ -397,6 +399,7 @@ my %bugurls = (
-     $bugrefs{kde} => 'kde',
-     $bugrefs{fdo} => 'fdo',
-     $bugrefs{jsc} => 'jsc',
-+    $bugrefs{deb} => 'deb',
- );
+--- openqa-4.6.1648473912.da11be7.orig/lib/OpenQA/Utils.pm
++++ openqa-4.6.1648473912.da11be7/lib/OpenQA/Utils.pm
+@@ -49,6 +49,8 @@ BEGIN {
+         kde => 'https://bugs.kde.org/show_bug.cgi?id=',
+         fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
+         jsc => 'https://jira.suse.de/browse/',
++        deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
++        bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
+     );
+     %BUGURLS = (
+         'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
+@@ -63,6 +65,7 @@ BEGIN {
+         $BUGREFS{kde} => 'kde',
+         $BUGREFS{fdo} => 'fdo',
+         $BUGREFS{jsc} => 'jsc',
++        $BUGREFS{deb} => 'deb',
+     );
  
- my $MARKER_REFS = join('|', keys %bugrefs);
+     $MARKER_REFS = join('|', keys %BUGREFS);
 --- /dev/null
-+++ openqa-4.6.1640268275.25ac0d7/man/openqa-label-all.1.in
++++ openqa-4.6.1648473912.da11be7/man/openqa-label-all.1.in
 @@ -0,0 +1,65 @@
 +.\"                                      Hey, EMACS: -*- nroff -*-
 +.\" First parameter, NAME, should be all caps
@@ -306,8 +539,8 @@ A single combined diff, containing all the changes, follows.
 +.SH AUTHOR
 +This manual page was written by Philip Hands <phil@hands.com>, for the Debian
 +GNU/Linux system (but may be used by others).
---- openqa-4.6.1640268275.25ac0d7.orig/profiles/apparmor.d/usr.share.openqa.script.openqa
-+++ openqa-4.6.1640268275.25ac0d7/profiles/apparmor.d/usr.share.openqa.script.openqa
+--- openqa-4.6.1648473912.da11be7.orig/profiles/apparmor.d/usr.share.openqa.script.openqa
++++ openqa-4.6.1648473912.da11be7/profiles/apparmor.d/usr.share.openqa.script.openqa
 @@ -84,6 +84,13 @@
    owner /var/lib/openqa/share/tests/** rwl,
    owner /var/lib/openqa/archive/** rwl,
@@ -376,9 +609,9 @@ A single combined diff, containing all the changes, follows.
    # Site-specific additions and overrides. See local/README for details.
    #include <local/usr.share.openqa.script.openqa>
  }
---- openqa-4.6.1640268275.25ac0d7.orig/profiles/apparmor.d/usr.share.openqa.script.worker
-+++ openqa-4.6.1640268275.25ac0d7/profiles/apparmor.d/usr.share.openqa.script.worker
-@@ -27,8 +27,11 @@
+--- openqa-4.6.1648473912.da11be7.orig/profiles/apparmor.d/usr.share.openqa.script.worker
++++ openqa-4.6.1648473912.da11be7/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -28,8 +28,11 @@
    /dev/ptmx rw,
    /dev/pts/* rw,
    /dev/tty rw,
@@ -390,7 +623,7 @@ A single combined diff, containing all the changes, follows.
    /etc/openqa/client.conf r,
    /etc/openqa/workers.ini r,
    /etc/qemu/* r,
-@@ -36,6 +39,7 @@
+@@ -37,6 +40,7 @@
    /etc/vde2/vdecmd r,
    /proc/*/auxv r,
    /proc/*/cmdline r,
@@ -398,9 +631,9 @@ A single combined diff, containing all the changes, follows.
    /proc/*/mountinfo r,
    /proc/*/net/psched r,
    /proc/*/stat r,
-@@ -60,12 +64,14 @@
+@@ -61,12 +65,14 @@
    /sys/kernel/mm/transparent_hugepage/enabled r,
-   /tmp/* rwk,
+   /tmp/** rwk,
    /usr/bin/Xvnc rCx,
 +  /usr/bin/apt rix,
    /{usr/,}bin/cat rix,
@@ -413,7 +646,7 @@ A single combined diff, containing all the changes, follows.
    /usr/bin/eatmydata rix,
    /usr/bin/env rix,
    /usr/bin/find rix,
-@@ -102,6 +108,7 @@
+@@ -104,6 +110,7 @@
    /usr/bin/x3270 cx,
    /usr/bin/xterm-console rix,
    /usr/bin/xz rix,
@@ -421,7 +654,7 @@ A single combined diff, containing all the changes, follows.
    /usr/lib*/qemu/block-curl.so rix,
    /usr/lib*/qemu/block-iscsi.so mr,
    /usr/lib*/qemu/block-rbd.so mr,
-@@ -116,6 +123,7 @@
+@@ -118,6 +125,7 @@
    /usr/lib/utempter/utempter rix,
    /usr/sbin/smbd rix,
    /usr/sbin/ipmiconsole rix,
@@ -429,7 +662,7 @@ A single combined diff, containing all the changes, follows.
    /usr/share/openqa/lib/** r,
    /usr/share/openqa/lib/DBIx/Class/Timestamps.pm r,
    /usr/share/openqa/lib/OpenQA/** r,
-@@ -126,6 +134,8 @@
+@@ -128,6 +136,8 @@
    /usr/share/seabios/* r,
    /usr/share/qemu/keymaps/* r,
    /usr/share/OVMF/* rk,
@@ -438,42 +671,18 @@ A single combined diff, containing all the changes, follows.
    /var/lib/openqa/cache/ r,
    /var/lib/openqa/cache/** rwk,
    /var/lib/openqa/pool/ r,
---- openqa-4.6.1640268275.25ac0d7.orig/script/dump_templates
-+++ openqa-4.6.1640268275.25ac0d7/script/dump_templates
-@@ -5,11 +5,11 @@
+--- openqa-4.6.1648473912.da11be7.orig/script/configure-web-proxy
++++ openqa-4.6.1648473912.da11be7/script/configure-web-proxy
+@@ -21,6 +21,6 @@ while true; do
+   esac
+ done
  
- =head1 NAME
- 
--dump_templates - dump openQA templates
-+openqa-dump-templates - dump openQA templates
- 
- =head1 SYNOPSIS
- 
--dump_templates [OPTIONS] [TABLES...]
-+openqa-dump-templates [OPTIONS] [TABLES...]
- 
- =head1 OPTIONS
- 
-@@ -79,13 +79,13 @@ print help
- 
- =over 4
- 
--=item dump_templates --host openqa.example.com Products
-+=item openqa-dump-templates --host openqa.example.com Products
- 
--=item dump_templates --host openqa.example.com --group "openSUSE Tumbleweed" --full
-+=item openqa-dump-templates --host openqa.example.com --group "openSUSE Tumbleweed" --full
- 
--=item dump_templates --host openqa.example.com --test "gnome"
-+=item openqa-dump-templates --host openqa.example.com --test "gnome"
- 
--=item dump_templates --host openqa.example.com --machine "64bit"
-+=item openqa-dump-templates --host openqa.example.com --machine "64bit"
- 
- =back
- 
---- openqa-4.6.1640268275.25ac0d7.orig/script/fetchneedles
-+++ openqa-4.6.1640268275.25ac0d7/script/fetchneedles
+-for i in headers proxy proxy_http proxy_wstunnel rewrite ; do a2enmod $i ; done
++for i in headers proxy proxy_http proxy_wstunnel rewrite expires ; do a2enmod $i ; done
+ sed -i -e 's/^.*httpsonly.*$/httpsonly = 0/g' /etc/openqa/openqa.ini
+ sed "s/#ServerName.*$/ServerName $(hostname)/" /etc/apache2/vhosts.d/openqa.conf.template > /etc/apache2/vhosts.d/openqa.conf
+--- openqa-4.6.1648473912.da11be7.orig/script/fetchneedles
++++ openqa-4.6.1648473912.da11be7/script/fetchneedles
 @@ -1,19 +1,19 @@
  #!/bin/sh -e
  : "${dbuser:="geekotest"}"
@@ -482,20 +691,19 @@ A single combined diff, containing all the changes, follows.
  
 -: "${dist_name:=${dist:-"openSUSE"}}" # the display name, for the help message
 -: "${dist:="opensuse"}"
--: "${giturl:="git://github.com/os-autoinst/os-autoinst-distri-opensuse.git"}"
+-: "${giturl:="https://github.com/os-autoinst/os-autoinst-distri-opensuse.git"}"
 -: "${branch:="master"}"
--: "${email:="openqa@$HOST"}"
 +: "${dist_name:=${dist:-"Debian"}}" # the display name, for the help message
 +: "${dist:="debian"}"
 +: "${giturl:="https://salsa.debian.org/qa/openqa/openqa-tests-debian.git"}"
 +: "${branch:="debian"}"
-+: "${email:="openqa@$(hostname -f)"}"
+ : "${email:="openqa@$HOST"}"
  : "${username:="openQA web UI"}"
  : "${product:="$dist"}"
  
 -: "${git_lfs:="0"}"
 -: "${needles_separate:="1"}"
--: "${needles_giturl:="git://github.com/os-autoinst/os-autoinst-needles-opensuse.git"}"
+-: "${needles_giturl:="https://github.com/os-autoinst/os-autoinst-needles-opensuse.git"}"
 -: "${needles_branch:="master"}"
 +: "${git_lfs:="1"}"
 +: "${needles_separate:="0"}"
@@ -504,24 +712,8 @@ A single combined diff, containing all the changes, follows.
  
  : "${updateall:="0"}"
  : "${force:="0"}"
---- openqa-4.6.1640268275.25ac0d7.orig/script/load_templates
-+++ openqa-4.6.1640268275.25ac0d7/script/load_templates
-@@ -5,11 +5,11 @@
- 
- =head1 NAME
- 
--load_templates - load openqa job templates
-+openqa-load-templates - load openqa job templates
- 
- =head1 SYNOPSIS
- 
--load_templates [OPTIONS] FILE
-+openqa-load-templates [OPTIONS] FILE
- 
- =head1 OPTIONS
- 
---- openqa-4.6.1640268275.25ac0d7.orig/script/openqa-validate-yaml
-+++ openqa-4.6.1640268275.25ac0d7/script/openqa-validate-yaml
+--- openqa-4.6.1648473912.da11be7.orig/script/openqa-validate-yaml
++++ openqa-4.6.1648473912.da11be7/script/openqa-validate-yaml
 @@ -19,6 +19,52 @@
  # OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  # SOFTWARE.
@@ -575,8 +767,8 @@ A single combined diff, containing all the changes, follows.
  use strict;
  use warnings;
  use 5.010;
---- openqa-4.6.1640268275.25ac0d7.orig/systemd/openqa-webui.service
-+++ openqa-4.6.1640268275.25ac0d7/systemd/openqa-webui.service
+--- openqa-4.6.1648473912.da11be7.orig/systemd/openqa-webui.service
++++ openqa-4.6.1648473912.da11be7/systemd/openqa-webui.service
 @@ -4,6 +4,7 @@ Wants=apache2.service openqa-setup-db.se
  Before=apache2.service
  After=postgresql.service openqa-setup-db.service openqa-scheduler.service nss-lookup.target remote-fs.target
@@ -585,19 +777,19 @@ A single combined diff, containing all the changes, follows.
  
  [Service]
  User=geekotest
---- openqa-4.6.1640268275.25ac0d7.orig/systemd/openqa-worker@.service
-+++ openqa-4.6.1640268275.25ac0d7/systemd/openqa-worker@.service
-@@ -7,6 +7,7 @@ Description=openQA Worker #%i
- Wants=network.target
+--- openqa-4.6.1648473912.da11be7.orig/systemd/openqa-worker@.service
++++ openqa-4.6.1648473912.da11be7/systemd/openqa-worker@.service
+@@ -6,6 +6,7 @@
+ Description=openQA Worker #%i
  After=openqa-slirpvde.service network.target nss-lookup.target remote-fs.target
  PartOf=openqa-worker.target
 +Documentation=https://open.qa/docs/#_run_openqa_workers
  
  [Service]
  Type=simple
---- openqa-4.6.1640268275.25ac0d7.orig/t/43-cli-api.t
-+++ openqa-4.6.1640268275.25ac0d7/t/43-cli-api.t
-@@ -93,6 +93,10 @@ subtest 'Host' => sub {
+--- openqa-4.6.1648473912.da11be7.orig/t/43-cli-api.t
++++ openqa-4.6.1648473912.da11be7/t/43-cli-api.t
+@@ -92,6 +92,10 @@ subtest 'Host' => sub {
      like $@, qr/Usage: openqa-cli api/, 'usage';
      is $api->host, 'https://openqa.opensuse.org', 'host';
  
@@ -608,9 +800,9 @@ A single combined diff, containing all the changes, follows.
      eval { $api->run(@host) };
      like $@, qr/Usage: openqa-cli api/, 'usage';
      is $api->host, $host, 'host';
---- openqa-4.6.1640268275.25ac0d7.orig/t/43-cli-archive.t
-+++ openqa-4.6.1640268275.25ac0d7/t/43-cli-archive.t
-@@ -77,6 +77,10 @@ subtest 'Host' => sub {
+--- openqa-4.6.1648473912.da11be7.orig/t/43-cli-archive.t
++++ openqa-4.6.1648473912.da11be7/t/43-cli-archive.t
+@@ -74,6 +74,10 @@ subtest 'Host' => sub {
      like $@, qr/Usage: openqa-cli archive/, 'usage';
      is $archive->host, 'https://openqa.opensuse.org', 'host';
  
@@ -621,8 +813,45 @@ A single combined diff, containing all the changes, follows.
      eval { $archive->run(@host) };
      like $@, qr/Usage: openqa-cli archive/, 'usage';
      is $archive->host, $host, 'host';
---- openqa-4.6.1640268275.25ac0d7.orig/templates/webapi/comments/add_comment_form_groups.html.ep
-+++ openqa-4.6.1640268275.25ac0d7/templates/webapi/comments/add_comment_form_groups.html.ep
+--- openqa-4.6.1648473912.da11be7.orig/t/full-stack.t
++++ openqa-4.6.1648473912.da11be7/t/full-stack.t
+@@ -83,10 +83,6 @@ $driver->click_element_ok('Login', 'link
+ # we're back on the main page
+ $driver->title_is('openQA', 'back on main page');
+ 
+-# click away the tour
+-$driver->click_element_ok('dont-notify', 'id', 'disable tour permanently');
+-$driver->click_element_ok('shepherd-cancel-icon', 'class_name', 'confirm dismissing tour');
+-
+ schedule_one_job_over_api_and_verify($driver, OpenQA::Test::FullstackUtils::job_setup(PAUSE_AT => 'shutdown'));
+ 
+ sub status_text { find_status_text($driver) }
+--- openqa-4.6.1648473912.da11be7.orig/t/ui/19-tests-links.t
++++ openqa-4.6.1648473912.da11be7/t/ui/19-tests-links.t
+@@ -23,9 +23,6 @@ $driver->find_element_by_link_text('Logi
+ # we're back on the main page
+ $driver->title_is("openQA", "back on main page");
+ 
+-# remove tour
+-$driver->find_element_by_class_name('shepherd-cancel-icon')->click();
+-
+ my @texts = map { $_->get_text() } wait_for_element(selector => '.progress-bar-softfailed');
+ is_deeply(\@texts, ['2 softfailed'], 'Progress bars show soft fails');
+ 
+--- openqa-4.6.1648473912.da11be7.orig/t/ui/21-admin-needles.t
++++ openqa-4.6.1648473912.da11be7/t/ui/21-admin-needles.t
+@@ -54,9 +54,6 @@ $driver->find_element_by_link_text('Logi
+ # we're back on the main page
+ $driver->title_is("openQA", "back on main page");
+ 
+-# disable tour
+-$driver->find_element_by_class_name('shepherd-cancel-icon')->click();
+-
+ sub goto_admin_needle_table {
+     my $login_link = $driver->find_element('#user-action > a');
+     is($login_link->get_text(), 'Logged in as Demo', 'logged in as demo');
+--- openqa-4.6.1648473912.da11be7.orig/templates/webapi/comments/add_comment_form_groups.html.ep
++++ openqa-4.6.1648473912.da11be7/templates/webapi/comments/add_comment_form_groups.html.ep
 @@ -19,7 +19,7 @@
                  </p>
                  <ul>
@@ -632,8 +861,8 @@ A single combined diff, containing all the changes, follows.
                      </li>
                      <li>
                          For generic labels use <code>label:<i>keyword</i></code> where <i>keyword</i> can be any valid character up to the next whitespace, e.g. "false_positive".
---- openqa-4.6.1640268275.25ac0d7.orig/tools/generate-packed-assets
-+++ openqa-4.6.1640268275.25ac0d7/tools/generate-packed-assets
+--- openqa-4.6.1648473912.da11be7.orig/tools/generate-packed-assets
++++ openqa-4.6.1648473912.da11be7/tools/generate-packed-assets
 @@ -35,6 +35,8 @@ ASSETPACK_PLUGINS=$(grep 'AssetPack' lib
  BUILD_CACHE="plugin AssetPack => { pipes => [qw(${ASSETPACK_PLUGINS})]} and app->asset->process()"
  BUILD_CACHE_OPTS='-Ilib/ -MMojolicious::Lite'
