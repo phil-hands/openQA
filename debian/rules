@@ -7,6 +7,8 @@ include /usr/share/dpkg/pkg-info.mk
 	dh $@
 
 override_dh_auto_build:
+	# forget shepherd until it is packaged:
+	rm assets/stylesheets/shepherd.scss t/ui/24-feature-tour.t
 	# create links to locally installed assets
 	# and convince assetpack to use local copies of remote assets:
 	mkdir -p assets/_debian
