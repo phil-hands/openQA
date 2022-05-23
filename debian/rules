@@ -65,7 +65,7 @@ execute_after_dh_install:
 		$(CURDIR)/debian/openqa/usr/share/openqa/script/configure-web-proxy \
 		$(CURDIR)/debian/openqa/etc/apache2/sites-available/openqa*.conf.template
 
-execute_after_dh_fixperms-arch:
+execute_after_dh_fixperms:
 	chmod -x debian/openqa/etc/logrotate.d/openqa
 	chmod +x debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
 

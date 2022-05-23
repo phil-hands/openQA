@@ -284,6 +284,7 @@ Description: automatic Operating System testing framework (worker)
 
 Package: openqa-doc
 Architecture: all
+Multi-Arch: foreign
 Section: doc
 Depends: ${misc:Depends},
 Description: automatic Operating System testing framework - documentation
