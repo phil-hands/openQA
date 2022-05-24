@@ -5,7 +5,7 @@
     </p>
     <ul>
         <li>
-            For bugreferences write <code><i>bugtracker_shortname</i>#<i>bug_nr</i></code> in a comment, e.g. <code>bsc#1234</code>.
+            For bugreferences write <code><i>bugtracker_shortname</i>#<i>bug_nr</i></code> in a comment, e.g. <code>deb#123456</code>.
         </li>
         <li>
             For generic labels use <code>label:<i>keyword</i></code> where <i>keyword</i> can be any valid character up to the next whitespace, e.g. "false_positive".
