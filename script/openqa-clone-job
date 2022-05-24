@@ -96,7 +96,7 @@ from JOBREF if it is a URL).
 =item B<--dir> DIR
 
 Specifies the directory to store test assets (defaults to
-/var/lib/openqa/factory).
+$OPENQA_SHAREDIR/factory).
 
 =item B<--skip-deps>
 
@@ -142,6 +142,12 @@ Displays a progress bar when downloading assets.
 Provides parental job with settings specified via command line (they go to child
 job by default).
 
+=item B<--export-command>
+
+Prints an `openqa-cli` command to create the jobs instead of creating them
+directly. This is useful to customize the API call or to review it before
+submitting.
+
 =item B<--apikey> <value>
 
 Specifies the public key needed for API authentication.
@@ -168,6 +174,7 @@ Getopt::Long::Configure("no_ignore_case");
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
 use OpenQA::Script::CloneJob;
+use OpenQA::Utils 'assetdir';
 
 my %options;
 my $jobid;
@@ -177,13 +184,13 @@ sub usage ($r) {
     die "cannot display help, install perl(Pod::Usage)\n" if $@;
 }
 
-sub parse_options() {
+sub parse_options () {
     GetOptions(
         \%options, "from=s", "host=s", "dir=s",
         "apikey:s", "apisecret:s", "verbose|v", "json-output|j",
         "skip-deps", "skip-chained-deps", "skip-download", "parental-inheritance",
         "help|h", "show-progress", "within-instance|w=s", "clone-children",
-        "max-depth:i", "ignore-missing-assets",
+        "max-depth:i", "ignore-missing-assets", "export-command",
     ) or usage(1);
     usage(0) if $options{help};
     usage(1) if $options{help} || ($options{'within-instance'} && $options{from});
@@ -200,13 +207,13 @@ sub parse_options() {
     die "missing job reference, see --help for usage\n" unless $jobid;
     ($options{'from'}, $jobid) = split_jobid($jobid) unless $options{'from'};
     usage(1) unless ($jobid && $options{'from'});
-    $options{'dir'} ||= '/var/lib/openqa/factory';
+    $options{'dir'} ||= assetdir();
     $options{'host'} ||= 'localhost';
     $options{'args'} = \@ARGV;
     return $jobid;
 }
 
-sub main() {
+sub main () {
     my ($jobid, $host) = parse_options();
     return unless $jobid;
     clone_jobs($jobid, \%options);

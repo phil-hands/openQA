@@ -9,7 +9,7 @@ use Date::Format 'time2str';
 use File::Basename 'basename';
 use IPC::Run;
 use OpenQA::App;
-use OpenQA::Log qw(log_debug log_warning);
+use OpenQA::Log qw(log_debug log_info);
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Schema::Result::JobDependencies;
 use OpenQA::Utils 'testcasedir';
@@ -195,7 +195,7 @@ sub create_from_settings {
     # associate currently available assets with job
     $job->register_assets_from_settings;
 
-    log_warning('Ignoring invalid group ' . encode_json($group_args) . ' when creating new job ' . $job->id)
+    log_info('Ignoring invalid group ' . encode_json($group_args) . ' when creating new job ' . $job->id)
       if keys %$group_args && !$group;
     $job->calculate_blocked_by;
     $txn_guard->commit;

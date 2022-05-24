@@ -22,6 +22,7 @@ use Test::MockModule 'strict';
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
 use Mojo::File 'path';
+use Mojo::JSON qw(decode_json encode_json);
 use OpenQA::Test::Utils qw(perform_minion_jobs redirect_output);
 use OpenQA::Test::TimeLimit '30';
 
@@ -31,9 +32,7 @@ my $jobs = $t->app->schema->resultset('Jobs');
 my $users = $t->app->schema->resultset('Users');
 
 # for "investigation" tests
-my $job_mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs', no_auto => 1);
 my $fake_git_log = 'deadbeef Break test foo';
-$job_mock->redefine(git_log_diff => sub { $fake_git_log });
 
 my %settings = (
     DISTRI => 'Unicorn',
@@ -417,6 +416,13 @@ subtest 'carry over, including soft-fails' => sub {
     is($job->comments, 0, 'no comment');
 
     subtest 'additional investigation notes provided on new failed' => sub {
+        my $job_mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs', no_auto => 1);
+        my $got_limit = 0;
+        $job_mock->redefine(
+            git_log_diff => sub ($self, $dir, $range, $limit) {
+                $got_limit = $limit;
+                return $fake_git_log;
+            });
         path('t/data/last_good.json')->copy_to(path(($job->_previous_scenario_jobs)[1]->result_dir(), 'vars.json'));
         path('t/data/first_bad.json')->copy_to(path($job->result_dir(), 'vars.json'));
         path('t/data/last_good_packages.txt')
@@ -452,14 +458,40 @@ subtest 'carry over, including soft-fails' => sub {
             like($inv->{test_log}, qr/^.*file changed/m, 'git log with test changes');
         };
         subtest 'investigation can display test_log with git stats when more than one commit' => sub {
+            $got_limit = 0;
             $fake_git_log
               = "\nqwertyuio0 test0\n mylogfile0 | 1 +\n 1 file changed, 1 insertion(+)\nqwertyuio1 test1\n mylogfile1 | 1 +\n 1 file changed, 1 insertion(+)\n";
-            ok($inv = $job->investigate, 'job investigation ok with test changes');
+            ok($inv = $job->investigate(git_limit => 23), 'job investigation ok with test changes');
             my $actual_lines = split(/\n/, $inv->{test_log});
             my $expected_lines = 7;
             is($actual_lines, $expected_lines, 'test_log have correct number of lines');
             like($inv->{test_log}, qr/^.*file changed/m, 'git log with test changes');
+            is $got_limit, 23, 'git_limit was correctly passed';
         };
+    };
+
+    subtest 'vars.json with a UNKNOWN TEST_GIT_HASH' => sub {
+        path('t/data/first_bad.json')->copy_to(path($job->result_dir(), 'vars.json'));
+        my $last_good_path = path(($job->_previous_scenario_jobs)[1]->result_dir(), 'vars.json');
+        path('t/data/last_good.json')->copy_to(path($last_good_path));
+        my $last_good_vars = decode_json $last_good_path->slurp;
+        $last_good_vars->{TEST_GIT_HASH} = 'UNKNOWN';
+        $last_good_path->spurt(encode_json $last_good_vars);
+        ok my $inv = $job->investigate, 'job can provide investigation details';
+        is ref(my $last_good = $inv->{last_good}), 'HASH', 'previous job identified as last good and it is a hash';
+        is $last_good->{link}, '/tests/99997', 'last_good hash has the correct link';
+        like $inv->{test_log}, qr/Invalid range UNKNOWN..c65/, 'test_log has message about invalid range';
+        like $inv->{test_diff_stat}, qr/Invalid range UNKNOWN..c65/, 'test_diff_stat has message about invalid range';
+    };
+
+    subtest 'vars.json of last good already deleted' => sub {
+        path('t/data/first_bad.json')->copy_to(path($job->result_dir(), 'vars.json'));
+        unlink path(($job->_previous_scenario_jobs)[1]->result_dir(), 'vars.json');
+        ok my $inv = $job->investigate, 'job can provide investigation details';
+        is ref(my $last_good = $inv->{last_good}), 'HASH', 'previous job identified as last good and it is a hash';
+        is $inv->{diff_to_last_good}, undef, 'diff_to_last_good does not exist';
+        is $last_good->{link}, '/tests/99997', 'last_good hash has the correct link';
+        like($inv->{diff_packages_to_last_good}, qr/^\+python/m, 'diff packages for job is shown');
     };
 
     subtest 'external hook is called on done job if specified' => sub {

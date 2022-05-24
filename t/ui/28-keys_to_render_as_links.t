@@ -14,6 +14,8 @@ use OpenQA::SeleniumTest;
 use Mojo::File 'path';
 
 my $schema = OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl');
+my $scheduled_products = $schema->resultset('ScheduledProducts');
+my $product_id = $scheduled_products->create({settings => {__URL => 'https://foo,http://bar test', __NO_URL => 'foo'}});
 # setup openqa.ini with job_settings_ui
 $ENV{OPENQA_CONFIG} = "t/data/03-setting-links";
 my $t = Test::Mojo->new('OpenQA::WebAPI');
@@ -44,6 +46,18 @@ is(scalar @number_of_elem, 1, 'Only configured setting keys render as links');
 note 'Checking link Navigation to the source';
 $driver->find_element_by_link($foo_path)->click();
 is($driver->get_current_url(), "$url$uri_path_from_root_dir", 'Link is accessed with correct URI');
+
+subtest 'scheduled product settings' => sub {
+    $driver->get('/admin/productlog?id=' . $product_id->id);
+    my $table = $driver->find_element('#scheduled-products > table');
+    like $table->get_text, qr{__NO_URL foo.*__URL https://foo,http://bar test}s, 'text rendered';
+    my @links_in_table = $driver->find_elements('#scheduled-products > table a');
+    is scalar @links_in_table, 2, 'exactly two links are rendered' or return;
+    is $links_in_table[0]->get_text, 'https://foo', 'link text (1)';
+    like $links_in_table[0]->get_attribute('href'), qr{^https://foo/?$}, 'link href (1)';
+    is $links_in_table[1]->get_text, 'http://bar', 'link text (2)';
+    like $links_in_table[1]->get_attribute('href'), qr{^http://bar/?$}, 'link href (2)';
+};
 
 kill_driver();
 done_testing();

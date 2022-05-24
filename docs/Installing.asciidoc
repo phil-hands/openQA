@@ -1027,7 +1027,9 @@ automatically every day. It is also possible to trigger the cleanup manually by 
 * Tables:
 ** table_create table_update table_delete
 * Users:
-** user_new_comment user_update_comment user_delete_comment user_login
+** user_update user_login user_deleted
+* Comments:
+** comment_create comment_update comment_delete
 * Needles:
 ** needle_delete needle_modify
 
@@ -1055,7 +1057,13 @@ reboots during the configured reboot maintenance windows using `rebootmgr`.
 As an alternative to the systemd timer the script
 `/usr/share/openqa/script/openqa-auto-update` can be called when desired.
 
-==== Migrating from older databases
+The distribution package `openQA-continuous-update` can be used to continuously
+upgrade the system. It will frequently check whether `devel:openQA` contains
+updates and if it does it will upgrade the whole system. This approach is
+independent of `openQA-auto-update` but can be used complementary. The
+configuration is analogous to `openQA-auto-update`.
+
+== Migrating from older databases
 
 For older versions of openQA, you can migrate from SQLite to PostgreSQL
 according to
@@ -1063,7 +1071,7 @@ according to
 
 For migrating from older PostgreSQL versions read on.
 
-==== Migrating PostgreSQL database on openSUSE
+== Migrating PostgreSQL database on openSUSE
 
 The PostgreSQL `data`-directory needs to be migrated in order to switch to a
 newer major version of PostgreSQL. The following instructions are specific to
@@ -1138,7 +1146,7 @@ sudo -u postgres vimdiff \
 IMPORTANT: There shouldn't be a diff in the locale settings, otherwise
 `pg_upgrade` will complain.
 
-5. Shutdown postgres server and related services as appropriate for your setup,
+7. Shutdown postgres server and related services as appropriate for your setup,
 e.g.:
 +
 [source,sh]
@@ -1147,7 +1155,7 @@ sudo systemctl stop openqa-{webui,websockets,scheduler,livehandler,gru}
 sudo systemctl stop postgresql
 ----
 
-6. Perform the migration:
+8. Perform the migration:
 +
 [source,sh]
 ----
@@ -1166,14 +1174,14 @@ for details.
 NOTE: This step only takes a few seconds for multiple production DBs because the `--link`
 option is used.
 
-7. Change symlink (shown in step 2) to use the new data directory:
+9. Change symlink (shown in step 2) to use the new data directory:
 +
 [source,sh]
 ----
 sudo ln --force --no-dereference --relative --symbolic /var/lib/pgsql/data.$newver /var/lib/pgsql/data
 ----
 
-8. Start services again as appropriate for your setup, e.g.:
+10. Start services again as appropriate for your setup, e.g.:
 +
 [source,sh]
 ----
@@ -1184,21 +1192,21 @@ sudo systemctl start openqa-{webui,websockets,scheduler,livehandler,gru}
 NOTE: There is no need to take care of starting the new version of the PostgreSQL service.
 The start script checks the version of the data directory and starts the correct version.
 
-9. Check whether usual role and database are present and running on the new version:
+11. Check whether usual role and database are present and running on the new version:
 +
 [source,sh]
 ----
 sudo -u geekotest psql -c 'select version();' openqa
 ----
 
-10. Remove old postgres packages if not needed anymore:
+12. Remove old postgres packages if not needed anymore:
 +
 [source,sh]
 ----
 sudo zypper rm postgresql$oldver-server postgresql$oldver-contrib postgresql$oldver
 ----
 
-11. Delete the old data directory if not needed anymore:
+13. Delete the old data directory if not needed anymore:
 +
 [source,sh]
 ----
