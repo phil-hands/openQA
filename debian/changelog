@@ -1,3 +1,9 @@
+openqa (4.6.1653336570.10bff0d-1) UNRELEASED; urgency=medium
+
+  * New upstream release.
+
+ -- Philip Hands <phil@hands.com>  Tue, 24 May 2022 09:57:43 +0200
+
 openqa (4.6.1648473912.da11be7-1) unstable; urgency=medium
 
   * Create and install manpages
