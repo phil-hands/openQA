@@ -723,12 +723,13 @@ sub cluster_jobs ($self, @args) {
     my $skip_children = $args{skip_children};
     my $skip_parents = $args{skip_parents};
     my $no_directly_chained_parent = $args{no_directly_chained_parent};
+    my $cancelmode = $args{cancelmode};
 
     # handle re-visiting job
     if (defined $job) {
         # checkout the children after all when revisiting this job without $skip_children but children
         # have previously been skipped
-        return $self->_cluster_children($jobs) if !$skip_children && delete $job->{children_skipped};
+        return $self->_cluster_children($jobs, $cancelmode) if !$skip_children && delete $job->{children_skipped};
         # otherwise skip the already visisted job
         return $jobs;
     }
@@ -760,9 +761,9 @@ sub cluster_jobs ($self, @args) {
             # duplicate only up the chain if the parent job wasn't ok
             # notes: - We skip the children here to avoid considering "direct siblings".
             #        - Going up the chain is not required/wanted when cancelling.
-            unless ($skip_parents || $args{cancelmode}) {
+            unless ($skip_parents || $cancelmode) {
                 my $parent_result = $p->result;
-                $p->cluster_jobs(jobs => $jobs, skip_children => 1)
+                $p->cluster_jobs(jobs => $jobs, skip_children => 1, cancelmode => $cancelmode)
                   if !$parent_result || !OpenQA::Jobs::Constants::is_ok_result($parent_result);
             }
             next;
@@ -771,7 +772,7 @@ sub cluster_jobs ($self, @args) {
             push(@{$job->{directly_chained_parents}}, $parent_id);
             # duplicate always up the chain to ensure this job ran directly after its directly chained parent
             # notes: same as for CHAINED dependencies
-            unless ($skip_parents || $args{cancelmode}) {
+            unless ($skip_parents || $cancelmode) {
                 next if exists $jobs->{$parent_id};
                 die "Direct parent $parent_id needs to be cloned as well for the directly chained dependency "
                   . 'to work correctly. It is generally better to restart the parent which will restart all children '
@@ -779,7 +780,7 @@ sub cluster_jobs ($self, @args) {
                   . '<a href="https://open.qa/docs/#_handling_of_related_jobs_on_failure_cancellation_restart">'
                   . "documentation</a> for more information.\n"
                   if $no_directly_chained_parent;
-                $p->cluster_jobs(jobs => $jobs, skip_children => 1);
+                $p->cluster_jobs(jobs => $jobs, skip_children => 1, cancelmode => $cancelmode);
             }
             next;
         }
@@ -801,12 +802,16 @@ sub cluster_jobs ($self, @args) {
                     next PARENT unless $jobs->{$child->id};
                 }
             }
-            $p->cluster_jobs(jobs => $jobs, no_directly_chained_parent => $no_directly_chained_parent)
-              unless $skip_parents;
+            $p->cluster_jobs(
+                jobs => $jobs,
+                no_directly_chained_parent => $no_directly_chained_parent,
+                cancelmode => $cancelmode
+            ) unless $skip_parents;
         }
     }
 
-    return $self->_cluster_children($jobs, $skip_parents, $no_directly_chained_parent) unless $skip_children;
+    return $self->_cluster_children($jobs, $cancelmode, $skip_parents, $no_directly_chained_parent)
+      unless $skip_children;
 
     # flag this job as "children_skipped" to be able to distinguish when re-visiting the job
     $job->{children_skipped} = 1;
@@ -814,7 +819,7 @@ sub cluster_jobs ($self, @args) {
 }
 
 # internal (recursive) function used by cluster_jobs to invoke itself for all children
-sub _cluster_children ($self, $jobs, $skip_parents = undef, $no_directly_chained_parent = undef) {
+sub _cluster_children ($self, $jobs, $cancelmode, $skip_parents = undef, $no_directly_chained_parent = undef) {
     my $schema = $self->result_source->schema;
     my $current_job_info = $jobs->{$self->id};
 
@@ -830,7 +835,8 @@ sub _cluster_children ($self, $jobs, $skip_parents = undef, $no_directly_chained
             jobs => $jobs,
             skip_parents => $skip_parents,
             no_directly_chained_parent => $no_directly_chained_parent,
-            added_as_child => 1
+            added_as_child => 1,
+            cancelmode => $cancelmode,
         );
 
         # add the child's ID to the current job info
@@ -1352,13 +1358,14 @@ sub create_asset ($self, $asset, $scope, $local = undef) {
     $type = 'hdd' if $fname =~ /\.(?:qcow2|raw|vhd|vhdx)$/;
     $type //= 'other';
 
-    $fname = sprintf("%08d-%s", $self->id, $fname) if $scope ne 'public';
+    my $job_id = sprintf "%08d", $self->id;
+    $fname = "$job_id-$fname" if $scope ne 'public';
 
     my $assetdir = assetdir();
     my $fpath = path($assetdir, $type);
     my $temp_path = path($assetdir, 'tmp', $scope);
 
-    my $temp_chunk_folder = path($temp_path, join('.', $fname, 'CHUNKS'));
+    my $temp_chunk_folder = path($temp_path, $job_id, join('.', $fname, 'CHUNKS'));
     my $temp_final_file = path($temp_chunk_folder, $fname);
     my $final_file = path($fpath, $fname);
 
@@ -1826,17 +1833,25 @@ sub has_autoinst_log ($self) {
     return -e "$result_dir/autoinst-log.txt";
 }
 
-sub git_log_diff ($self, $dir, $refspec_range) {
+sub git_log_diff ($self, $dir, $refspec_range, $limit = undef) {
+    return "Invalid range $refspec_range" if $refspec_range =~ m/UNKNOWN/;
     my $res = run_cmd_with_log_return_error(
-        ['git', '-C', $dir, 'log', '--stat', '--pretty=oneline', '--abbrev-commit', '--no-merges', $refspec_range]);
+        [
+            'git', '-C', $dir, 'log', ($limit ? "-$limit" : ()),
+            '--stat', '--pretty=oneline', '--abbrev-commit', '--no-merges', $refspec_range
+        ],
+        stdout => 'trace'
+    );
     # regardless of success or not the output contains the information we need
-    return "\n" . $res->{stderr} if $res->{stderr};
+    return $res->{stdout} . $res->{stderr};
 }
 
 sub git_diff ($self, $dir, $refspec_range) {
+    return "Invalid range $refspec_range" if $refspec_range =~ m/UNKNOWN/;
     my $timeout = OpenQA::App->singleton->config->{global}->{job_investigate_git_timeout} // 20;
-    my $res = run_cmd_with_log_return_error(['timeout', $timeout, 'git', '-C', $dir, 'diff', '--stat', $refspec_range]);
-    return "\n" . $res->{stderr} if $res->{stderr};
+    my $res = run_cmd_with_log_return_error(['timeout', $timeout, 'git', '-C', $dir, 'diff', '--stat', $refspec_range],
+        stdout => 'trace');
+    return $res->{stdout} . $res->{stderr};
 }
 
 =head2 investigate
@@ -1845,6 +1860,7 @@ Find pointers for investigation on failures, e.g. what changed vs. a "last
 good" job in the same scenario.
 
 =cut
+
 sub investigate ($self, %args) {
     my @previous = $self->_previous_scenario_jobs;
     return {error => 'No previous job in this scenario, cannot provide hints'} unless @previous;
@@ -1859,16 +1875,20 @@ sub investigate ($self, %args) {
         next unless $prev->result =~ /(?:passed|softfailed)/;
         $inv{last_good} = {type => 'link', link => '/tests/' . $prev->id, text => $prev->id};
         last unless $prev->result_dir;
+        my ($prev_file, $self_file) = map {
+            eval { Mojo::File->new($_->result_dir(), 'vars.json')->slurp }
+              // undef
+        } ($prev, $self);
+        $inv{diff_packages_to_last_good} = $self->packages_diff($prev, $ignore) // 'Diff of packages not available';
+        last unless $prev_file;
         # just ignore any problems on generating the diff with eval, e.g.
         # files missing. This is a best-effort approach.
-        my @files = map { Mojo::File->new($_->result_dir(), 'vars.json')->slurp } ($prev, $self);
-        my $diff = eval { diff(\$files[0], \$files[1], {CONTEXT => 0}) };
+        my $diff = eval { diff(\$prev_file, \$self_file, {CONTEXT => 0}) };
         $inv{diff_to_last_good} = join("\n", grep { !/(^@@|$ignore)/ } split(/\n/, $diff));
-        $inv{diff_packages_to_last_good} = $self->packages_diff($prev, $ignore) // 'Diff of packages not available';
-        my ($before, $after) = map { decode_json($_) } @files;
+        my ($before, $after) = map { decode_json($_) } ($prev_file, $self_file);
         my $dir = testcasedir($self->DISTRI, $self->VERSION);
         my $refspec_range = "$before->{TEST_GIT_HASH}..$after->{TEST_GIT_HASH}";
-        $inv{test_log} = $self->git_log_diff($dir, $refspec_range);
+        $inv{test_log} = $self->git_log_diff($dir, $refspec_range, $args{git_limit});
         $inv{test_log} ||= 'No test changes recorded, test regression unlikely';
         $inv{test_diff_stat} = $self->git_diff($dir, $refspec_range) if $inv{test_log};
         # no need for duplicating needles git log if the git repo is the same
@@ -1876,7 +1896,7 @@ sub investigate ($self, %args) {
         if ($after->{TEST_GIT_HASH} ne $after->{NEEDLES_GIT_HASH}) {
             $dir = needledir($self->DISTRI, $self->VERSION);
             my $refspec_needles_range = "$before->{NEEDLES_GIT_HASH}..$after->{NEEDLES_GIT_HASH}";
-            $inv{needles_log} = $self->git_log_diff($dir, $refspec_needles_range);
+            $inv{needles_log} = $self->git_log_diff($dir, $refspec_needles_range, $args{git_limit});
             $inv{needles_log} ||= 'No needle changes recorded, test regression due to needles unlikely';
             $inv{needles_diff_stat} = $self->git_diff($dir, $refspec_needles_range) if $inv{needles_log};
         }
@@ -2003,6 +2023,8 @@ sub done ($self, %args) {
         $new_val{reason} = 'no test modules scheduled/uploaded';
     }
     $self->update(\%new_val);
+    $self->unblock;
+    $self->auto_duplicate if $restart || (!$self->is_ok && $self->handle_retry);
     # bugrefs are there to mark reasons of failure - the function checks itself though
     my $carried_over = $self->carry_over_bugrefs;
     $self->enqueue_finalize_job_results($carried_over);
@@ -2014,8 +2036,6 @@ sub done ($self, %args) {
             $self->_job_stop_cluster($job);
         }
     }
-    $self->unblock;
-    $self->auto_duplicate if $restart || (!$self->is_ok && $self->handle_retry);
 
     return $new_val{result} // $self->result;
 }

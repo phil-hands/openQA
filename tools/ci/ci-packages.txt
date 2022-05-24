@@ -19,7 +19,7 @@ gtk3-schema-3.24.20
 gtk3-tools-3.24.20
 hicolor-icon-theme-0.17
 hostname-3.16
-hwdata-0.355
+hwdata-0.358
 icewm-1.4.2
 icewm-default-1.4.2
 icewm-theme-branding-1.2.5
@@ -68,6 +68,7 @@ pciutils-3.5.6
 perl-Algorithm-C3-0.10
 perl-Algorithm-Diff-1.1903
 perl-aliased-0.34
+perl-AppConfig-1.71
 perl-App-cpanminus-1.7045
 perl-Archive-Extract-0.80
 perl-Archive-Zip-1.60
@@ -95,7 +96,7 @@ perl-Class-Method-Modifiers-2.12
 perl-Class-Singleton-1.5
 perl-Class-Tiny-1.006
 perl-Clone-0.39
-perl-Code-TidyAll-0.81
+perl-Code-TidyAll-0.82
 perl-CommonMark-0.290000
 perl-common-sense-3.74
 perl-Config-Any-0.32
@@ -104,7 +105,7 @@ perl-Config-IniFiles-2.94
 perl-Config-Tiny-2.23
 perl-Context-Preserve-0.03
 perl-CPAN-DistnameInfo-0.12
-perl-Cpanel-JSON-XS-4.27
+perl-Cpanel-JSON-XS-4.28
 perl-CPAN-Meta-Check-0.014
 perl-CPAN-Meta-Requirements-2.140000
 perl-Crypt-DES-2.07
@@ -199,7 +200,7 @@ perl-Log-Contextual-0.008001
 perl-LWP-MediaTypes-6.02
 perl-LWP-Protocol-https-6.06
 perl-Meta-Builder-0.003
-perl-Minion-10.23
+perl-Minion-10.24
 perl-Minion-Backend-SQLite-5.0.6
 perl-Mixin-Linewise-0.108
 perl-Module-Build-0.422400
@@ -209,7 +210,7 @@ perl-Module-Pluggable-5.2
 perl-Module-Runtime-0.016
 perl-Module-Runtime-Conflicts-0.003
 perl-Mojo-IOLoop-ReadWriteProcess-0.32
-perl-Mojolicious-9.22
+perl-Mojolicious-9.25
 perl-Mojolicious-Plugin-AssetPack-2.13
 perl-Mojolicious-Plugin-OAuth2-2.02
 perl-Mojo-Pg-4.27
@@ -258,7 +259,7 @@ perl-Readonly-2.05
 perl-Regexp-Common-2017060201
 perl-Role-Tiny-2.000006
 perl-Scope-Guard-0.21
-perl-Selenium-Remote-Driver-1.46
+perl-Selenium-Remote-Driver-1.47
 perl-Socket6-0.28
 perl-Socket-MsgHdr-0.04
 perl-Sort-Versions-1.62
@@ -283,6 +284,7 @@ perl-Sub-Uplevel-0.240.0
 perl-SUPER-1.20141117
 perl-TAP-Harness-JUnit-0.42
 perl-Task-Weaken-1.06
+perl-Template-Toolkit-2.27
 perl-Test-Deep-1.127
 perl-Test-Differences-0.64
 perl-Test-Exception-0.430000

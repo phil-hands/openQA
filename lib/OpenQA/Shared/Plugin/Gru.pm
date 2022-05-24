@@ -64,6 +64,9 @@ sub register {
 
     $app->plugin(Minion => {Pg => $conn});
 
+    my $minion_job_max_age = OpenQA::App->singleton->config->{misc_limits}->{minion_job_max_age};
+    $self->app->minion->remove_after($minion_job_max_age) if $minion_job_max_age;
+
     # We use a custom job class (for legacy reasons)
     $app->minion->on(
         worker => sub {
@@ -83,6 +86,11 @@ sub register {
     # Enable the Minion Admin interface under /minion
     my $auth = $app->routes->under('/minion')->to('session#ensure_admin');
     $app->plugin('Minion::Admin' => {route => $auth});
+    # allow the continuously polled stats to be available on an
+    # unauthenticated route to prevent recurring broken requests to the login
+    # provider if not logged in
+    my $route = $app->routes->find('minion_stats')->remove;
+    $app->routes->any('/minion')->add_child($route);
 
     my $gru = OpenQA::Shared::Plugin::Gru->new($app);
     $app->helper(gru => sub { $gru });

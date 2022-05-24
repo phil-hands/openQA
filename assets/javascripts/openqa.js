@@ -534,3 +534,19 @@ function renderComments(row) {
   }
   return html;
 }
+
+function renderHttpUrlAsLink(value) {
+  const span = document.createElement('span');
+  for (let match; (match = value.match(/https?:\/\/[^\s,]*/)); ) {
+    const url = match[0];
+    const link = document.createElement('a');
+    link.href = url;
+    link.target = 'blank';
+    link.appendChild(document.createTextNode(url));
+    span.appendChild(document.createTextNode(value.substr(0, match.index)));
+    span.appendChild(link);
+    value = value.substr(match.index + url.length);
+  }
+  span.appendChild(document.createTextNode(value));
+  return span;
+}

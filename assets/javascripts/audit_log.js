@@ -6,6 +6,15 @@ var ajax_url;
 
 function getURLForType(type, event_data) {
   switch (type) {
+    case 'comment_create':
+    case 'comment_update':
+      if (event_data.job_id !== undefined) {
+        return '/tests/' + event_data.job_id + '#comments';
+      } else if (event_data.group_id !== undefined) {
+        return '/group_overview/' + event_data.group_id + '#comments';
+      } else if (event_data.parent_group_id !== undefined) {
+        return '/parent_group_overview/' + event_data.parent_group_id + '#comments';
+      }
     case 'jobtemplate_create':
       if (event_data.job_group_id) {
         return '/admin/job_templates/' + event_data.job_group_id;
@@ -142,7 +151,11 @@ function showScheduledProductModalDialog(title, body) {
 function renderScheduledProductSettings(settings) {
   const table = $('<table/>').addClass('table table-striped');
   for (const [key, value] of Object.entries(settings || {})) {
-    table.append($('<tr/>').append($('<td/>').text(key)).append($('<td/>').text(value)));
+    table.append(
+      $('<tr/>')
+        .append($('<td/>').text(key))
+        .append($('<td/>').append(renderHttpUrlAsLink(value)))
+    );
   }
   return table;
 }

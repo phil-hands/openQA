@@ -317,26 +317,30 @@ sub run_cmd_with_log {
 }
 
 sub run_cmd_with_log_return_error {
-    my ($cmd) = @_;
+    my ($cmd, %args) = @_;
+    my $stdout_level = $args{stdout} // 'debug';
+    my $stderr_level = $args{stderr} // 'debug';
 
     log_info('Running cmd: ' . join(' ', @$cmd));
     try {
-        my ($stdin, $stdout_err);
-        my $ipc_run_succeeded = IPC::Run::run($cmd, \$stdin, '>&', \$stdout_err);
+        my ($stdin, $stdout_err, $stdout, $stderr) = ('') x 4;
+        my $ipc_run_succeeded = IPC::Run::run($cmd, \$stdin, \$stdout, \$stderr);
         my $return_code = $?;
-        chomp $stdout_err;
+        chomp $stderr;
         if ($ipc_run_succeeded) {
-            log_debug($stdout_err);
+            OpenQA::Log->can("log_$stdout_level")->($stdout);
+            OpenQA::Log->can("log_$stderr_level")->($stderr);
             log_info("cmd returned $return_code");
         }
         else {
-            log_warning($stdout_err);
+            log_warning($stdout . $stderr);
             log_error("cmd returned $return_code");
         }
         return {
             status => $ipc_run_succeeded,
             return_code => $return_code,
-            stderr => $stdout_err,
+            stdout => $stdout,
+            stderr => $stderr,
         };
     }
     catch {
@@ -344,6 +348,7 @@ sub run_cmd_with_log_return_error {
             status => 0,
             return_code => undef,
             stderr => "an internal error occurred",
+            stdout => '',
         };
     };
 }
@@ -507,10 +512,11 @@ sub check_download_passlist {
     # Passed the params hash ref for a job and the download_domains
     # passlist read from openqa.ini. Checks that all params ending
     # in _URL (i.e. requesting asset download) specify URLs that are
-    # passlisted. It's provided here so that we can run the check
-    # twice, once to return immediately and conveniently from the Iso
-    # controller, once again directly in the Gru asset download sub
-    # just in case someone somehow manages to bypass the API and
+    # passlisted (except those starting with __ as they are not
+    # actually download). It's provided here so that we can run the
+    # check twice, once to return immediately and conveniently from
+    # the Iso controller, once again directly in the Gru asset download
+    # sub just in case someone somehow manages to bypass the API and
     # create a gru task directly. On failure, returns an array of 4
     # items: the first is 1 if there was a passlist at all or 2 if
     # there was not, the second is the name of the param for which the
@@ -523,7 +529,7 @@ sub check_download_passlist {
         @okdomains = split(/ /, $passlist);
     }
     for my $param (keys %$params) {
-        next unless ($param =~ /_URL$/);
+        next unless ($param =~ /^(?!__).*_URL$/);
         my $url = $$params{$param};
         my @check = check_download_url($url, $passlist);
         next unless (@check);
