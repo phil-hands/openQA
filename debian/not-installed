@@ -8,3 +8,4 @@ usr/share/openqa/script/openqa-bootstrap
 usr/share/openqa/script/openqa-bootstrap-container
 usr/share/openqa/script/openqa-check-devel-repo
 usr/share/openqa/script/openqa-rollback
+usr/share/openqa/script/openqa-continuous-update
