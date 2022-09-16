@@ -219,6 +219,7 @@ Depends: ${misc:Depends},
          libjson-validator-perl,
          libfilesys-df-perl,
          libtime-moment-perl,
+         libcpanel-json-xs-perl,
 Recommends:
          git-lfs,
 Description: automatic Operating System testing framework (common files)
