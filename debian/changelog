@@ -1,3 +1,11 @@
+openqa (4.6.1653336570.10bff0d-2) unstable; urgency=medium
+
+  * bump Standards-Version
+  * depend libcpanel-json-xs-perl & libmoose-perl (closes: 1019920)
+  * lintian tidyage
+
+ -- Philip Hands <phil@hands.com>  Mon, 10 Oct 2022 20:28:51 +0200
+
 openqa (4.6.1653336570.10bff0d-1) unstable; urgency=medium
 
   * New upstream release.
