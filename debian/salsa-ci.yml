@@ -1,15 +1,5 @@
 include:
-  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/salsa-ci.yml
-  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/pipeline-jobs.yml
+  - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/recipes/debian.yml
 
 variables:
-  SALSA_CI_DISABLE_LINTIAN: 0
-  SALSA_CI_DISABLE_APTLY: 0
-  SALSA_CI_DISABLE_REPROTEST: 1
-  SALSA_CI_DISABLE_BUILD_PACKAGE_ANY: 1
-
-stages:
-  - provisioning
-  - build
-  - test
-  - publish
+  SALSA_CI_DISABLE_CROSSBUILD_ARM64: 1
