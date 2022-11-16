@@ -52,7 +52,7 @@ __PACKAGE__->table('jobs');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime FilterColumn Timestamps));
 __PACKAGE__->add_columns(
     id => {
-        data_type => 'integer',
+        data_type => 'bigint',
         is_auto_increment => 1,
     },
     result_dir => {    # this is the directory below testresults
@@ -80,12 +80,12 @@ __PACKAGE__->add_columns(
         is_nullable => 1,
     },
     clone_id => {
-        data_type => 'integer',
+        data_type => 'bigint',
         is_foreign_key => 1,
         is_nullable => 1
     },
     blocked_by_id => {
-        data_type => 'integer',
+        data_type => 'bigint',
         is_foreign_key => 1,
         is_nullable => 1
     },
@@ -122,12 +122,12 @@ __PACKAGE__->add_columns(
         is_nullable => 1
     },
     group_id => {
-        data_type => 'integer',
+        data_type => 'bigint',
         is_foreign_key => 1,
         is_nullable => 1
     },
     assigned_worker_id => {
-        data_type => 'integer',
+        data_type => 'bigint',
         is_foreign_key => 1,
         is_nullable => 1
     },
@@ -164,7 +164,7 @@ __PACKAGE__->add_columns(
         default_value => 0,
     },
     scheduled_product_id => {
-        data_type => 'integer',
+        data_type => 'bigint',
         is_foreign_key => 1,
         is_nullable => 1,
     },
@@ -385,12 +385,13 @@ sub prepare_for_work ($self, $worker = undef, $worker_properties = {}) {
         $job_hashref->{settings}->{NICVLAN} = join(',', @vlans);
     }
 
-    # assign new tmpdir, clean previous one
-    if (my $tmpdir = $worker->get_property('WORKER_TMPDIR')) {
-        File::Path::rmtree($tmpdir);
+    unless ($worker_properties->{WORKER_TMPDIR}) {
+        # assign new tmpdir, clean previous one
+        if (my $tmpdir = $worker->get_property('WORKER_TMPDIR')) {
+            File::Path::rmtree($tmpdir);
+        }
+        $worker->set_property(WORKER_TMPDIR => tempdir());
     }
-    $worker->set_property(WORKER_TMPDIR => $worker_properties->{WORKER_TMPDIR} // tempdir());
-
     return $job_hashref;
 }
 
@@ -1226,15 +1227,9 @@ sub create_result_dir ($self) {
         $self->update({result_dir => $dir});
         $dir = $self->result_dir;
     }
-    if (!-d $dir) {
-        my $npd = $self->num_prefix_dir;
-        mkdir $npd unless -d $npd;
-        mkdir $dir or die "can't mkdir $dir: $!";
-    }
-    my $sdir = "$dir/.thumbs";
-    mkdir $sdir or die "can't mkdir $sdir: $!" unless -d $sdir;
-    $sdir = "$dir/ulogs";
-    mkdir $sdir or die "can't mkdir $sdir: $!" unless -d $sdir;
+    path($dir)->make_path;
+    path($dir, '.thumbs')->make_path;
+    path($dir, 'ulogs')->make_path;
     return $dir;
 }
 
@@ -1283,9 +1278,12 @@ sub progress_info ($self) {
 }
 
 sub account_result_size ($self, $result_name, $size) {
+    # update via raw query to avoid exception in case the job has already been deleted meanwhile (see poo#119866)
     my $job_id = $self->id;
-    log_trace("Accounting size of $result_name for job $job_id: $size");
-    $self->update({result_size => \"coalesce(result_size, 0) + $size"});
+    my $dbh = $self->result_source->schema->storage->dbh;
+    my $sth = $dbh->prepare('UPDATE jobs SET result_size = coalesce(result_size, 0) + ? WHERE id = ?');
+    log_trace "Accounting size of $result_name for job $job_id: $size";
+    return $sth->execute($size, $job_id) != 0;
 }
 
 sub store_image ($self, $asset, $md5, $thumb = undef) {
@@ -1691,20 +1689,23 @@ sub _carry_over_candidate ($self) {
     my $lookup_depth = $config->{lookup_depth};
     my $state_changes_limit = $config->{state_changes_limit};
 
+    my $label = sprintf "_carry_over_candidate(%d)", $self->id;
+    log_debug(sprintf "$label: _failure_reason=%s", $current_failure_reason);
+
     # we only do carryover for jobs with some kind of (soft) failure
     return if $current_failure_reason eq 'GOOD';
 
     # search for previous jobs
     for my $job ($self->_previous_scenario_jobs($lookup_depth)) {
         my $job_fr = $job->_failure_reason;
-        log_debug(sprintf("checking take over from %d: %s vs %s", $job->id, $job_fr, $current_failure_reason));
+        log_debug(sprintf("$label: checking take over from %d: _failure_reason=%s", $job->id, $job_fr));
         if ($job_fr eq $current_failure_reason) {
-            log_debug("found a good candidate");
+            log_debug(sprintf "$label: found a good candidate (%d)", $job->id);
             return $job;
         }
 
         if ($job_fr eq $prev_failure_reason) {
-            log_debug("ignoring job with repeated problem");
+            log_debug(sprintf "$label: ignoring job %d with repeated problem", $job->id);
             next;
         }
 
@@ -1714,7 +1715,7 @@ sub _carry_over_candidate ($self) {
         # if the job changed failures more often, we assume
         # that the carry over is pointless
         if ($state_changes > $state_changes_limit) {
-            log_debug("changed state more than $state_changes_limit, aborting search");
+            log_debug("$label: changed state more than $state_changes_limit ($state_changes), aborting search");
             return;
         }
     }
@@ -1834,7 +1835,7 @@ sub has_autoinst_log ($self) {
 }
 
 sub git_log_diff ($self, $dir, $refspec_range, $limit = undef) {
-    return "Invalid range $refspec_range" if $refspec_range =~ m/UNKNOWN/;
+    return "Invalid range $refspec_range" if $refspec_range =~ m/UNKNOWN|unreadable git hash/;
     my $res = run_cmd_with_log_return_error(
         [
             'git', '-C', $dir, 'log', ($limit ? "-$limit" : ()),
@@ -1847,7 +1848,7 @@ sub git_log_diff ($self, $dir, $refspec_range, $limit = undef) {
 }
 
 sub git_diff ($self, $dir, $refspec_range) {
-    return "Invalid range $refspec_range" if $refspec_range =~ m/UNKNOWN/;
+    return "Invalid range $refspec_range" if $refspec_range =~ m/UNKNOWN|unreadable git hash/;
     my $timeout = OpenQA::App->singleton->config->{global}->{job_investigate_git_timeout} // 20;
     my $res = run_cmd_with_log_return_error(['timeout', $timeout, 'git', '-C', $dir, 'diff', '--stat', $refspec_range],
         stdout => 'trace');
@@ -1880,7 +1881,7 @@ sub investigate ($self, %args) {
               // undef
         } ($prev, $self);
         $inv{diff_packages_to_last_good} = $self->packages_diff($prev, $ignore) // 'Diff of packages not available';
-        last unless $prev_file;
+        last unless $self_file && $prev_file;
         # just ignore any problems on generating the diff with eval, e.g.
         # files missing. This is a best-effort approach.
         my $diff = eval { diff(\$prev_file, \$self_file, {CONTEXT => 0}) };
@@ -1927,9 +1928,9 @@ sub ancestors ($self, $limit = -1) {
             union all
             select id as orig_id, orig_id.level + 1 as level from jobs join orig_id on orig_id.orig_id = jobs.clone_id where (? < 0 or level < ?))
         select level from orig_id order by level desc limit 1;');
-    $sth->bind_param(1, $self->id, SQL_INTEGER);
-    $sth->bind_param(2, $limit, SQL_INTEGER);
-    $sth->bind_param(3, $limit, SQL_INTEGER);
+    $sth->bind_param(1, $self->id, SQL_BIGINT);
+    $sth->bind_param(2, $limit, SQL_BIGINT);
+    $sth->bind_param(3, $limit, SQL_BIGINT);
     $sth->execute;
     $self->{_ancestors} = $sth->fetchrow_array;
 }
@@ -1943,9 +1944,9 @@ sub descendants ($self, $limit = -1) {
             union all
             select jobs.clone_id as clone_id, clone_id.level + 1 as level from jobs join clone_id on clone_id.clone_id = jobs.id where (? < 0 or level < ?))
         select level from clone_id order by level desc limit 1;');
-    $sth->bind_param(1, $self->id, SQL_INTEGER);
-    $sth->bind_param(2, $limit, SQL_INTEGER);
-    $sth->bind_param(3, $limit, SQL_INTEGER);
+    $sth->bind_param(1, $self->id, SQL_BIGINT);
+    $sth->bind_param(2, $limit, SQL_BIGINT);
+    $sth->bind_param(3, $limit, SQL_BIGINT);
     $sth->execute;
     $self->{_descendants} = $sth->fetchrow_array;
 }

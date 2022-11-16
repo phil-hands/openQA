@@ -24,6 +24,7 @@
     pre {
         text-align: left;
         margin-bottom: 0;
+        padding-bottom: 1rem;
         border: none;
         background-color: inherit;
     }
@@ -40,9 +41,20 @@
     }
 
 }
+.darkmode {
+    #preview_container_in {
+        background-color: #0a0a0a;
+    }
+}
 
 #preview_container_in > * {
     max-width: 100%;
+}
+.darkmode {
+    #preview_container_in > * {
+        color: $default-font-color-darktheme;
+        background-color: $default-bg-color-darktheme;
+    }
 }
 
 .links > div {
@@ -184,6 +196,19 @@
                     }
                 }
             }
+        }
+    }
+}
+
+.darkmode {
+    .candidates-selection {
+        #candidatesMenu, #candidatesMenu.dropdown-toggle {
+            box-shadow: 0 0 0 1px rgba(231,229,227,.15) inset;
+            background-color: $default-bg-color-darktheme;
+            color: $default-font-color-darktheme;
+        }
+        #screenshot_button {
+            border-color: #272625;
         }
     }
 }

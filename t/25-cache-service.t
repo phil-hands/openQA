@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Mojo::Base -strict, -signatures;
 use Time::Seconds;
 $ENV{MOJO_LOG_LEVEL} = 'info';
 
@@ -57,13 +58,12 @@ my $cache_client = OpenQA::CacheService::Client->new();
 
 END { session->clean }
 
-my $daemon;
 my $cache_service = cache_worker_service;
 my $t = Test::Mojo->new('OpenQA::CacheService');
 
 my $server_instance = process sub {
     # Connect application with web server and start accepting connections
-    $daemon = Mojo::Server::Daemon->new(app => fake_asset_server, listen => [$host])->silent(1);
+    my $daemon = Mojo::Server::Daemon->new(app => fake_asset_server, listen => [$host])->silent(1);
     $daemon->run;
     Devel::Cover::report() if Devel::Cover->can('report');
     _exit(0);    # uncoverable statement to ensure proper exit code of complete test at cleanup
@@ -73,15 +73,14 @@ my $server_instance = process sub {
   _default_blocking_signal => POSIX::SIGTERM,
   kill_sleeptime => 0;
 
-sub start_server {
+sub start_servers () {
     $server_instance->set_pipes(0)->separate_err(0)->blocking_stop(1)->channels(0)->restart;
-    $cache_service->set_pipes(0)->separate_err(0)->blocking_stop(1)->channels(0)->restart->restart;
+    $cache_service->set_pipes(0)->separate_err(0)->blocking_stop(1)->channels(0)->restart;
     perform_minion_jobs($t->app->minion);
     wait_for_or_bail_out { $cache_client->info->available } 'cache service';
 }
 
-sub test_default_usage {
-    my ($id, $asset) = @_;
+sub test_default_usage ($id, $asset) {
     my $asset_request = $cache_client->asset_request(id => $id, asset => $asset, type => 'hdd', host => $host);
 
     if (!$cache_client->enqueue($asset_request)) {
@@ -92,8 +91,7 @@ sub test_default_usage {
     ok($asset_request->minion_id, "Minion job id recorded in the request object") or die diag explain $asset_request;
 }
 
-sub test_sync {
-    my ($run) = @_;
+sub test_sync ($run) {
     my $dir = tempdir;
     my $dir2 = tempdir;
     my $rsync_request = $cache_client->rsync_request(from => $dir, to => $dir2);
@@ -136,8 +134,7 @@ sub test_sync {
       or die diag $status2->output;
 }
 
-sub test_download {
-    my ($id, $asset) = @_;
+sub test_download ($id, $asset) {
     unlink path($cachedir)->child($asset);
     my $asset_request = $cache_client->asset_request(id => $id, asset => $asset, type => 'hdd', host => $host);
 
@@ -154,8 +151,7 @@ sub test_download {
     ok($asset_request->minion_id, "Minion job id recorded in the request object") or die diag explain $asset_request;
 }
 
-sub perform_job_in_foreground {
-    my $job = shift;
+sub perform_job_in_foreground ($job) {
     if (my $err = $job->execute) { $job->fail($err) }
     else { $job->finish }
 }
@@ -223,8 +219,7 @@ subtest 'Cache Requests' => sub {
       'to_array() not implemented in base request';
 };
 
-start_server;
-ok $cache_client->info->available, 'cache service is available';
+start_servers;
 
 subtest 'Invalid requests' => sub {
     my $url = $cache_client->url('/status/12345');
@@ -264,13 +259,13 @@ subtest 'Asset exists' => sub {
 };
 
 subtest 'Increased SQLite busy timeout' => sub {
-    my $cache = OpenQA::CacheService->new;
+    my $cache = $t->app;
     is $cache->cache->sqlite->db->dbh->sqlite_busy_timeout, 600000, '10 minute cache busy timeout';
     is $cache->minion->backend->sqlite->db->dbh->sqlite_busy_timeout, 600000, '10 minute minion busy timeout';
 };
 
 subtest 'Job progress (guard against parallel downloads of the same file)' => sub {
-    my $app = OpenQA::CacheService->new;
+    my $app = $t->app;
     ok !$app->progress->is_downloading('foo'), 'not downloading';
     is $app->progress->downloading_job('foo'), undef, 'no job';
     my $guard = $app->progress->guard('foo', 123);
@@ -445,9 +440,7 @@ subtest 'Multiple minion workers (parallel downloads, almost simulating real sce
 
 subtest 'Test Minion task registration and execution' => sub {
     my $asset = 'sle-12-SP3-x86_64-0368-200_133333@64bit.qcow2';
-
-    my $app = OpenQA::CacheService->new;
-
+    my $app = $t->app;
     my $req = $cache_client->asset_request(id => 922756, asset => $asset, type => 'hdd', host => $host);
     $cache_client->enqueue($req);
     my $worker = $app->minion->repair->worker->register;
@@ -462,8 +455,6 @@ subtest 'Test Minion task registration and execution' => sub {
 };
 
 subtest 'Test Minion Sync task' => sub {
-    my $app = OpenQA::CacheService->new;
-
     my $dir = tempdir;
     my $dir2 = tempdir;
     $dir->child('test')->spurt('foobar');
@@ -471,7 +462,7 @@ subtest 'Test Minion Sync task' => sub {
 
     my $req = $cache_client->rsync_request(from => $dir, to => $dir2);
     ok !$cache_client->enqueue($req);
-    my $worker = $app->minion->repair->worker->register;
+    my $worker = $t->app->minion->repair->worker->register;
     ok($worker->id, 'worker has an ID');
     my $job = $worker->dequeue(0);
     ok($job, 'job enqueued');
@@ -486,7 +477,7 @@ subtest 'Test Minion Sync task' => sub {
 };
 
 subtest 'Minion monitoring with InfluxDB' => sub {
-    my $app = OpenQA::CacheService->new;
+    my $app = $t->app;
     my $rate = $app->cache->metrics->{download_rate};
     ok $rate > 0, 'download rate is higher than 0 bytes per second';
 
@@ -495,7 +486,7 @@ subtest 'Minion monitoring with InfluxDB' => sub {
     my $res = $ua->get($url)->result;
     is $res->body, <<"EOF", 'three workers still running';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=0i,failed=0i,inactive=0i
-openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=2i
+openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=2i,registered=2i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -504,7 +495,7 @@ EOF
     $res = $ua->get($url)->result;
     is $res->body, <<"EOF", 'four workers running now';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=0i,failed=0i,inactive=0i
-openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i
+openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i,registered=3i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -515,7 +506,7 @@ EOF
     $res = $ua->get($url)->result;
     is $res->body, <<"EOF", 'two jobs';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=1i,delayed=0i,failed=0i,inactive=1i
-openqa_minion_workers,url=http://127.0.0.1:9530 active=1i,inactive=2i
+openqa_minion_workers,url=http://127.0.0.1:9530 active=1i,inactive=2i,registered=3i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -523,7 +514,7 @@ EOF
     $res = $ua->get($url)->result;
     is $res->body, <<"EOF", 'one job failed';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=0i,failed=1i,inactive=1i
-openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i
+openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i,registered=3i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -531,16 +522,14 @@ EOF
     $res = $ua->get($url)->result;
     is $res->body, <<"EOF", 'job is being retried';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=1i,failed=0i,inactive=2i
-openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i
+openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i,registered=3i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 };
 
 subtest 'Concurrent downloads of the same file' => sub {
     my $asset = 'sle-12-SP3-x86_64-0368-200_133333@64bit.qcow2';
-
-    my $app = OpenQA::CacheService->new;
-
+    my $app = $t->app;
     my $req = $cache_client->asset_request(id => 922756, asset => $asset, type => 'hdd', host => $host);
     $cache_client->enqueue($req);
     my $req2 = $cache_client->asset_request(id => 922757, asset => $asset, type => 'hdd', host => $host);
@@ -593,9 +582,7 @@ subtest 'Concurrent rsync' => sub {
     my $dir2 = tempdir;
     $dir->child('test')->spurt('foobar');
     my $expected = $dir2->child('tests')->child('test');
-
-    my $app = OpenQA::CacheService->new;
-
+    my $app = $t->app;
     my $req = $cache_client->rsync_request(from => $dir, to => $dir2);
     $cache_client->enqueue($req);
     my $req2 = $cache_client->rsync_request(from => $dir, to => $dir2);
@@ -655,8 +642,9 @@ subtest 'OpenQA::CacheService::Task::Sync' => sub {
     $worker_2->stop;
 };
 
-$server_instance->stop;
-$cache_service->stop;
-done_testing();
+done_testing;
 
-1;
+END {
+    $server_instance->stop;
+    $cache_service->stop;
+}

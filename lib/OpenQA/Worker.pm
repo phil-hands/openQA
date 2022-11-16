@@ -31,12 +31,12 @@ BEGIN {
     };
 }
 
-use POSIX 'uname';
 use Fcntl;
 use File::Path qw(make_path remove_tree);
 use File::Spec::Functions 'catdir';
 use Mojo::IOLoop;
 use Mojo::File 'path';
+use Net::Domain qw(hostname hostfqdn);
 use Try::Tiny;
 use Scalar::Util 'looks_like_number';
 use OpenQA::Constants
@@ -64,9 +64,6 @@ has 'isotovideo_interface_version';
 sub new {
     my ($class, $cli_options) = @_;
 
-    # determine uname info
-    my ($sysname, $hostname, $release, $version, $machine) = POSIX::uname();
-
     # determine instance number
     my $instance_number = $cli_options->{instance};
     die 'no instance number specified' unless defined $instance_number;
@@ -79,6 +76,7 @@ sub new {
         log_name => 'worker',
         instance => $instance_number,
     );
+    $settings->global_settings->{WORKER_HOSTNAME} //= hostfqdn;
     $settings->apply_to_app($app);
 
     # setup the isotovideo engine
@@ -92,7 +90,7 @@ sub new {
         app => $app,
         settings => $settings,
         clients_by_webui_host => undef,
-        worker_hostname => $hostname,
+        worker_hostname => hostname,
         isotovideo_interface_version => $isotovideo_interface_version,
     );
     $self->{_cli_options} = $cli_options;
@@ -109,15 +107,17 @@ sub log_setup_info {
 
     my $instance = $self->instance_number;
     my $settings = $self->settings;
+    my $global_settings = $settings->global_settings;
     my $msg = "worker $instance:";
-    $msg .= "\n - config file:           " . ($settings->file_path // 'not found');
-    $msg .= "\n - worker hostname:       " . $self->worker_hostname;
-    $msg .= "\n - isotovideo version:    " . $self->isotovideo_interface_version;
-    $msg .= "\n - websocket API version: " . WEBSOCKET_API_VERSION;
-    $msg .= "\n - web UI hosts:          " . join(',', @{$settings->webui_hosts});
-    $msg .= "\n - class:                 " . ($settings->global_settings->{WORKER_CLASS} // '?');
-    $msg .= "\n - no cleanup:            " . ($self->no_cleanup ? 'yes' : 'no');
-    $msg .= "\n - pool directory:        " . $self->pool_directory;
+    $msg .= "\n - config file:                      " . ($settings->file_path // 'not found');
+    $msg .= "\n - name used to register:            " . ($self->worker_hostname // 'undetermined');
+    $msg .= "\n - worker address (WORKER_HOSTNAME): " . ($global_settings->{WORKER_HOSTNAME} // 'undetermined');
+    $msg .= "\n - isotovideo version:               " . $self->isotovideo_interface_version;
+    $msg .= "\n - websocket API version:            " . WEBSOCKET_API_VERSION;
+    $msg .= "\n - web UI hosts:                     " . join(',', @{$settings->webui_hosts});
+    $msg .= "\n - class:                            " . ($global_settings->{WORKER_CLASS} // '?');
+    $msg .= "\n - no cleanup:                       " . ($self->no_cleanup ? 'yes' : 'no');
+    $msg .= "\n - pool directory:                   " . $self->pool_directory;
     log_info($msg);
 
     my $parse_errors = $settings->parse_errors;
@@ -375,22 +375,9 @@ sub exec ($self) {
     return $return_code;
 }
 
-sub _prepare_cache_directory {
-    my ($webui_host, $cachedirectory) = @_;
-    die 'No cachedir' unless $cachedirectory;
-
+sub _prepare_cache_directory ($webui_host, $cachedirectory) {
     my $host_to_cache = Mojo::URL->new($webui_host)->host || $webui_host;
-    my $shared_cache = File::Spec->catdir($cachedirectory, $host_to_cache);
-    File::Path::make_path($shared_cache);
-    log_info("CACHE: caching is enabled, setting up $shared_cache");
-
-    # make sure the downloads are in the same file system - otherwise
-    # asset->move_to becomes a bit more expensive than it should
-    my $tmpdir = File::Spec->catdir($cachedirectory, 'tmp');
-    File::Path::make_path($tmpdir);
-    $ENV{MOJO_TMPDIR} = $tmpdir;
-
-    return $shared_cache;
+    return File::Spec->catdir($cachedirectory, $host_to_cache);
 }
 
 sub _assert_whether_job_acceptance_possible {
@@ -653,7 +640,8 @@ sub check_availability {
     # check whether the cache service is available if caching enabled
     if (my $cache_service_client = $self->{_cache_service_client}) {
         my $error = $cache_service_client->info->availability_error;
-        return 'Worker cache not available: ' . $error if $error;
+        my $host = $cache_service_client->host // '?';
+        return "Worker cache not available via $host: $error" if $error;
     }
 
     # check whether qemu is still running

@@ -49,6 +49,8 @@ BEGIN {
         kde => 'https://bugs.kde.org/show_bug.cgi?id=',
         fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
         jsc => 'https://jira.suse.de/browse/',
+        pio => 'https://pagure.io/',
+        ggo => 'https://gitlab.gnome.org/',
     );
     %BUGURLS = (
         'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
@@ -63,6 +65,8 @@ BEGIN {
         $BUGREFS{kde} => 'kde',
         $BUGREFS{fdo} => 'fdo',
         $BUGREFS{jsc} => 'jsc',
+        $BUGREFS{pio} => 'pio',
+        $BUGREFS{ggo} => 'ggo',
     );
 
     $MARKER_REFS = join('|', keys %BUGREFS);
@@ -214,7 +218,6 @@ sub gitrepodir {
     my %args = (distri => '', version => '', @_);
     my $path = $args{needles} ? needledir($args{distri}, $args{version}) : testcasedir($args{distri}, $args{version});
     my $filename = (-e path($path, '.git')) ? path($path, '.git', 'config') : '';
-    log_warning("$path is not a git directory") if $filename eq '';
     my $config = Config::Tiny->read($filename, 'utf8');
     return '' unless defined $config;
     if ($config->{'remote "origin"'}{url} =~ /^http(s?)/) {
@@ -441,8 +444,10 @@ sub bugurl {
     # calling https://github.com/os-autoinst/openQA/issues/966 will yield the
     # same page as https://github.com/os-autoinst/openQA/pull/966 and vice
     # versa for both an issue as well as pull request
+    # for pagure.io it has to be "issue", not "issues"
     $bugref =~ BUGREF_REGEX;
-    return $BUGREFS{$+{marker}} . ($+{repo} ? "$+{repo}/issues/" : '') . $+{id};
+    my $issuetext = $+{marker} eq "pio" ? "issue" : "issues";
+    return $BUGREFS{$+{marker}} . ($+{repo} ? "$+{repo}/$issuetext/" : '') . $+{id};
 }
 
 sub bugref_to_href {
@@ -457,7 +462,9 @@ sub href_to_bugref {
     my $regex = $MARKER_URLS =~ s/\?/\\\?/gr;
     # <repo> is optional, e.g. for github. For github issues and pull are
     # interchangeable, see comment in 'bugurl', too
-    $regex = qr{(?<!["\(\[])(?<url_root>$regex)((?<repo>.*)/(issues|pull)/)?(?<id>([A-Z]+-)?\d+)(?![\w])};
+    # gitlab URLs have an odd /-/ after the repo name, e.g.
+    # https://gitlab.gnome.org/GNOME/gnome-shell/-/issues/5244
+    $regex = qr{(?<!["\(\[])(?<url_root>$regex)((?<repo>.*?)/(-/)?(issues?|pull)/)?(?<id>([A-Z]+-)?\d+)(?![\w])};
     $text =~ s{$regex}{@{[$BUGURLS{$+{url_root}} . ($+{repo} ? '#' . $+{repo} : '')]}#$+{id}}gi;
     return $text;
 }
@@ -500,12 +507,7 @@ sub check_download_url {
         my $quoted = qr/$okdomain/;
         $ok = 1 if ($host =~ /${quoted}$/);
     }
-    if ($ok) {
-        return ();
-    }
-    else {
-        return (1, $host);
-    }
+    return $ok ? () : (1, $host);
 }
 
 sub check_download_passlist {
@@ -525,11 +527,10 @@ sub check_download_passlist {
 
     my ($params, $passlist) = @_;
     my @okdomains;
-    if (defined $passlist) {
-        @okdomains = split(/ /, $passlist);
-    }
+    @okdomains = split(/ /, $passlist) if defined $passlist;
     for my $param (keys %$params) {
         next unless ($param =~ /^(?!__).*_URL$/);
+        next unless asset_type_from_setting((get_url_short($param))[0]);
         my $url = $$params{$param};
         my @check = check_download_url($url, $passlist);
         next unless (@check);
@@ -609,7 +610,7 @@ sub human_readable_size {
     if ($size < 3000) {
         return "$p$size Byte";
     }
-    $size = $size / 1024.;
+    $size /= 1024.;
     if ($size < 1024) {
         return $p . _round_a_bit($size) . " KiB";
     }
@@ -912,7 +913,7 @@ sub change_sec_to_word {
     );
     my $time_word = '';
     for my $key (qw(d h m s)) {
-        $time_word = $time_word . int($second / $time_numbers{$key}) . $key . ' '
+        $time_word .= int($second / $time_numbers{$key}) . $key . ' '
           if (int($second / $time_numbers{$key}));
         $second = int($second % $time_numbers{$key});
     }

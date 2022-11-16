@@ -102,11 +102,11 @@ This is basically a checklist to go through in case the developer mode is broken
   and open the live view. Then open the JavaScript console of the web browser. If it contains messages
   like `Received message via ws proxy: {...,"type":"info","what":"cmdsrvmsg"}` the os-autoinst command
   server can be reached. Otherwise there should be at least a message like
-  `Received message via ws proxy: {"what":"connecting to os-autoinst command server at ws:\/\/hostname:20053\/xhB84lUuPlMfhDEF\/ws",...}`
+  `Received message via ws proxy: {"what":"connecting to os-autoinst command server at ws:\/\/host:20053\/xhB84lUuPlMfhDEF\/ws",...}`
   which contains the URL the livehandler is attempting to query. In this case
   try the following sub-steps:
-  .. If the hostname is wrong, add `WORKER_HOSTNAME = correcthostname` to `workers.ini`. The worker
-     should then tell the web UI that it is reachable via `correcthostname` resulting in a correct URL
+  .. If the host is wrong, add `WORKER_HOSTNAME = correcthost` to `workers.ini`. The worker
+     should then tell the web UI that it is reachable via `correcthost` resulting in a correct URL
      for the os-autoinst command server. Be sure the setting appears after the `[global]` section
      header.
   .. It might also be the case that the firewall is blocking the HTTP/websocket connection on the required
@@ -117,3 +117,17 @@ This is basically a checklist to go through in case the developer mode is broken
   which component needs access to which other components and the ports used by default.
 
 //-
+
+=== Configure firewalld
+As mentioned, certain ports are required to be open on the worker host. If you are
+using firewalld and the ports are blocked, it is fairly simple to open them:
+
+```
+# add new service "isotovideo" with ports covering 50 worker slots as explained in debugging steps above
+firewall-cmd --new-service isotovideo
+for i in {1..50}; do firewall-cmd --service=isotovideo --add-port=$((i * 10 + 20003))/tcp ; done
+# allow the service in your zone (public in this example) right now
+firewall-cmd --zone=public --add-service=isotovideo
+# ensure the settings to be effective after firewall or host restarts
+firewall-cmd --runtime-to-permanent
+```

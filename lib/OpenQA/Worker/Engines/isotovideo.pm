@@ -14,7 +14,7 @@ use Mojo::JSON 'encode_json';    # booleans
 use Cpanel::JSON::XS ();
 use Fcntl;
 use File::Spec::Functions qw(abs2rel catdir file_name_is_absolute);
-use File::Basename 'basename';
+use File::Basename qw(basename fileparse);
 use Errno;
 use Cwd 'abs_path';
 use OpenQA::CacheService::Client;
@@ -98,11 +98,12 @@ sub _poll_cache_service ($job, $cache_client, $request, $delay, $callback) {
 
 sub cache_assets ($cache_client, $job, $vars, $assets_to_cache, $assetkeys, $webui_host, $pooldir, $callback) {
     return $callback->(undef) unless my $this_asset = shift @$assets_to_cache;
-    return cache_assets(@_) unless my $asset_value = $vars->{$this_asset};
+    return cache_assets($cache_client, $job, $vars, $assets_to_cache, $assetkeys, $webui_host, $pooldir, $callback)
+      unless my $asset_value = $vars->{$this_asset};
 
     my $asset_uri = trim($asset_value);
-    # skip UEFI_PFLASH_VARS asset if the job won't use UEFI
-    return cache_assets(@_) if $this_asset eq 'UEFI_PFLASH_VARS' && !$vars->{UEFI};
+    return cache_assets($cache_client, $job, $vars, $assets_to_cache, $assetkeys, $webui_host, $pooldir, $callback)
+      if ($this_asset eq 'UEFI_PFLASH_VARS' && !$vars->{UEFI});
     # check cache availability
     my $error = $cache_client->info->availability_error;
     return $callback->({error => $error}) if $error;
@@ -185,12 +186,11 @@ sub _link_asset ($asset, $pooldir) {
     return {basename => $asset_basename, absolute_path => $target->to_string};
 }
 
-sub _link_repo {
-    my ($source_dir, $pooldir, $target_name) = @_;
+sub _link_repo ($source_dir, $pooldir, $target_name, $ignore_missing = 0) {
     $pooldir = path($pooldir);
     my $target = $pooldir->child($target_name);
     unlink $target;
-    return {error => "The source directory $source_dir does not exist"} unless -e $source_dir;
+    return {error => "The source directory $source_dir does not exist"} if !$ignore_missing && !-e $source_dir;
     return {error => qq{Cannot create symlink from "$source_dir" to "$target": $!}}
       unless symlink($source_dir, $target);
     log_debug(qq{Symlinked from "$source_dir" to "$target"});
@@ -379,6 +379,11 @@ sub _configure_cgroupv2 ($job_info) {
     return $cgroup;
 }
 
+sub _checkout_path ($url_or_path, $is_url) {
+    return $url_or_path unless $$is_url = looks_like_url_with_scheme $url_or_path;
+    return (fileparse(Mojo::URL->new($url_or_path)->path, qr/\.[^.]*/))[0];
+}
+
 sub _engine_workit_step_2 ($job, $job_settings, $vars, $shared_cache, $callback) {
     my $worker = $job->worker;
     my $pooldir = $worker->pool_directory;
@@ -424,9 +429,17 @@ sub _engine_workit_step_2 ($job, $job_settings, $vars, $shared_cache, $callback)
         || ($needles_dir && !file_name_is_absolute($needles_dir) && !looks_like_url_with_scheme($needles_dir)))
     {
         # create/assign a symlink for needles if NEEDLES_DIR has been specified by the user as a path relative to
-        # the default CASEDIR/PRODUCTDIR
+        # the default CASEDIR/PRODUCTDIR or as a path relative to the specified CASEDIR if NEEDLES_DIR starts with
+        # %CASEDIR%.
+        my $cannot_check_existence;
+        my $symlink_target
+          = $needles_dir && $needles_dir =~ qr/^\%CASEDIR\%(.*)/i
+          ? _checkout_path($casedir, \$cannot_check_existence) . $1
+          : $default_needles_dir;
         $vars->{NEEDLES_DIR} = $needles_dir = basename($needles_dir || 'needles');
-        if (my $error = _link_repo($default_needles_dir, $pooldir, $needles_dir)) { return $callback->($error) }
+        if (my $error = _link_repo($symlink_target, $pooldir, $needles_dir, $cannot_check_existence)) {
+            return $callback->($error);
+        }
     }
     _save_vars($pooldir, $vars);
 

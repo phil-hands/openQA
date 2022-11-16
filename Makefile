@@ -8,6 +8,8 @@ KEEP_DB ?= 0
 # CONTAINER_TEST: Set to 0 to exclude container tests needing a container
 # runtime environment
 CONTAINER_TEST ?= 1
+# HELM_TEST: Set to 0 to exclude helm tests needing a kubernetes cluster
+HELM_TEST ?= 1
 # TESTS: Specify individual test files in a space separated lists. As the user
 # most likely wants only the mentioned tests to be executed and no other
 # checks this implicitly disables CHECKSTYLE
@@ -32,6 +34,9 @@ SCALE_FACTOR ?= 2
 endif
 TIMEOUT_RETRIES ?= $$((${TIMEOUT_M} * ${SCALE_FACTOR} * (${RETRY} + 1) ))m
 CRE ?= podman
+# avoid localized error messages (that are matched against in certain cases)
+LC_ALL = C.utf8
+LANGUAGE =
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(patsubst %/,%,$(dir $(mkfile_path)))
 container_env_file := "$(current_dir)/container.env"
@@ -91,16 +96,17 @@ install-generic:
 	for i in systemd/*.{service,target,timer,path}; do \
 		install -m 644 $$i "$(DESTDIR)"/usr/lib/systemd/system ;\
 	done
+	ln -s openqa-worker-plain@.service "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker@.service
 	sed \
 		-e 's_^\(ExecStart=/usr/share/openqa/script/worker\) \(--instance %i\)$$_\1 --no-cleanup \2_' \
-		-e '/Wants/aConflicts=openqa-worker@.service' \
-		systemd/openqa-worker@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-no-cleanup@.service
+		-e '/Wants/aConflicts=openqa-worker-plain@.service' \
+		systemd/openqa-worker-plain@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-no-cleanup@.service
 	sed \
 		-e '/Type/aEnvironment=OPENQA_WORKER_TERMINATE_AFTER_JOBS_DONE=1' \
 		-e '/ExecStart=/aExecReload=\/bin\/kill -HUP $$MAINPID' \
 		-e 's/Restart=on-failure/Restart=always/' \
-		-e '/Wants/aConflicts=openqa-worker@.service' \
-		systemd/openqa-worker@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-auto-restart@.service
+		-e '/Wants/aConflicts=openqa-worker-plain@.service' \
+		systemd/openqa-worker-plain@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-auto-restart@.service
 	install -m 755 systemd/systemd-openqa-generator "$(DESTDIR)"/usr/lib/systemd/system-generators
 	install -m 644 systemd/tmpfiles-openqa.conf "$(DESTDIR)"/usr/lib/tmpfiles.d/openqa.conf
 	install -m 644 systemd/tmpfiles-openqa-webui.conf "$(DESTDIR)"/usr/lib/tmpfiles.d/openqa-webui.conf
@@ -141,13 +147,19 @@ ifeq ($(TRAVIS),true)
 test: run-tests-within-container
 else
 ifeq ($(CHECKSTYLE),0)
-test: test-with-database
+checkstyle_tests =
 else
-test: test-checkstyle-standalone test-with-database
+checkstyle_tests = test-checkstyle-standalone
 endif
+test: $(checkstyle_tests) test-with-database
 ifeq ($(CONTAINER_TEST),1)
 ifeq ($(TESTS),)
 test: test-containers-compose
+endif
+endif
+ifeq ($(HELM_TEST),1)
+ifeq ($(TESTS),)
+test: test-helm-chart
 endif
 endif
 endif
@@ -310,6 +322,17 @@ tidy: tidy-js tidy-perl
 .PHONY: test-containers-compose
 test-containers-compose:
 	tools/test_containers_compose
+
+.PHONY: test-helm-chart
+test-helm-chart: test-helm-lint test-helm-install
+
+.PHONY: test-helm-lint
+test-helm-lint:
+	tools/test_helm_chart lint
+
+.PHONY: test-helm-install
+test-helm-install:
+	tools/test_helm_chart install
 
 .PHONY: update-deps
 update-deps:

@@ -6,8 +6,10 @@ package OpenQA::Log;
 use Mojo::Base -strict, -signatures;
 
 use Carp;
+use Cpanel::JSON::XS ();
 use Exporter 'import';
 use Mojo::File 'path';
+use Mojo::JSON qw(decode_json);
 use File::Path 'make_path';
 use OpenQA::App;
 use Time::Moment;
@@ -27,6 +29,7 @@ our @EXPORT_OK = qw(
   log_format_callback
   get_channel_handle
   setup_log
+  redact_settings_in_file
   format_settings
 );
 
@@ -41,23 +44,23 @@ my %LOG_DEFAULTS = (LOG_TO_STANDARD_CHANNEL => 1, CHANNELS => []);
 #  log_debug("message");
 #  log_debug("message", channels=>'channel1')
 #  log_debug("message", channels=>'channel1', standard=>0)
-sub log_debug (@) { _log_msg('debug', @_); }
+sub log_debug (@args) { _log_msg('debug', @args); }
 
 # log_trace("message"[, param1=>val1, param2=>val2]);
-sub log_trace (@) { _log_msg('trace', @_); }
+sub log_trace (@args) { _log_msg('trace', @args); }
 
 # log_info("message"[, param1=>val1, param2=>val2]);
-sub log_info (@) { _log_msg('info', @_); }
+sub log_info (@args) { _log_msg('info', @args); }
 
 # log_warning("message"[, param1=>val1, param2=>val2]);
-sub log_warning (@) { _log_msg('warn', @_); }
+sub log_warning (@args) { _log_msg('warn', @args); }
 
 # log_error("message"[, param1=>val1, param2=>val2]);
-sub log_error (@) { _log_msg('error', @_); }
+sub log_error (@args) { _log_msg('error', @args); }
 # log_fatal("message"[, param1=>val1, param2=>val2]);
-sub log_fatal (@) {
-    _log_msg('fatal', @_);
-    croak $_[0];
+sub log_fatal (@args) {
+    _log_msg('fatal', @args);
+    croak $args[0];
 }
 
 sub _current_log_level () {
@@ -205,9 +208,18 @@ sub setup_log ($app, $logfile = undef, $logdir = undef, $level = undef) {
     OpenQA::App->set_singleton($app);
 }
 
+sub redact_settings ($vars) {
+    return {map { $_ !~ qr/(^_SECRET_|_PASSWORD)/ ? ($_ => $vars->{$_}) : ($_ => '[redacted]') } keys %$vars};
+}
+
+sub redact_settings_in_file ($file) {
+    $file = path($file);
+    $file->spurt(Cpanel::JSON::XS->new->pretty->canonical->encode(redact_settings(decode_json($file->slurp))));
+}
+
 sub format_settings ($vars) {
-    my @s = map { $_ !~ qr/(^_SECRET_|_PASSWORD)/ ? ("    $_=$vars->{$_}") : ("    $_=[redacted]") } sort keys %$vars;
-    return join("\n", @s);
+    $vars = redact_settings($vars);
+    return join("\n", map { "    $_=$vars->{$_}" } sort keys %$vars);
 }
 
 1;

@@ -4,6 +4,7 @@
 package OpenQA::WebAPI::Controller::API::V1::Job;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
+use OpenQA::App;
 use OpenQA::Utils qw(:DEFAULT assetdir);
 use OpenQA::JobSettings;
 use OpenQA::Jobs::Constants;
@@ -13,12 +14,11 @@ use OpenQA::Schema::Result::Jobs;
 use OpenQA::Events;
 use OpenQA::Scheduler::Client;
 use OpenQA::Log qw(log_error log_info);
+use List::Util qw(min);
 use Try::Tiny;
 use DBIx::Class::Timestamps 'now';
 use Mojo::Asset::Memory;
 use Mojo::File 'path';
-
-use constant JOB_QUERY_LIMIT => 10000;
 
 =pod
 
@@ -85,8 +85,9 @@ sub list {
     $validation->optional('limit')->num(0);
     $validation->optional('latest')->num(1);
 
-    my $limit = $validation->param('limit') // JOB_QUERY_LIMIT;
-    return $self->render(json => {error => 'Limit exceeds maximum'}, status => 400) unless $limit <= JOB_QUERY_LIMIT;
+    my $limits = OpenQA::App->singleton->config->{misc_limits};
+    my $limit = min($limits->{generic_max_limit}, $validation->param('limit') // $limits->{generic_default_limit});
+    return $self->render(json => {error => 'Limit exceeds maximum'}, status => 400) unless $limit;
     return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
     # validate parameters
@@ -172,11 +173,12 @@ sub list {
         push @{$parents{$dep->child_job_id}}, $dep;
     }
     my $js
-      = $schema->resultset('JobSettings')->search({job_id => {-in => [@jobids]}}, {select => [qw(job_id key value)]});
+      = $schema->resultset('JobSettings')
+      ->search(\['job_id = ANY(?)', [{}, \@jobids]], {select => [qw(job_id key value)]});
     while (my $set = $js->next) {
         push @{$settings{$set->job_id}}, $set;
     }
-    my $o = $schema->resultset('Jobs')->search({clone_id => {-in => [@jobids]}}, {select => [qw(id clone_id)]},);
+    my $o = $schema->resultset('Jobs')->search(\['clone_id = ANY(?)', [{}, \@jobids]], {select => [qw(id clone_id)]});
     while (my $orig = $o->next) {
         $origins{$orig->clone_id} = $orig->id;
     }
@@ -973,17 +975,17 @@ Used for both apiv1_cancel and apiv1_cancel_jobs
 sub cancel {
     my ($self) = @_;
     my $jobid = $self->param('jobid');
+    my $reason = $self->param('reason');
 
     my $res;
     if ($jobid) {
         return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
-        $job->cancel(OpenQA::Jobs::Constants::USER_CANCELLED);
-        $self->emit_event('openqa_job_cancel', {id => int($jobid)});
+        $job->cancel(OpenQA::Jobs::Constants::USER_CANCELLED, $reason);
+        $self->emit_event('openqa_job_cancel', {id => int($jobid), reason => $reason});
     }
     else {
         my $params = $self->req->params->to_hash;
         $res = $self->schema->resultset('Jobs')->cancel_by_settings($params, 0);
-        $self->emit_event('openqa_job_cancel_by_settings', $params) if ($res);
     }
 
     $self->render(json => {result => $res});

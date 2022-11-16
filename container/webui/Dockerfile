@@ -1,16 +1,16 @@
 #!BuildTag: openqa_webui
-FROM opensuse/leap:15.3
+FROM opensuse/leap:15.4
 LABEL maintainer Jan Sedlak <jsedlak@redhat.com>, Josef Skladanka <jskladan@redhat.com>, wnereiz <wnereiz@eienteiland.org>, Sergio Lindo Mansilla <slindomansilla@suse.com>
 LABEL version="0.3"
 
 # hadolint ignore=DL3037
-RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/openSUSE_Leap_15.3 devel_openQA && \
-    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.3/openSUSE_Leap_15.3 devel_openQA_Leap && \
+RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/15.4 devel_openQA && \
+    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.4/15.4 devel_openQA_Leap && \
     zypper --gpg-auto-import-keys ref && \
     # openQA might need rubygem:sass to compile assets in this context due to
     # unknown reasons even though the package should use the precompiled
     # assets from cache.tar
-    zypper in -y --force-resolution ca-certificates-mozilla curl openQA-local-db apache2 hostname which w3m 'rubygem(sass)' && \
+    zypper in -y ca-certificates-mozilla curl openQA-local-db apache2 hostname which w3m 'rubygem(sass)' && \
     zypper clean && \
     gensslcert && \
     a2enmod headers && \

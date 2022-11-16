@@ -9,7 +9,7 @@ use Date::Format 'time2str';
 use File::Basename 'basename';
 use IPC::Run;
 use OpenQA::App;
-use OpenQA::Log qw(log_debug log_info);
+use OpenQA::Log qw(log_trace log_debug log_info);
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Schema::Result::JobDependencies;
 use OpenQA::Utils 'testcasedir';
@@ -84,10 +84,9 @@ MACHINE. For each set of dupes, only the latest job found is included in
 the return array.
 
 =cut
-sub latest_jobs {
-    my ($self, $until) = @_;
-
+sub latest_jobs ($self, $until = undef) {
     my @jobs = $self->search($until ? {t_created => {'<=' => $until}} : undef, {order_by => ['me.id DESC']});
+
     my @latest;
     my %seen;
     foreach my $job (@jobs) {
@@ -102,6 +101,7 @@ sub latest_jobs {
         next if $seen{$key}++;
         push(@latest, $job);
     }
+
     return @latest;
 }
 
@@ -202,7 +202,7 @@ sub create_from_settings {
     return $job;
 }
 
-sub search_modules ($self, $module_re) {
+sub _search_modules ($self, $module_re) {
     my $distris = path(testcasedir);
     my @results;
     for my $distri ($distris->list({dir => 1})->map('realpath')->uniq()->each) {
@@ -218,12 +218,12 @@ sub search_modules ($self, $module_re) {
     return \@results;
 }
 
-sub prepare_complex_query_search_args ($self, $args) {
+sub _prepare_complex_query_search_args ($self, $args) {
     my @conds;
     my @joins;
 
     if ($args->{module_re}) {
-        my $modules = $self->search_modules($args->{module_re});
+        my $modules = $self->_search_modules($args->{module_re});
         push @{$args->{modules}}, @$modules;
     }
 
@@ -316,7 +316,7 @@ sub complex_query ($self, %args) {
         next unless $args{$arg};
         $args{$arg} = [split(',', $args{$arg})] unless (ref($args{$arg}) eq 'ARRAY');
     }
-    my ($conds, $attrs) = $self->prepare_complex_query_search_args(\%args);
+    my ($conds, $attrs) = $self->_prepare_complex_query_search_args(\%args);
     my $jobs = $self->search({-and => $conds}, $attrs);
     return $jobs;
 }
@@ -337,14 +337,12 @@ sub cancel_by_settings {
     }
     if (keys %precond) {
         my $subquery = $schema->resultset('JobSettings')->query_for_settings(\%precond);
-        $cond{id} = {-in => $subquery->get_column('job_id')->as_query};
+        $cond{'me.id'} = {-in => $subquery->get_column('job_id')->as_query};
     }
     $cond{state} = [OpenQA::Jobs::Constants::PENDING_STATES];
     my $jobs = $schema->resultset('Jobs')->search(\%cond);
     my $jobs_to_cancel;
     if ($newbuild) {
-        # 'monkey patch' cond to be usable in chained search
-        $cond{'me.id'} = delete $cond{id} if $cond{id};
         # filter out all jobs that have any comment (they are considered 'important') ...
         $jobs_to_cancel = $jobs->search({'comments.job_id' => undef}, {join => 'comments'});
         # ... or belong to a tagged build, i.e. is considered important
@@ -370,15 +368,16 @@ sub cancel_by_settings {
     }
     my $cancelled_jobs = 0;
     # first scheduled to avoid worker grab
-    $jobs = $jobs_to_cancel->search({state => OpenQA::Jobs::Constants::SCHEDULED});
-    while (my $j = $jobs->next) {
+    my $scheduled = $jobs_to_cancel->search({state => OpenQA::Jobs::Constants::SCHEDULED});
+    while (my $j = $scheduled->next) {
         $cancelled_jobs += _cancel_or_deprioritize($j, $newbuild, $deprioritize, $deprio_limit);
     }
     # then the rest
-    $jobs = $jobs_to_cancel->search({state => [OpenQA::Jobs::Constants::EXECUTION_STATES]});
-    while (my $j = $jobs->next) {
+    my $executing = $jobs_to_cancel->search({state => [OpenQA::Jobs::Constants::EXECUTION_STATES]});
+    while (my $j = $executing->next) {
         $cancelled_jobs += _cancel_or_deprioritize($j, $newbuild, $deprioritize, $deprio_limit);
     }
+    OpenQA::App->singleton->emit_event(openqa_job_cancel_by_settings => $settings) if ($cancelled_jobs);
     return $cancelled_jobs;
 }
 
@@ -392,7 +391,8 @@ sub _cancel_or_deprioritize {
             return 0;
         }
     }
-    return $job->cancel($newbuild ? OpenQA::Jobs::Constants::OBSOLETED : OpenQA::Jobs::Constants::USER_CANCELLED) // 0;
+    return $job->cancel($newbuild ? OpenQA::Jobs::Constants::OBSOLETED : OpenQA::Jobs::Constants::USER_CANCELLED,
+        'cancelled based on job settings') // 0;
 }
 
 sub next_previous_jobs_query {
@@ -447,12 +447,12 @@ sub mark_job_linked {
     my $referer_host = $referer->host;
     my $app = OpenQA::App->singleton;
     return undef unless $referer_host;
-    return log_debug("Unrecognized referer '$referer_host'")
+    return log_trace("Unrecognized referer '$referer_host'")
       unless grep { $referer_host eq $_ } @{$app->config->{global}->{recognized_referers}};
     my $job = $self->find({id => $jobid});
     return undef if !$job || ($referer->path_query =~ /^\/?$/);
     my $comments = $job->comments;
-    return undef if $comments->find({text => {like => 'label:linked%'}});
+    return undef if $comments->search({text => {like => 'label:linked%'}}, {rows => 1})->first;
     my $user = $self->result_source->schema->resultset('Users')->system({select => ['id']});
     $comments->create_with_event({text => "label:linked Job mentioned in $referer_url", user_id => $user->id});
 }

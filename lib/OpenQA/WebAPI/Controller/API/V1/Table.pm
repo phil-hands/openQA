@@ -6,7 +6,9 @@ package OpenQA::WebAPI::Controller::API::V1::Table;
 use Mojo::Base 'Mojolicious::Controller';
 
 use Mojo::Util 'trim';
+use OpenQA::App;
 use OpenQA::Log 'log_debug';
+use List::Util qw(min);
 use Try::Tiny;
 
 =pod
@@ -47,24 +49,27 @@ version, arch and flavor parameters are always required.
 
 =cut
 
-my %tables = (
+my %TABLES = (
     Machines => {
         keys => [['id'], ['name'],],
         cols => ['id', 'name', 'backend', 'description'],
         required => ['name', 'backend'],
         defaults => {description => undef},
+        ref_name => 'machine'
     },
     TestSuites => {
         keys => [['id'], ['name'],],
         cols => ['id', 'name', 'description'],
         required => ['name'],
         defaults => {description => undef},
+        ref_name => 'test_suite'
     },
     Products => {
         keys => [['id'], ['distri', 'version', 'arch', 'flavor'],],
         cols => ['id', 'distri', 'version', 'arch', 'flavor', 'description'],
         required => ['distri', 'version', 'arch', 'flavor'],
         defaults => {description => "", name => ""},
+        ref_name => 'product'
     },
 );
 
@@ -85,18 +90,20 @@ documentation.
 
 sub list {
     my ($self) = @_;
+    my $limits = OpenQA::App->singleton->config->{misc_limits};
+    my $limit = min($limits->{generic_max_limit}, $self->param('limit') // $limits->{generic_default_limit});
 
     my $table = $self->param("table");
     my %search;
 
-    for my $key (@{$tables{$table}->{keys}}) {
+    for my $key (@{$TABLES{$table}->{keys}}) {
         my $have = 1;
         for my $par (@$key) {
             $have &&= $self->param($par);
         }
         if ($have) {
             for my $par (@$key) {
-                $search{$par} = $self->param($par);
+                $search{"me.$par"} = $self->param($par);
             }
         }
     }
@@ -104,7 +111,15 @@ sub list {
     my @result;
     eval {
         my $rs = $self->schema->resultset($table);
-        @result = %search ? $rs->search(\%search) : $rs->all;
+        @result = $rs->search(
+            keys %search ? \%search : undef,
+            {
+                join => 'settings',
+                '+select' => [qw(settings.id settings.key settings.value), "settings.$TABLES{$table}{ref_name}_id"],
+                collapse => 1,
+                order_by => 'me.id',
+                rows => $limit
+            });
     };
     my $error = $@;
     if ($error) {
@@ -122,7 +137,7 @@ sub list {
                             map {
                                 my $val = $row->get_column($_);
                                 $val ? ($_ => $val) : ()
-                            } @{$tables{$table}->{cols}}
+                            } @{$TABLES{$table}->{cols}}
                         ),
                         settings => [map { {key => $_->key, value => $_->value} } @settings]);
                     \%hash;
@@ -147,7 +162,7 @@ OpenQA::WebAPI::Controller::API::V1::Table package documentation.
 sub create {
     my ($self) = @_;
     my $table = $self->param("table");
-    my %entry = %{$tables{$table}->{defaults}};
+    my %entry = %{$TABLES{$table}->{defaults}};
 
     my ($error_message, $settings, $keys) = $self->_prepare_settings($table, \%entry);
     return $self->render(json => {error => $error_message}, status => 400) if defined $error_message;
@@ -329,7 +344,7 @@ sub _prepare_settings {
     my ($self, $table, $entry) = @_;
     my $validation = $self->validation;
 
-    for my $par (@{$tables{$table}->{required}}) {
+    for my $par (@{$TABLES{$table}->{required}}) {
         $validation->required($par);
         if (!defined $validation->param($par)) {
             next;

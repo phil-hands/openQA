@@ -26,7 +26,7 @@ function toggleAllParallelChildren(expand, table) {
 }
 
 function hasOnlyOkChildren(table, parentID) {
-  const sel = '.parallel-child-of-' + parentID + ' .status:not(.result_passed):not(.result_softfailed)';
+  const sel = '.parallel-child-of-' + parentID + window.overviewParallelChildrenCollapsableResultsSel;
   return table.querySelector(sel) === null;
 }
 
@@ -86,7 +86,7 @@ function showToggleLinkForParallelParents(relatedRow, relatedTable, resElement, 
   };
   testNameCell.appendChild(toggleLink);
   const heading = relatedTable.parentElement.previousElementSibling;
-  if (heading.previousElementSibling.classList.contains('collapse-all-button')) {
+  if (heading.previousElementSibling.classList.contains('btn')) {
     return true;
   }
   const collapseAllButton = document.createElement('a');

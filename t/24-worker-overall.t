@@ -194,13 +194,10 @@ subtest 'status' => sub {
     $worker->settings->global_settings->{CACHEDIRECTORY} = 'foo';
     $worker->configure_cache_client;
     my $worker_status = $worker->status;
+    my $reason = 'Worker cache not available via http://127.0.0.1:9530: Cache service info error: Connection refused';
     is_deeply(
         $worker_status,
-        {
-            type => 'worker_status',
-            status => 'broken',
-            reason => 'Worker cache not available: Cache service info error: Connection refused'
-        },
+        {type => 'worker_status', status => 'broken', reason => $reason},
         'worker is broken if CACHEDIRECTORY set but worker cache not available'
     );
 
@@ -537,6 +534,14 @@ subtest 'handle client status changes' => sub {
     };
     like($output, qr/Test disabling - ignoring server/s, 'client disabled');
     unlike($output, qr/Stopping.*because registration/s, 'worker not stopped; there are still other clients');
+
+    # see if the expected number of retries is performed
+    $ENV{OPENQA_WORKER_CONNECT_INTERVAL} = 7;
+    combined_like {
+        $worker->_handle_client_status_changed($fake_client,
+            {status => 'failed', reason => 'test', error_message => '500 response: unavailable'})
+    }
+    qr/trying again in 7 seconds/s, 'worker will attempt to retry later';
 
     # assume all clients are disabled; worker should stop
     $fake_client_2->status('disabled');

@@ -90,6 +90,7 @@ images:
       # Exclude container specific tests needing a container runtime
       # environment, using github actions instead
       CONTAINER_TEST: 0
+      HELM_TEST: 0
 
   - &base
     image: registry.opensuse.org/devel/openqa/ci/containers/base:latest
@@ -293,6 +294,9 @@ workflows:
       - build-docs:
           <<: *requires
 
+  # Nightly jobs are using the GitHub user "os-autoinst-bot" to create PRs (search for occurrences of `os-autoinst-bot`
+  # within this repository). This user's access token is configured on https://github.com/settings/tokens as usual and set
+  # as variable `GITHUB_TOKEN` on https://app.circleci.com/settings/project/github/os-autoinst/openQA/environment-variables.
   nightly:
     triggers:
       - schedule:

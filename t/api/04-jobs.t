@@ -49,8 +49,7 @@ my $chunk_size = 10000000;
 
 my $io_loop_mock = mock_io_loop(subprocess => 1);
 
-sub calculate_file_md5($) {
-    my ($file) = @_;
+sub calculate_file_md5 ($file) {
     my $c = path($file)->slurp;
     my $md5 = Digest::MD5->new;
     $md5->add($c);
@@ -109,8 +108,6 @@ subtest 'only 9 are current and only 10 are relevant' => sub {
 };
 
 subtest 'check limit quantity' => sub {
-    $t->get_ok('/api/v1/jobs' => form => {scope => 'current', limit => 20000})->status_is(400)
-      ->json_is({error => 'Limit exceeds maximum', error_status => 400});
     $t->get_ok('/api/v1/jobs' => form => {scope => 'current', limit => 'foo'})->status_is(400)
       ->json_is({error => 'Erroneous parameters (limit invalid)', error_status => 400});
     $t->get_ok('/api/v1/jobs' => form => {scope => 'current', limit => 5})->status_is(200);
@@ -219,6 +216,47 @@ subtest 'job overview' => sub {
         $t->json_is('/0/id' => 99939, 'Check correct order');
     };
 
+};
+
+subtest 'jobs for job settings' => sub {
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26102})->status_is(200)
+      ->json_is({jobs => []});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '_TEST_ISSUES', list_value => 26103})->status_is(200)
+      ->json_is({jobs => []});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_', list_value => 26103})->status_is(200)
+      ->json_is({jobs => []});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '%test%', list_value => '%test%'})->status_is(400)
+      ->json_is({error_status => 400, error => 'Erroneous parameters (key invalid, list_value invalid)'});
+
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26103})->status_is(200)
+      ->json_is({jobs => [99926]});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26104})->status_is(200)
+      ->json_is({jobs => [99927]});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26105})->status_is(200)
+      ->json_is({jobs => [99928, 99927]});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26106})->status_is(200)
+      ->json_is({jobs => [99928, 99927]});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26110})->status_is(200)
+      ->json_is({jobs => [99981]});
+
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 261042})->status_is(200)
+      ->json_is({jobs => []});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 2610})->status_is(200)
+      ->json_is({jobs => []});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 2})->status_is(200)
+      ->json_is({jobs => []});
+
+    local $t->app->config->{misc_limits}{job_settings_max_recent_jobs} = 5;
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26110})->status_is(200)
+      ->json_is({jobs => [99981]});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26103})->status_is(200)
+      ->json_is({jobs => []});
+
+    local $t->app->config->{misc_limits}{job_settings_max_recent_jobs} = 1000000000;
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26110})->status_is(200)
+      ->json_is({jobs => [99981]});
+    $t->get_ok('/api/v1/job_settings/jobs' => form => {key => '*_TEST_ISSUES', list_value => 26103})->status_is(200)
+      ->json_is({jobs => [99926]});
 };
 
 $schema->txn_begin;
@@ -699,9 +737,23 @@ subtest 'cancel job' => sub {
     $t->post_ok('/api/v1/jobs/99963/cancel')->status_is(200);
     is_deeply(
         OpenQA::Test::Case::find_most_recent_event($schema, 'job_cancel'),
-        {id => 99963},
+        {id => 99963, reason => undef},
         'Cancellation was logged correctly'
     );
+
+    $t->post_ok('/api/v1/jobs/99963/cancel?reason=Undecided')->status_is(200);
+    is_deeply(
+        OpenQA::Test::Case::find_most_recent_event($schema, 'job_cancel'),
+        {id => 99963, reason => 'Undecided'},
+        'Cancellation was logged with reason'
+    );
+
+    my $form = {TEST => 'spam_eggs'};
+    $t->post_ok('/api/v1/jobs', form => $form)->status_is(200);
+    $t->post_ok('/api/v1/jobs/cancel', form => $form)->status_is(200);
+    is($t->tx->res->json->{result}, 1, 'number of affected jobs returned') or diag explain $t->tx->res->json;
+    is_deeply(OpenQA::Test::Case::find_most_recent_event($schema, 'job_cancel_by_settings'),
+        $form, 'Cancellation was logged with settings');
 };
 
 # helper to find a build in the JSON results
@@ -1116,7 +1168,13 @@ sub junit_ok {
         my $testname = $result->test->name;
         subtest "Parsed results for $testname" => sub {
             my $db_module = $jobs->find($jobid)->modules->find({name => $testname});
-
+            my $jobresult = 'passed';
+            if ($result->result eq 'skip' or $result->result eq 'conf') {
+                $jobresult = 'skipped';
+            }
+            elsif ($result->result eq 'fail' or $result->result eq 'brok') {
+                $jobresult = 'failed';
+            }
             ok(-e path($basedir, "details-$testname.json"), 'junit details written');
             my $got_details = {
                 results => {
@@ -1134,7 +1192,7 @@ sub junit_ok {
                 name => $testname,
                 script => 'test',
                 category => $result->test->category,
-                result => $result->result eq 'ok' ? 'passed' : 'failed',
+                result => $jobresult,
             };
             for my $step (@{$got_details->{results}->{details}}) {
                 next unless $step->{text};
@@ -1195,7 +1253,7 @@ subtest 'Parse extra tests results - LTP' => sub {
     $t->content_is('OK', 'ok returned');
     ok !-e path($basedir, $fname), 'file was not uploaded';
 
-    is $parser->tests->size, 4, 'Tests parsed correctly' or diag explain $parser->tests->size;
+    is $parser->tests->size, 7, 'Tests parsed correctly' or diag explain $parser->tests->size;
     junit_ok $parser, $jobid, $basedir, ['details-LTP_syscalls_accept01.json', 'LTP-LTP_syscalls_accept01.txt'];
 };
 
@@ -1440,6 +1498,24 @@ subtest 'show parent group name and id when getting job details' => sub {
     my $job = $t->tx->res->json->{job};
     is $job->{parent_group}, 'Foo', 'parent group name was shown correctly';
     is $job->{parent_group_id}, $parent_group_id, 'parent group id was shown correctly';
+};
+
+subtest 'server-side limit has precedence over user-specified limit' => sub {
+    my $limits = OpenQA::App->singleton->config->{misc_limits};
+    $limits->{generic_max_limit} = 5;
+    $limits->{generic_default_limit} = 2;
+
+    $t->get_ok('/api/v1/jobs?limit=10', 'query with exceeding user-specified limit for jobs')->status_is(200);
+    my $jobs = $t->tx->res->json->{jobs};
+    is ref $jobs, 'ARRAY', 'data returned (1)' and is scalar @$jobs, 5, 'maximum limit for jobs is effective';
+
+    $t->get_ok('/api/v1/jobs?limit=3', 'query with exceeding user-specified limit for jobs')->status_is(200);
+    $jobs = $t->tx->res->json->{jobs};
+    is ref $jobs, 'ARRAY', 'data returned (2)' and is scalar @$jobs, 3, 'user limit for jobs is effective';
+
+    $t->get_ok('/api/v1/jobs', 'query with (low) default limit for jobs')->status_is(200);
+    $jobs = $t->tx->res->json->{jobs};
+    is ref $jobs, 'ARRAY', 'data returned (3)' and is scalar @$jobs, 2, 'default limit for jobs is effective';
 };
 
 # delete the job with a registered job module

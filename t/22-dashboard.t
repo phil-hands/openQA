@@ -539,14 +539,25 @@ subtest 'job parent groups with multiple version and builds' => sub {
 subtest 'extra plugin links' => sub {
     $t->app->config->{plugin_links}{operator}{Test1} = 'tests_overview';
     $t->app->config->{plugin_links}{operator}{Test2} = 'latest';
-    $t->app->config->{plugin_links}{admin}{Test3} = 'tests_export';
     $t->get_ok('/')->status_is(200)->element_exists('a[href*="/tests/overview"]')
       ->text_like('a[href*="/tests/overview"]', qr/Test1/)->element_exists('a[href*="/tests/latest"]')
-      ->text_like('a[href*="/tests/latest"]', qr/Test2/)->element_exists_not('a[href*="/tests/export"]');
+      ->text_like('a[href*="/tests/latest"]', qr/Test2/);
     $t->app->schema->resultset('Users')->search({username => 'percival'})->next->update({is_admin => 1});
     $t->get_ok('/')->status_is(200)->element_exists('a[href*="/tests/overview"]')
-      ->element_exists('a[href*="/tests/latest"]')->element_exists('a[href*="/tests/export"]')
-      ->text_like('a[href*="/tests/export"]', qr/Test3/);
+      ->element_exists('a[href*="/tests/latest"]');
+};
+
+subtest 'SUSE branding' => sub {
+    $t->app->config->{global}->{branding} = 'openqa.suse.de';
+    $t->get_ok('/')->status_is(200, 'main page');
+    $t->text_like('.jumbotron h2', qr/Welcome to.*at SUSE/, 'text from docbox rendered');
+    $t->attr_like('#sponsorbox a', 'href', qr/suse.com/, 'link to SUSE website');
+    $t->get_ok('/group_overview/1002')->status_is(200, 'group dashboard');
+    $t->get_ok('/parent_group_overview/' . $test_parent->id)->status_is(200, 'parent group dashboard');
+    $t->get_ok('/tests/99962/comments_ajax')->status_is(200, 'job comments');
+    my $btn_sel = '#commentForm .comment-toolbar a.fa-unlink';
+    $t->attr_like($btn_sel, 'title', qr/Add marker.*approved/, 'button title for adding review marker');
+    $t->attr_like($btn_sel, 'data-template', qr/\@review:acceptable_for/, 'button template for adding review marker');
 };
 
 done_testing;

@@ -5,9 +5,15 @@
 % use List::Util qw(sum);
 
 % content_for 'ready_function' => begin
+  window.overviewParallelChildrenCollapsableResultsSel = '<%= $parallel_children_collapsable_results_sel %>';
   setupOverview();
 % end
 
+% if ($limit_exceeded) {
+  <div class="alert alert-warning" id="max-jobs-limit" role="alert">
+    <i class="fa fa-exclamation-circle"></i> Only <%= $limit_exceeded %> results included, please narrow down your search parameters.
+  </div>
+% }
 <div>
     <h2>Test result overview</h2>
     <div id="summary" class="card <%= ($aggregated->{failed} + $aggregated->{not_complete}) ? 'border-danger' : 'border-success' %>">

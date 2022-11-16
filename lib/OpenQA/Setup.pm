@@ -18,6 +18,7 @@ use Time::Seconds;
 use Scalar::Util 'looks_like_number';
 use OpenQA::Constants qw(DEFAULT_WORKER_TIMEOUT MAX_TIMER);
 use OpenQA::JobGroupDefaults;
+use OpenQA::Jobs::Constants qw(OK_RESULTS);
 use OpenQA::Task::Job::Limit;
 
 my %CARRY_OVER_DEFAULTS = (lookup_depth => 10, state_changes_limit => 3);
@@ -47,8 +48,9 @@ sub read_config ($app) {
             worker_timeout => DEFAULT_WORKER_TIMEOUT,
             search_results_limit => 50000,
             auto_clone_regex =>
-'^(cache failure: |terminated prematurely: |api failure: Failed to register .* 503|backend died: .*VNC.*Connection timed out|QEMU terminated: Failed to allocate KVM HPT of order 25.* Cannot allocate memory)',
+'^(cache failure: |terminated prematurely: |api failure: Failed to register .* 503|backend died: .*VNC.*(timeout|timed out|refused)|QEMU terminated: Failed to allocate KVM HPT of order 25.* Cannot allocate memory)',
             force_result_regex => '',
+            parallel_children_collapsable_results => join(' ', OK_RESULTS),
         },
         rate_limits => {
             search => 5,
@@ -60,6 +62,7 @@ sub read_config ($app) {
             update_remote => '',
             update_branch => '',
             do_push => 'no',
+            do_cleanup => 'no',
         },
         'scheduler' => {
             max_job_scheduled_time => 7,
@@ -150,6 +153,20 @@ sub read_config ($app) {
             screenshot_cleanup_batches_per_minion_job => OpenQA::Task::Job::Limit::DEFAULT_BATCHES_PER_MINION_JOB,
             results_min_free_disk_space_percentage => undef,
             minion_job_max_age => ONE_WEEK,
+            generic_default_limit => 500,
+            generic_max_limit => 5000,
+            tests_overview_max_jobs => 500,
+            all_tests_default_finished_jobs => 500,
+            all_tests_max_finished_jobs => 5000,
+            list_templates_default_limit => 500,
+            list_templates_max_limit => 5000,
+            next_jobs_default_limit => 100,
+            next_jobs_max_limit => 1000,
+            previous_jobs_default_limit => 400,
+            previous_jobs_max_limit => 4000,
+            job_settings_max_recent_jobs => 20000,
+            assets_default_limit => 100000,
+            assets_max_limit => 200000,
         },
         archiving => {
             archive_preserved_important_jobs => 0,
@@ -240,6 +257,9 @@ sub read_config ($app) {
     if (my $minion_fail_job_blocklist = $config->{influxdb}->{ignored_failed_minion_jobs}) {
         $config->{influxdb}->{ignored_failed_minion_jobs} = [split(/\s+/, $minion_fail_job_blocklist)];
     }
+    my $results = delete $global_config->{parallel_children_collapsable_results};
+    $global_config->{parallel_children_collapsable_results_sel}
+      = ' .status' . join('', map { ":not(.result_$_)" } split(/\s+/, $results));
     _validate_worker_timeout($app);
 }
 

@@ -15,8 +15,6 @@ use Try::Tiny;
 
 has secrets => sub ($self) { $self->schema->read_application_secrets };
 
-sub log_name { $$ }
-
 # This method will run once at server start
 sub startup ($self) {
 
@@ -116,6 +114,9 @@ sub startup ($self) {
     $apik_auth->post('/')->to('api_key#create');
     $apik_auth->delete('/:apikeyid')->name('api_key')->to('api_key#destroy');
 
+    $logged_in->get('/appearance')->to('appearance#index')->name('appearance');
+    $logged_in->post('/appearance')->to('appearance#save');
+
     $r->get('/search')->name('search')->to(template => 'search/search');
 
     $r->get('/tests')->name('tests')->to('test#list');
@@ -133,7 +134,6 @@ sub startup ($self) {
     }
     $r->get('/tests/latest')->name('latest')->to('test#latest');
 
-    $r->get('/tests/export')->name('tests_export')->to('test#export');
     $r->get('/tests/list_ajax')->name('tests_ajax')->to('test#list_ajax');
     $r->get('/tests/list_running_ajax')->name('tests_ajax')->to('test#list_running_ajax');
     $r->get('/tests/list_scheduled_ajax')->name('tests_ajax')->to('test#list_scheduled_ajax');
@@ -341,6 +341,9 @@ sub startup ($self) {
     $api_ro->post('/jobs/cancel')->name('apiv1_cancel_jobs')->to('job#cancel');
     $api_ro->post('/jobs/restart')->name('apiv1_restart_jobs')->to('job#restart');
 
+    # api/v1/job_settings/jobs
+    $api_public_r->get('/job_settings/jobs')->name('apiv1_get_jobs_for_job_settings')->to('job_settings#jobs');
+
     my $job_r = $api_ro->any('/jobs/<jobid:num>');
     push @api_routes, $job_r;
     $api_public_r->any('/jobs/<jobid:num>')->name('apiv1_job')->to('job#show');
@@ -516,8 +519,8 @@ sub startup ($self) {
         });
 }
 
-sub schema { OpenQA::Schema->singleton }
+sub schema ($self) { OpenQA::Schema->singleton }
 
-sub run { __PACKAGE__->new->start }
+sub run () { __PACKAGE__->new->start }
 
 1;

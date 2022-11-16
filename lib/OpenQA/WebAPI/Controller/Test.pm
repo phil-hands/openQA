@@ -4,6 +4,7 @@
 package OpenQA::WebAPI::Controller::Test;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
+use OpenQA::App;
 use OpenQA::Utils;
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
@@ -15,16 +16,15 @@ use Mojo::File 'path';
 use File::Basename;
 use POSIX 'strftime';
 use Mojo::JSON qw(to_json decode_json);
+use List::Util qw(min);
 
 use constant DEPENDENCY_DEBUG_INFO => $ENV{OPENQA_DEPENDENCY_DEBUG_INFO};
 
-sub referer_check {
-    my ($self) = @_;
+sub referer_check ($self) {
     return $self->reply->not_found if (!defined $self->param('testid'));
     my $referer = $self->req->headers->header('Referer') // '';
-    if ($referer) {
-        $self->schema->resultset('Jobs')->mark_job_linked($self->param('testid'), $referer);
-    }
+    return 1 unless $referer;
+    $self->schema->resultset('Jobs')->mark_job_linked($self->param('testid'), $referer);
     return 1;
 }
 
@@ -46,16 +46,20 @@ sub get_match_param {
 sub list_ajax ($self) {
     my $scope = $self->param('relevant');
     $scope = $scope && $scope ne 'false' && $scope ne '0' ? 'relevant' : '';
+    my $limits = OpenQA::App->singleton->config->{misc_limits};
     my @jobs = $self->schema->resultset('Jobs')->complex_query(
         state => [OpenQA::Jobs::Constants::FINAL_STATES],
         scope => $scope,
         match => $self->get_match_param,
         groupid => $self->param('groupid'),
-        limit => ($self->param('limit') // 500),
-        order_by => [{-desc => 'me.t_finished'}, {-desc => 'me.id'}],
+        limit => min(
+            $limits->{all_tests_max_finished_jobs},
+            $self->param('limit') // $limits->{all_tests_default_finished_jobs}
+        ),
+        order_by => \'COALESCE(me.t_finished, me.t_updated) DESC, me.id DESC',
         columns => [
             qw(id MACHINE DISTRI VERSION FLAVOR ARCH BUILD TEST
-              state clone_id result group_id t_finished
+              state clone_id result group_id t_finished t_updated
               passed_module_count softfailed_module_count
               failed_module_count skipped_module_count
               externally_skipped_module_count
@@ -89,7 +93,7 @@ sub list_ajax ($self) {
                 flavor => $job->FLAVOR // '',
                 arch => $job->ARCH // '',
                 build => $job->BUILD // '',
-                testtime => ($job->t_finished // '') . 'Z',
+                testtime => ($job->t_finished // $job->t_updated // '') . 'Z',
                 result => $job->result,
                 group => $job->group_id,
                 comment_data => $rendered_data,
@@ -153,6 +157,7 @@ sub list_running_ajax {
                 arch => $job->ARCH // '',
                 build => $job->BUILD // '',
                 testtime => ($job->t_started // '') . 'Z',
+                result => $job->result,
                 group => $job->group_id,
                 state => $job->state,
                 progress => $job->progress_info,
@@ -163,6 +168,8 @@ sub list_running_ajax {
 
 sub list_scheduled_ajax {
     my ($self) = @_;
+    my $limits = OpenQA::App->singleton->config->{misc_limits};
+    my $limit = min($limits->{generic_max_limit}, $self->param('limit') // $limits->{generic_default_limit});
 
     my $scheduled = $self->schema->resultset('Jobs')->complex_query(
         state => [OpenQA::Jobs::Constants::PRE_EXECUTION_STATES],
@@ -175,6 +182,7 @@ sub list_scheduled_ajax {
               blocked_by_id priority
             )
         ],
+        limit => $limit,
     );
 
     my @scheduled;
@@ -193,6 +201,7 @@ sub list_scheduled_ajax {
                 arch => $job->ARCH // '',
                 build => $job->BUILD // '',
                 testtime => $job->t_created . 'Z',
+                result => $job->result,
                 group => $job->group_id,
                 state => $job->state,
                 blocked_by_id => $job->blocked_by_id,
@@ -202,9 +211,7 @@ sub list_scheduled_ajax {
     $self->render(json => {data => \@scheduled});
 }
 
-sub _stash_job {
-    my ($self, $args) = @_;
-
+sub _stash_job ($self, $args = undef) {
     return undef unless my $job_id = $self->param('testid');
     return undef unless my $job = $self->schema->resultset('Jobs')->find({id => $job_id}, $args);
     $self->stash(job => $job);
@@ -220,9 +227,7 @@ sub _stash_job_and_module_list {
     return $job;
 }
 
-sub details {
-    my ($self) = @_;
-
+sub details ($self) {
     return $self->reply->not_found unless my $job = $self->_stash_job;
 
     if ($job->should_show_autoinst_log) {
@@ -234,10 +239,7 @@ sub details {
     my @ret;
 
     for my $module (@{$modules->{modules}}) {
-        for my $step (@{$module->{details}}) {
-            delete $step->{needles};
-        }
-
+        delete $_->{needles} for @{$module->{details}};
         my $hash = {
             name => $module->{name},
             category => $module->{category},
@@ -247,9 +249,7 @@ sub details {
             flags => []};
 
         for my $flag (qw(important fatal milestone always_rollback)) {
-            if ($module->{$flag}) {
-                push(@{$hash->{flags}}, $flag);
-            }
+            push(@{$hash->{flags}}, $flag) if $module->{$flag};
         }
 
         push @ret, $hash;
@@ -267,16 +267,12 @@ sub details {
     return $self->render(json => {snippets => $snips, modules => \@ret});
 }
 
-sub external {
-    my ($self) = @_;
-
+sub external ($self) {
     $self->_stash_job_and_module_list or return $self->reply->not_found;
     $self->render('test/external');
 }
 
-sub live {
-    my ($self) = @_;
-
+sub live ($self) {
     my $job = $self->_stash_job or return $self->reply->not_found;
     my $current_user = $self->current_user;
     my $worker = $job->worker;
@@ -293,9 +289,7 @@ sub live {
     $self->render('test/live');
 }
 
-sub downloads {
-    my ($self) = @_;
-
+sub downloads ($self) {
     my $job = $self->_stash_job({prefetch => [qw(settings jobs_assets)]}) or return $self->reply->not_found;
     $self->stash(
         $job->result_dir
@@ -372,7 +366,7 @@ sub show_filesrc {
 sub comments {
     my ($self) = @_;
 
-    $self->_stash_job({prefetch => 'comments'}) or return $self->reply->not_found;
+    $self->_stash_job({prefetch => 'comments', order_by => 'comments.id'}) or return $self->reply->not_found;
     $self->render('test/comments');
 }
 
@@ -430,8 +424,11 @@ sub _show {
 sub job_next_previous_ajax ($self) {
     return $self->reply->not_found unless my $main_job = $self->_get_current_job;
     my $main_jobid = $main_job->id;
-    my $p_limit = $self->param('previous_limit') // 400;
-    my $n_limit = $self->param('next_limit') // 100;
+
+    my $limits = OpenQA::App->singleton->config->{misc_limits};
+    my $p_limit = min($limits->{previous_jobs_max_limit},
+        $self->param('previous_limit') // $limits->{previous_jobs_default_limit});
+    my $n_limit = min($limits->{next_jobs_max_limit}, $self->param('next_limit') // $limits->{next_jobs_default_limit});
 
     my $schema = $self->schema;
     my $jobs_rs = $schema->resultset('Jobs')->next_previous_jobs_query(
@@ -500,8 +497,7 @@ sub _calculate_preferred_machines {
 }
 
 # Take an job objects arrayref and prepare data structures for 'overview'
-sub prepare_job_results {
-    my ($self, $jobs) = @_;
+sub _prepare_job_results ($self, $all_jobs, $limit) {
     my %archs;
     my %results;
     my $aggregated = {
@@ -514,7 +510,7 @@ sub prepare_job_results {
         running => 0,
         unknown => 0
     };
-    my $preferred_machines = _calculate_preferred_machines($jobs);
+    my $preferred_machines = _calculate_preferred_machines($all_jobs);
 
     # read parameter for additional filtering
     my $failed_modules = $self->param_hash('failed_modules');
@@ -523,20 +519,31 @@ sub prepare_job_results {
     my $archs = $self->param_hash('arch');
     my $machines = $self->param_hash('machine');
 
+    my @jobs = grep {
+              (not $states or $states->{$_->state})
+          and (not $results or $results->{$_->result})
+          and (not $archs or $archs->{$_->ARCH})
+          and (not $machines or $machines->{$_->MACHINE})
+          and (not $failed_modules or $_->result eq OpenQA::Jobs::Constants::FAILED)
+    } @$all_jobs;
+    my $limit_exceeded = @jobs >= $limit;
+    @jobs = @jobs[0 .. ($limit - 1)] if $limit_exceeded;
+    my @jobids = map { $_->id } @jobs;
+
     # prefetch the number of available labels for those jobs
     my $schema = $self->schema;
-    my $comment_data = $schema->resultset('Comments')->comment_data_for_jobs($jobs, {bugdetails => 1});
+    my $comment_data = $schema->resultset('Comments')->comment_data_for_jobs(\@jobs, {bugdetails => 1});
 
     # prefetch test suite names from job settings
     my $job_settings
       = $schema->resultset('JobSettings')
-      ->search({job_id => {-in => [map { $_->id } @$jobs]}, key => {-in => [qw(JOB_DESCRIPTION TEST_SUITE_NAME)]}});
+      ->search({job_id => {-in => [map { $_->id } @jobs]}, key => {-in => [qw(JOB_DESCRIPTION TEST_SUITE_NAME)]}});
     my %settings_by_job_id;
     for my $js ($job_settings->all) {
         $settings_by_job_id{$js->job_id}->{$js->key} = $js->value;
     }
 
-    my %test_suite_names = map { $_->id => ($settings_by_job_id{$_->id}->{TEST_SUITE_NAME} // $_->TEST) } @$jobs;
+    my %test_suite_names = map { $_->id => ($settings_by_job_id{$_->id}->{TEST_SUITE_NAME} // $_->TEST) } @jobs;
 
     # prefetch descriptions from test suites
     my %desc_args = (in => [values %test_suite_names]);
@@ -544,14 +551,6 @@ sub prepare_job_results {
       = $schema->resultset('TestSuites')->search({name => \%desc_args}, {columns => [qw(name description)]});
     my %descriptions = map { $_->name => $_->description } @descriptions;
 
-    my @wanted_jobs = grep {
-              (not $states or $states->{$_->state})
-          and (not $results or $results->{$_->result})
-          and (not $archs or $archs->{$_->ARCH})
-          and (not $machines or $machines->{$_->MACHINE})
-          and (not $failed_modules or $_->result eq OpenQA::Jobs::Constants::FAILED)
-    } @$jobs;
-    my @jobids = map { $_->id } @wanted_jobs;
     my $failed_modules_by_job = $schema->resultset('JobModules')->search(
         {job_id => {-in => [@jobids]}, result => 'failed'},
         {select => [qw(name job_id)], order_by => 't_updated'},
@@ -571,7 +570,7 @@ sub prepare_job_results {
         push @{$children_by_job{$dep->parent_job_id}}, $dep;
         push @{$parents_by_job{$dep->child_job_id}}, $dep;
     }
-    foreach my $job (@wanted_jobs) {
+    foreach my $job (@jobs) {
         my $id = $job->id;
         my $result = $job->overview_result(
             $comment_data, $aggregated, $failed_modules,
@@ -613,7 +612,7 @@ sub prepare_job_results {
         my $description = $settings_by_job_id{$id}->{JOB_DESCRIPTION} // $descriptions{$test_suite_names{$id}};
         $results{$distri}{$version}{$flavor}{$test}{description} //= $description;
     }
-    return (\%archs, \%results, $aggregated);
+    return ($limit_exceeded, \%archs, \%results, $aggregated);
 }
 
 # appends the specified $distri and $version to $array_to_add_parts_to as string or if $raw as Mojo::ByteStream
@@ -645,6 +644,7 @@ sub _add_distri_and_version_to_summary {
 sub overview {
     my ($self) = @_;
     my ($search_args, $groups) = $self->compose_job_overview_search_args;
+    my $config = OpenQA::App->singleton->config;
     my $validation = $self->validation;
     $validation->optional('t')->datetime;
     my $until = $validation->param('t');
@@ -656,9 +656,13 @@ sub overview {
         distri => $search_args->{distri},
         groups => $groups,
         until => $until,
+        parallel_children_collapsable_results_sel => $config->{global}->{parallel_children_collapsable_results_sel},
     );
-    my @latest_jobs = $self->schema->resultset('Jobs')->complex_query(%$search_args)->latest_jobs($until);
-    ($stash{archs}, $stash{results}, $stash{aggregated}) = $self->prepare_job_results(\@latest_jobs);
+    my @jobs = $self->schema->resultset('Jobs')->complex_query(%$search_args)->latest_jobs($until);
+
+    my $limit = $config->{misc_limits}->{tests_overview_max_jobs};
+    (my $limit_exceeded, $stash{archs}, $stash{results}, $stash{aggregated})
+      = $self->_prepare_job_results(\@jobs, $limit);
 
     # determine distri/version from job results if not explicitly specified via search args
     my @distris = keys %{$stash{results}};
@@ -693,6 +697,7 @@ sub overview {
         %stash,
         summary_parts => \@summary_parts,
         only_distri => $only_distri,
+        limit_exceeded => $limit_exceeded ? $limit : undef
     );
     $self->respond_to(
         json => {json => \%stash},
@@ -713,43 +718,10 @@ sub latest {
     return $self->_show($job);
 }
 
-sub export {
-    my ($self) = @_;
-    $self->res->headers->content_type('text/plain');
-
-    my @groups = $self->schema->resultset("JobGroups")->search(undef, {order_by => 'name'});
-
-    for my $group (@groups) {
-        $self->write_chunk(sprintf("Jobs of Group '%s'\n", $group->name));
-        my @conds;
-        if ($self->param('from')) {
-            push(@conds, {id => {'>=' => $self->param('from')}});
-        }
-        if ($self->param('to')) {
-            push(@conds, {id => {'<' => $self->param('to')}});
-        }
-        my $jobs = $group->jobs->search({-and => \@conds}, {order_by => 'id'});
-        while (my $job = $jobs->next) {
-            next if ($job->result eq OpenQA::Jobs::Constants::OBSOLETED);
-            $self->write_chunk(sprintf("Job %d: %s is %s\n", $job->id, $job->name, $job->result));
-            my $modules = $job->modules->search(undef, {order_by => 'id'});
-            while (my $m = $modules->next) {
-                next if ($m->result eq OpenQA::Jobs::Constants::NONE);
-                $self->write_chunk(sprintf("  %s/%s: %s\n", $m->category, $m->name, $m->result));
-            }
-        }
-        $self->write_chunk("\n\n");
-    }
-    $self->finish('END');
-}
-
 sub module_fails {
     my ($self) = @_;
 
-    unless (defined $self->param('testid') and defined $self->param('moduleid')) {
-        return $self->reply->not_found;
-    }
-
+    return $self->reply->not_found unless defined $self->param('testid') and defined $self->param('moduleid');
     my $module = $self->app->schema->resultset("JobModules")->search(
         {
             job_id => $self->param('testid'),
@@ -763,18 +735,12 @@ sub module_fails {
     for my $detail (@{$module->results->{details}}) {
         $counter++;
         next unless $detail->{result} eq 'fail';
-        if ($first_failed_step == 0) {
-            $first_failed_step = $counter;
-        }
-        for my $needle (@{$detail->{needles}}) {
-            push @needles, $needle->{name};
-        }
+        $first_failed_step = $counter if $first_failed_step == 0;
+        push @needles, $_->{name} for @{$detail->{needles}};
     }
 
     # Fallback to first step
-    if ($first_failed_step == 0) {
-        $first_failed_step = 1;
-    }
+    $first_failed_step = 1 if $first_failed_step == 0;
 
     $self->render(
         json => {

@@ -226,7 +226,7 @@ it when running tests. Example:
 
 [source,sh]
 ----
-TEST_PG='DBI:Pg:dbname=openqa_test;host=/dev/shm/tpg' OPENQA_BASEDIR= prove -v t/14-grutasks.t
+TEST_PG='DBI:Pg:dbname=openqa_test;host=/dev/shm/tpg' OPENQA_BASEDIR= LC_ALL=C.utf8 LANGUAGE= prove -v t/14-grutasks.t
 ----
 
 In the case of wanting to tweak the tests as above, to speed up the test
@@ -526,13 +526,14 @@ client.conf and workers.ini.
 
 == Adding new authentication module
 
-OpenQA comes with two authentication modules providing authentication methods:
+openQA comes with two authentication modules providing authentication methods:
 OpenID and Fake (see <<Installing.asciidoc#authentication,User authentication>>).
 
 All authentication modules reside in `lib/OpenQA/Auth` directory. During
-OpenQA start, `[auth]/method` section of `/etc/openqa/openqa.ini` is read and according
-to its value (or default OpenID) OpenQA tries to require OpenQA::WebAPI::Auth::$method.
-If successful, module for given method is imported or the OpenQA ends with error.
+openQA start, the `[auth]/method` section of `/etc/openqa/openqa.ini` is read
+and according to its value (or default OpenID) openQA tries to require
+OpenQA::WebAPI::Auth::$method.  If successful, the module for the given method
+is imported or openQA ends with error.
 
 
 Each authentication module is expected to export `auth_login` and `auth_logout` functions. In case of request-response mechanism (as in
@@ -553,7 +554,7 @@ Authentication module is expected to return HASH:
 );
 ----
 
-Authentication module is expected to create or update user entry in OpenQA database
+Authentication module is expected to create or update user entry in openQA database
 after user validation. See included modules for inspiration.
 
 == Customize base directory
@@ -585,7 +586,13 @@ temporary PostgreSQL database used for testing. To do this step manually run
 `t/test_postgresql /dev/shm/tpg` to initialize a temporary PostgreSQL database
 and export the environment variable as instructed by that script.
 It is also possible to run a particular test, for example
-`prove t/api/01-workers.t`.
+`prove t/api/01-workers.t`. When using `prove` directly, make sure an English
+locale is set (e.g. `export LC_ALL=C.utf8 LANGUAGE=` before initializing the database
+and running `prove`).
+
+To keep the test database running after executing tests with the `Makefile`, add
+`KEEP_DB=1` to the make arguments. To access the test database, use
+`psql --host=/dev/shm/tpg openqa_test`.
 
 To watch the execution of the UI tests, set the environment variable `NOT_HEADLESS`.
 

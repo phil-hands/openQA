@@ -50,8 +50,8 @@ requires 'JSON::Validator';
 requires 'JavaScript::Minifier::XS', '>= 0.11';
 requires 'LWP::Protocol::https';
 requires 'LWP::UserAgent';
-requires 'Minion', '>= 10.22';
-requires 'Minion::Backend::SQLite', '>= 5.0.1';
+requires 'Minion', '>= 10.25';
+requires 'Minion::Backend::SQLite', '>= 5.0.7';
 requires 'Module::Load::Conditional';
 requires 'Module::Pluggable';
 requires 'Mojo::Base';
@@ -118,7 +118,7 @@ on 'test' => sub {
 on 'devel' => sub {
     requires 'Devel::Cover';
     requires 'Devel::Cover::Report::Codecovbash';
-    requires 'Perl::Tidy', '== 20220217';
+    requires 'Perl::Tidy', '== 20220613';
 
 };
 
