@@ -1,3 +1,10 @@
+openqa (4.6.1653336570.10bff0d-4) UNRELEASED; urgency=medium
+
+  * New upstream version 4.6.1653336570.10bff0d
+  * switch to dgit-debrebase workflow, and reconstruct separate patches
+
+ -- Philip Hands <phil@hands.com>  Wed, 16 Nov 2022 11:18:58 +0100
+
 openqa (4.6.1653336570.10bff0d-3) unstable; urgency=medium
 
   * bump Standards-Version
