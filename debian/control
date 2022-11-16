@@ -121,6 +121,7 @@ Build-Depends: debhelper-compat (= 13),
                libjs-jquery-timeago,
                libjs-popper.js (>= 1.16.1),
                node-jquery-ujs,
+               libcode-tidyall-perl,
 Standards-Version: 4.6.1
 Rules-Requires-Root: no
 Homepage: https://open.qa

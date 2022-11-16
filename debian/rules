@@ -70,28 +70,8 @@ execute_after_dh_fixperms:
 	chmod +x debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
 
 override_dh_auto_test:
-	# check things didn't change upstream
-	[ "$$(sed -n -e "/rm /,/^$$/{/^\(rm.*\| *\) t[/]/p}" dist/rpm/openQA.spec | md5sum)" = "11aeadc0dccdf73d1f723949a6a6118d  -" ]
-	# this snippet was generated thus: sed -n -e "/\(# we don't really need the tidy test\|# Skip tests not working currently\)/,/^$/{/./s/^/\t/;p}" dist/rpm/openQA.spec
-	# =-= BEGIN openQA.spec snippet
-	# we don't really need the tidy test
-	rm -f t/00-tidy.t
-
-	# Skip tests not working currently, or flaky, and Selenium tests
-	# https://progress.opensuse.org/issues/19652
-	# 01-test-utilities.t: https://progress.opensuse.org/issues/73162
-	# 17-labels_carry_over.t: https://progress.opensuse.org/issues/60209
-	# api/14-plugin_obs_rsync_async.t: https://progress.opensuse.org/issues/68836
-	# t/43-scheduling-and-worker-scalability.t: https://progress.opensuse.org/issues/96545
-	rm \
-	    t/01-test-utilities.t \
-	    t/17-labels_carry_over.t \
-	    t/25-cache-service.t \
-	    t/api/14-plugin_obs_rsync_async.t \
-	    t/43-scheduling-and-worker-scalability.t \
-	    t/ui/*.t
-
-	# =-= END openQA.spec snippet
+	# remeber, there used to be more disabled tests here, inspired by the RPM spec file.
+	# revert the change that introduced this comment if those tests start failing again.
 
 	# On debian we can't run test connecting to internet
 	rm -f ./t/40-script_openqa-clone-custom-git-refspec.t \
