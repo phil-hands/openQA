@@ -35,8 +35,6 @@ ASSETPACK_PLUGINS=$(grep 'AssetPack' lib/OpenQA/WebAPI.pm | awk -F '[()]' '{prin
 BUILD_CACHE="plugin AssetPack => { pipes => [qw(${ASSETPACK_PLUGINS})]} and app->asset->process()"
 BUILD_CACHE_OPTS='-Ilib/ -MMojolicious::Lite'
 
-MISSING=0
-
 generate() {
     # shellcheck disable=SC2039
     for _ in {1..3}; do
@@ -44,15 +42,8 @@ generate() {
         env MOJO_MODE="$1" perl $BUILD_CACHE_OPTS -e "$BUILD_CACHE" > /dev/null && return 0
         sleep 1
     done
-    MISSING=1
 }
 
 # Possibly requires a retry in case of CDN failures
 generate "test"
 generate "development"
-
-if [ "$GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS" ]; then
-    # for Debian packaging, fail at this point if any assets are missing
-    exit $MISSING
-fi
-exit 0

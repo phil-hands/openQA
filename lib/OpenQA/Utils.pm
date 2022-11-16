@@ -49,8 +49,6 @@ BEGIN {
         kde => 'https://bugs.kde.org/show_bug.cgi?id=',
         fdo => 'https://bugs.freedesktop.org/show_bug.cgi?id=',
         jsc => 'https://jira.suse.de/browse/',
-        deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
-        bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
     );
     %BUGURLS = (
         'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
@@ -65,7 +63,6 @@ BEGIN {
         $BUGREFS{kde} => 'kde',
         $BUGREFS{fdo} => 'fdo',
         $BUGREFS{jsc} => 'jsc',
-        $BUGREFS{deb} => 'deb',
     );
 
     $MARKER_REFS = join('|', keys %BUGREFS);

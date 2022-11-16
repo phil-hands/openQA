@@ -92,10 +92,6 @@ subtest 'Host' => sub {
     like $@, qr/Usage: openqa-cli api/, 'usage';
     is $api->host, 'https://openqa.opensuse.org', 'host';
 
-    eval { $api->run('--odn') };
-    like $@, qr/Usage: openqa-cli api/, 'usage';
-    is $api->host, 'https://openqa.debian.net', 'host';
-
     eval { $api->run(@host) };
     like $@, qr/Usage: openqa-cli api/, 'usage';
     is $api->host, $host, 'host';

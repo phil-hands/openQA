@@ -131,7 +131,6 @@ The easiest way to install openQA is from distribution packages.
 - For openSUSE, packages are available for Leap and Tumbleweed
 - For Fedora, packages are available in the official repositories for Fedora 23
 and later.
-- For Debian, packages are available in the official repositories for Debian Bookworm and later.
 
 === Development version repository
 
@@ -173,9 +172,6 @@ zypper in openQA
 
 # Fedora
 dnf install openqa openqa-httpd
-
-# Debian
-apt-get install openqa
 -------------------------------------------------------------------------------
 
 To install the openQA worker package use the following.
@@ -184,9 +180,6 @@ To install the openQA worker package use the following.
 -------------------------------------------------------------------------------
 # openSUSE
 zypper in openQA-worker
-
-# Debian
-apt-get install openqa-worker
 -------------------------------------------------------------------------------
 
 Different convenience packages exist for convenience in openSUSE, for example:
@@ -241,43 +234,28 @@ detailed setup instructions with all the details.
 === Apache proxy
 
 It is required to run openQA behind an http proxy (apache, nginx, etc..). See the
-*openqa.conf.template* config file in */etc/apache2/vhosts.d* (openSUSE),
-`/etc/httpd/conf.d` (Fedora) or `/etc/apache2/sites-available/openqa.conf.template` (Debian).
-To make everything work correctly on openSUSE or Debian, you
+*openqa.conf.template* config file in */etc/apache2/vhosts.d* (openSUSE) or
+`/etc/httpd/conf.d` (Fedora). To make everything work correctly on openSUSE, you
 need to enable the 'headers', 'proxy', 'proxy_http', 'proxy_wstunnel' and 'rewrite'
-modules using the command 'a2enmod'. On Debian you'll additionally need 'expires'.
-
-This is not necessary on Fedora.
+modules using the command 'a2enmod'. This is not necessary on Fedora.
 
 [source,sh]
 --------------------------------------------------------------------------------
-# openSUSE
+# openSUSE Only
 # You can check what modules are enabled by using 'a2enmod -l'
 a2enmod headers
 a2enmod proxy
 a2enmod proxy_http
 a2enmod proxy_wstunnel
 a2enmod rewrite
-
-# Debian
-# You can check what modules are enabled by using 'a2enmod -l'
-a2enmod headers
-a2enmod proxy
-a2enmod proxy_http
-a2enmod proxy_wstunnel
-a2enmod rewrite
-a2enmod expires
 --------------------------------------------------------------------------------
 
-For a basic setup, you can copy *openqa.conf.template* to *openqa.conf* and modify the `ServerName` setting if required. This will direct all HTTP traffic to openQA.
+For a basic setup, you can copy *openqa.conf.template* to *openqa.conf* and modify the `ServerName` if required
+setting. This will direct all HTTP traffic to openQA.
 
 [source,sh]
 --------------------------------------------------------------------------------
-# openSUSE
 cp /etc/apache2/vhosts.d/openqa.conf.template /etc/apache2/vhosts.d/openqa.conf
-
-# Debian
-cp /etc/apache2/sites-available/openqa.conf.template /etc/apache2/sites-enabled/openqa.conf
 --------------------------------------------------------------------------------
 
 === TLS/SSL
@@ -760,19 +738,16 @@ configure where the shared storage is mounted. Example:
 [source,ini]
 --------------------------------------------------------------------------------
 [global]
-HOST = openqa.opensuse.org openqa.fedoraproject.org openqa.debian.net
+HOST = openqa.opensuse.org openqa.fedora.fedoraproject.org
 
 [openqa.opensuse.org]
 SHARE_DIRECTORY = /var/lib/openqa/opensuse
 
 [openqa.fedoraproject.org]
 SHARE_DIRECTORY = /var/lib/openqa/fedora
-
-[openqa.debian.net]
-SHARE_DIRECTORY = /var/lib/openqa/debian
 --------------------------------------------------------------------------------
 
-Configuring `SHARE_DIRECTORY` is not a hard requirement. Workers will try following
+Configuring `SHARE_DIRECTORY` is not a hard requirement. Worker will try following
 directories prior registering with openQA instance:
 
 1. `SHARE_DIRECTORY`
@@ -781,8 +756,8 @@ directories prior registering with openQA instance:
 4. `/var/lib/openqa`
 5. fail if none of above is available
 
-Once a worker registers to an openQA instance it checks for available jobs and starts
-accepting websockets commands. Workers accept jobs as they will come in, there
+Once worker registers to openQA instance it checks for available job and starts
+accepting websockets commands. Worker accepts jobs as they will come in, there
 is no priority, or other ordering, support at the moment.
 It is possible to mix local openQA instance with remote instances or use only
 remote instances.

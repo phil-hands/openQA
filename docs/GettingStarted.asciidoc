@@ -340,20 +340,17 @@ The personal configuration should be stored in a file
 the `client.conf`, i.e. sections for each machine, e.g. `localhost`.
 
 [[get-testing]]
-== Testing openSUSE, Fedora or Debian
+== Testing openSUSE or Fedora
 
-An easy way to start using openQA is to start testing openSUSE, Fedora or Debian as they
+An easy way to start using openQA is to start testing openSUSE or Fedora as they
 have everything setup and prepared to ease the initial deployment. If you want
 to play deeper, you can configure the whole openQA manually from scratch, but
 this document should help you to get started faster.
 
 === Getting tests
 
-First you need to get actual tests.
-
-==== OpenSUSE
-
-You can get openSUSE tests and needles (the expected results) from
+First you need to get actual tests. You can get openSUSE tests and needles (the
+expected results) from
 https://github.com/os-autoinst/os-autoinst-distri-opensuse[GitHub]. It belongs
 into the `/var/lib/openqa/tests/opensuse` directory. To make it easier, you can just
 run
@@ -365,8 +362,6 @@ run
 
 Which will download the tests to the correct location and will set the correct
 rights as well.
-
-==== Fedora
 
 Fedora's tests are also in https://pagure.io/fedora-qa/os-autoinst-distri-fedora[git]. To
 use them, you may do:
@@ -380,31 +375,6 @@ git clone https://pagure.io/fedora-qa/os-autoinst-distri-fedora.git
 ./templates --clean
 cd ..
 chown -R geekotest fedora/
---------------------------------------------------------------------------------
-
-==== Debian
-
-Debian's tests are in https://salsa.debian.org/qa/openqa/openqa-tests-debian.git[git]. To use them, you may do:
-
-NOTE: Roland: Phil, 'fetchneedles' is distributed as part of openqa-common. When I ran it for the first time, it tried to create '/var/lib/openqa/.ssh/known_hosts'. That was possible only after I did 'chown geekotest /var/lib/openqa'. What is the preferred workflow? Use 'fetchneedles' or run the commands directly? i.e. can the Debian instruction become: 'run fetchneedles, just like openSUSE?'
-NOTE: Roland: Phil, can 'python3-jsonschema' become a dependency of openqa-common? (i.e. to allow 'fifloader.py' to run)
-
-[source,sh]
---------------------------------------------------------------------------------
-# Run as root. Method 1 with fetchneedles
-apt-get install python3-jsonschema ## Can this be integrated in the package openqa-common?
-/usr/share/openqa/script/fetchneedles
-cd /var/lib/openqa/share/tests/debian
-./fifloader.py templates.fif.json --load --clean ## Can this be integrated into fetchneedles?
-
-# Run as root Method 2 without fetchneedles
-apt-get install python3-jsonschema
-cd /var/lib/openqa/share/tests
-git clone https://salsa.debian.org/qa/openqa/openqa-tests-debian.git debian
-cd debian
-./fifloader.py templates.fif.json --load --clean
-cd ..
-chown -R geekotest debian/
 --------------------------------------------------------------------------------
 
 === Getting openQA configuration
@@ -426,9 +396,6 @@ consider reading its help page (`--help`) for documentation on possible extra ar
 
 For Fedora, similarly, you can call:
 
-NOTE: Roland: Fedora team, this is outdated. There is no file 'templates' in your repo any more.
-NOTE: Roland: It is probably as in Debian: './fifloader.py templates.fif.json --load --update'
-
 [source,sh]
 --------------------------------------------------------------------------------
 /var/lib/openqa/share/tests/fedora/templates [--apikey API_KEY] [--apisecret API_SECRET]
@@ -439,13 +406,6 @@ Some Fedora tests require special hard disk images to be present in
 https://pagure.io/fedora-qa/createhdds[createhdds]
 repository can be used to create these. See the documentation in that repo
 for more information.
-
-For Debian, you can call:
-
-[source,sh]
---------------------------------------------------------------------------------
-./fifloader.py templates.fif.json --load --update
---------------------------------------------------------------------------------
 
 === Adding a new ISO to test
 
@@ -484,22 +444,6 @@ openqa-cli api -X POST isos \
          FLAVOR=Everything-boot-iso \
          ARCH=x86_64 \
          BUILD=Rawhide-20160308.n.0
---------------------------------------------------------------------------------
-
-For Debian, a sample run might be:
-
-NOTE: Roland: should these 3 examples be simplified? They are nearly duplicates
-
-[source,sh]
---------------------------------------------------------------------------------
-# Run the first test
-openqa-cli api -X POST isos \
-         ISO=debian-testing-amd64-netinst.iso \
-         DISTRI=debian \
-         VERSION=testing \
-         FLAVOR=netinst-iso \
-         ARCH=x86_64 \
-         BUILD=20220310_0422-testing-amd64
 --------------------------------------------------------------------------------
 
 More details on triggering tests can also be found in the

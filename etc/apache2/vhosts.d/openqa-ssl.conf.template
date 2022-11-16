@@ -1,12 +1,12 @@
 # sample apache config file for the ssl enabled openqa vhost.
 # At the very minimum you need to set the ServerName.
 
-# There is a matching file nearby for non-ssl vhosts (openqa.conf.template) that
-# describes how to set things up, which also applies when setting up SSL.
-#
-# For SSL, you'll also need to load:
+# Note that this file will be ignored unless "SSL" is added to
+# APACHE_SERVER_FLAGS in /etc/sysconfig/apache2 (at least under
+# openSUSE).
 
-# a2enmod ssl
+<IfDefine SSL>
+<IfDefine !NOSSL>
 
 <VirtualHost *:443>
 
@@ -26,3 +26,7 @@
     Include /etc/apache2/vhosts.d/openqa-common.inc
 
 </VirtualHost>
+
+</IfDefine>
+</IfDefine>
+

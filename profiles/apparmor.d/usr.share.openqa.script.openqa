@@ -84,13 +84,6 @@
   owner /var/lib/openqa/share/tests/** rwl,
   owner /var/lib/openqa/archive/** rwl,
 
-  # Debian specific access to local assets
-  /usr/share/fonts/*/fork-awesome/* r,
-  /usr/share/fonts-fork-awesome/css/* r,
-  /usr/share/javascript/** r,
-  /usr/share/sass/bootstrap/** r,
-  /usr/share/nodejs/** r,
-
 
   profile /usr/bin/ssh {
     #include <abstractions/base>
@@ -106,6 +99,61 @@
     /var/lib/openqa/.ssh/* rw,
 
   }
+
+  # Cover hook script "openqa-trigger-from-obs"
+
+  #include <abstractions/bash>
+  #include <abstractions/openssl>
+
+  /opt/openqa-trigger-from-obs/ r,
+  /opt/openqa-trigger-from-obs/** r,
+  /opt/openqa-trigger-from-obs/*:*/.* rw,
+  /opt/openqa-trigger-from-obs/*:*/*/.* rw,
+  /opt/openqa-trigger-from-obs/*:*/*.lst rw,
+  /opt/openqa-trigger-from-obs/*:*/*/*.lst rw,
+  /opt/openqa-trigger-from-obs/*:*/*products* rw,
+  /opt/openqa-trigger-from-obs/*:*/*/*products* rw,
+
+  /opt/os-autoinst-scripts/** rix,
+  /usr/share/openqa/script/client rix,
+  /usr/share/openqa/script/openqa-cli px,
+  /usr/share/openqa/script/openqa-clone-job mrix,
+  /usr/share/openqa/script/openqa-clone-job r,
+  /{usr/,}bin/{b,d}ash rix,
+  /usr/bin/cat rix,
+  /usr/bin/curl rix,
+  /usr/bin/date mrix,
+  /usr/bin/cp ix,
+  /usr/bin/dirname ix,
+  /usr/bin/env mrix,
+  /usr/bin/gawk mrix,
+  /usr/bin/grep mrix,
+  /usr/bin/head mrix,
+  /usr/bin/hxselect mrix,
+  /usr/bin/hxnormalize mrix,
+  /usr/bin/jq rix,
+  /usr/bin/mv ix,
+  /usr/bin/mktemp rix,
+  /usr/sbin/sendmail ix,
+  /etc/postfix/main.cf r,
+  /usr/sbin/postdrop ix,
+  /var/spool/postfix/maildrop rw,
+  /var/spool/postfix/maildrop/* rwl,
+  /usr/bin/mailx ix,
+  /usr/bin/openqa-cli rix,
+  /usr/bin/perl ix,
+  /usr/bin/python3 ix,
+  /usr/bin/python3.6 ix,
+  /usr/bin/rm rix,
+  /usr/bin/rsync mrix,
+  /usr/bin/sed mrix,
+  /usr/bin/tac mrix,
+  /usr/bin/tail mrix,
+  /usr/bin/wget ix,
+
+  owner /var/log/openqa_gru wk,
+
+  /opt/openqa-trigger-from-obs/script/rsync.sh px -> /opt/openqa-trigger-from-obs/script/rsync.sh,
 
   # Site-specific additions and overrides. See local/README for details.
   #include <local/usr.share.openqa.script.openqa>

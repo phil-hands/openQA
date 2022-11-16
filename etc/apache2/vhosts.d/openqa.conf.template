@@ -17,7 +17,6 @@
 # a2enmod proxy_http
 # a2enmod proxy_wstunnel
 # a2enmod rewrite
-# a2enmod expires
 
 <VirtualHost *:80>
 
