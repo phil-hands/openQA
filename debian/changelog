@@ -1,9 +1,9 @@
-openqa (4.6.1668594742.66ecc7a70-1) UNRELEASED; urgency=medium
+openqa (4.6.1668594742.66ecc7a70-1) unstable; urgency=medium
 
   * Update to new upstream version 4.6.1668594742.66ecc7a70.
   * switch to dgit-debrebase workflow, and reconstruct separate patches
 
- -- Philip Hands <phil@hands.com>  Wed, 16 Nov 2022 13:04:59 +0100
+ -- Philip Hands <phil@hands.com>  Thu, 17 Nov 2022 11:14:56 +0100
 
 openqa (4.6.1653336570.10bff0d-3) unstable; urgency=medium
 
