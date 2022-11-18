@@ -67,7 +67,7 @@ execute_after_dh_install:
 
 execute_after_dh_fixperms:
 	chmod -x debian/openqa/etc/logrotate.d/openqa
-	chmod +x debian/openqa/usr/share/openqa/dbicdh/_common/upgrade/*-*/0*-*.pl
+	chmod +x debian/openqa/usr/share/openqa/dbicdh/*/upgrade/*-*/0*-*.pl
 
 override_dh_auto_test:
 	# remeber, there used to be more disabled tests here, inspired by the RPM spec file.
