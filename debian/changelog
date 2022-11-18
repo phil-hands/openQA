@@ -1,3 +1,9 @@
+openqa (4.6.1668594742.66ecc7a70-2) unstable; urgency=medium
+
+  * fix lintian script-not-executable
+
+ -- Philip Hands <phil@hands.com>  Fri, 18 Nov 2022 23:49:10 +0100
+
 openqa (4.6.1668594742.66ecc7a70-1) unstable; urgency=medium
 
   * Update to new upstream version 4.6.1668594742.66ecc7a70.
