@@ -47,12 +47,9 @@ sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
         return ();
     }
 
-    log_debug("+=" . ("-" x 16) . "=+");
-    log_debug("-> Scheduling new jobs.");
-    log_debug("\t Free workers: $free_worker_count/$worker_count");
-
     my $scheduled_jobs = $self->determine_scheduled_jobs;
-    log_debug("\t Scheduled jobs: " . scalar(keys %$scheduled_jobs));
+    log_debug(
+        "Scheduling: Free workers: $free_worker_count/$worker_count; Scheduled jobs: " . scalar(keys %$scheduled_jobs));
 
     # update the matching workers to the current free
     for my $jobinfo (values %$scheduled_jobs) {
@@ -470,14 +467,17 @@ sub _assign_multiple_jobs_to_worker ($self, $jobs, $worker, $directly_chained_jo
 sub incomplete_and_duplicate_stale_jobs ($self) {
     try {
         my $schema = OpenQA::Schema->singleton;
-        $schema->txn_do(
-            sub {
-                for my $job ($schema->resultset('Jobs')->stale_ones) {
-                    if ($job->state eq ASSIGNED) {
-                        $job->reschedule_state;
-                        next;
-                    }
+        for my $job ($schema->resultset('Jobs')->stale_ones) {
+            $schema->txn_do(
+                sub {
+                    # skip if the worker meanwhile showed up
                     my $worker = $job->assigned_worker // $job->worker;
+                    return if $worker && !$worker->dead;
+
+                    # set jobs not touched by the worker so far back to scheduled
+                    return if $job->state eq ASSIGNED && $job->reschedule_state;
+
+                    # consider other jobs incomplete
                     my $worker_info = defined $worker ? ('worker ' . $worker->name) : 'worker';
                     $job->done(
                         result => OpenQA::Jobs::Constants::INCOMPLETE,
@@ -490,8 +490,8 @@ sub incomplete_and_duplicate_stale_jobs ($self) {
                     else {
                         log_warning(sprintf('Dead job %d aborted as incomplete', $job->id));
                     }
-                }
-            });
+                });
+        }
     }
     catch {
         log_info("Failed stale job detection: $_");

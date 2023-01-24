@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::API::V1::Bug;
-use Mojo::Base 'Mojolicious::Controller';
+use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use OpenQA::App;
 use OpenQA::Utils;
@@ -50,43 +50,41 @@ Note: Only one of "refreshable" and "created_since" can be used at the same time
 
 =cut
 
-sub list {
-    my ($self) = @_;
-    my $limits = OpenQA::App->singleton->config->{misc_limits};
-    my $limit = min($limits->{generic_max_limit}, $self->param('limit') // $limits->{generic_default_limit});
-
+sub list ($self) {
     my $validation = $self->validation;
     $validation->optional('refreshable')->num(0, 1);
     $validation->optional('delta')->num(0);
     $validation->optional('created_since')->num(0);
+    $validation->optional('limit')->num;
+    $validation->optional('offset')->num;
     return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
-    my $schema = $self->schema;
-    my $bugs;
+    my $limits = OpenQA::App->singleton->config->{misc_limits};
+    my $limit = min($limits->{generic_max_limit}, $validation->param('limit') // $limits->{generic_default_limit});
+    my $offset = $validation->param('offset') // 0;
+
+    my $query = {};
     if ($validation->param('refreshable')) {
         my $delta = $validation->param('delta') || ONE_HOUR;
-        $bugs = $schema->resultset("Bugs")->search(
-            {
-                -or => {
-                    refreshed => 0,
-                    t_updated => {'<=' => time2str('%Y-%m-%d %H:%M:%S', time - $delta, 'UTC')}
-                },
-                existing => 1
+        $query = {
+            -or => {
+                refreshed => 0,
+                t_updated => {'<=' => time2str('%Y-%m-%d %H:%M:%S', time - $delta, 'UTC')}
             },
-            {rows => $limit});
+            existing => 1
+        };
     }
     elsif (my $delta = $validation->param('created_since')) {
-        $bugs = $schema->resultset("Bugs")->search(
-            {
-                t_created => {'>=' => time2str('%Y-%m-%d %H:%M:%S', time - $delta, 'UTC')}
-            },
-            {rows => $limit});
-    }
-    else {
-        $bugs = $schema->resultset("Bugs")->search({}, {rows => $limit});
+        $query = {t_created => {'>=' => time2str('%Y-%m-%d %H:%M:%S', time - $delta, 'UTC')}};
     }
 
-    my %ret = map { $_->id => $_->bugid } $bugs->all;
+    my @all = $self->schema->resultset('Bugs')->search($query, {rows => $limit + 1, offset => $offset})->all;
+
+    # Pagination
+    pop @all if my $has_more = @all > $limit;
+    $self->pagination_links_header($limit, $offset, $has_more);
+
+    my %ret = map { $_->id => $_->bugid } @all;
     $self->render(json => {bugs => \%ret});
 }
 
@@ -103,9 +101,7 @@ existing bug or not, and the date when the bug was last updated in the system.
 
 =cut
 
-sub show {
-    my ($self) = @_;
-
+sub show ($self) {
     my $bug = $self->schema->resultset("Bugs")->find($self->param('id'));
     return $self->reply->not_found unless $bug;
 
@@ -126,9 +122,7 @@ is created with the bug values passed as arguments.
 
 =cut
 
-sub create {
-    my ($self) = @_;
-
+sub create ($self) {
     my $validation = $self->validation;
     $validation->required('bugid');
     $self->_validate_bug_values;
@@ -155,9 +149,7 @@ the id of the bug, or an error if the bug id is not found in the system.
 
 =cut
 
-sub update {
-    my ($self) = @_;
-
+sub update ($self) {
     my $bug = $self->schema->resultset("Bugs")->find($self->param('id'));
     return $self->reply->not_found unless $bug;
 
@@ -180,9 +172,7 @@ Removes a bug from the system given its bug id. Return 1 on success or not found
 
 =cut
 
-sub destroy {
-    my ($self) = @_;
-
+sub destroy ($self) {
     my $bug = $self->schema->resultset("Bugs")->find($self->param('id'));
     return $self->reply->not_found unless $bug;
 
@@ -201,9 +191,7 @@ Internal method to validate the values expected by B<create()> and B<update()>.
 
 =cut
 
-sub _validate_bug_values {
-    my ($self) = @_;
-
+sub _validate_bug_values ($self) {
     my $validation = $self->validation;
     $validation->optional('title');
     $validation->optional('priority');
@@ -230,9 +218,7 @@ B<update()>.
 
 =cut
 
-sub get_bug_values {
-    my ($self) = @_;
-
+sub get_bug_values ($self) {
     my $validation = $self->validation;
     return {
         title => $validation->param('title'),

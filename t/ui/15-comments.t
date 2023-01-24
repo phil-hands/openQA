@@ -471,6 +471,7 @@ subtest 'editing when logged in as regular user' => sub {
         $driver->get('/tests/99938#comments');
         wait_for_ajax(msg => 'comments tab for job 99938 loaded');
         no_edit_no_remove_on_other_comments_expected;
+        wait_for_element(selector => '#text', description => 'comment form is displayed');
         $driver->find_element_by_id('text')->send_keys('test by nobody');
         $driver->find_element_by_id('submitComment')->click();
         wait_for_ajax(msg => 'comment for job 99938 added by regular user');
@@ -488,8 +489,10 @@ subtest 'editing when logged in as regular user' => sub {
         only_edit_for_own_comments_expected;
 
         # pinned comments are not shown (pinning is only possible when commentator is operator)
+        wait_for_element(selector => '#text', description => 'comment form is displayed');
         $driver->find_element_by_id('text')->send_keys($description_test_message);
         $driver->find_element_by_id('submitComment')->click();
+        wait_for_ajax(msg => 'comment with pinning for group added by regular user');
         $driver->get($group_url);
         is(scalar @{$driver->find_elements('.pinned-comment-row')}, 1, 'there shouldn\'t appear more pinned comments');
 

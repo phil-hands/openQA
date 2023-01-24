@@ -323,24 +323,25 @@ sub scenario_description ($self) {
 sub worker_id ($self) { $self->worker ? $self->worker->id : 0 }
 
 sub reschedule_state ($self, $state = OpenQA::Jobs::Constants::SCHEDULED) {
+    # set job to $state/SCHEDULED if it is still just ASSIGNED (not SETUP/RUNNING yet)
+    # note: As this function is invoked as part of the stale job detection the job might
+    #       already be SETUP/RUNNING after all. In this case we need to abort.
+    my $jobs = $self->result_source->schema->resultset('Jobs');
+    my %cond = (id => $self->id, state => {-in => [SCHEDULED, ASSIGNED]});
+    my %update = (state => $state, result => NONE, t_started => undef, assigned_worker_id => undef);
+    return 0 if $jobs->search(\%cond)->update(\%update) == 0;
+
     # cleanup
     $self->set_property('JOBTOKEN');
     $self->release_networks();
     $self->owned_locks->delete;
     $self->locked_locks->update({locked_by => undef});
 
-    $self->update(
-        {
-            state => $state,
-            t_started => undef,
-            assigned_worker_id => undef,
-            result => NONE
-        });
-
     log_debug('Job ' . $self->id . " reset to state $state");
 
     # free the worker
     if (my $worker = $self->worker) { $worker->update({job_id => undef}) }
+    return 1;
 }
 
 sub log_debug_job ($self, $msg) { log_debug('[Job#' . $self->id . '] ' . $msg) }
@@ -550,6 +551,8 @@ sub missing_assets ($self) {
     } @relevant_assets;
     return [] unless @assets_query;
     my $assets = $self->result_source->schema->resultset('Assets');
+    my @undetermined_assets = $assets->search({-or => \@assets_query, size => \'is null'}, {order_by => 'id'});
+    $_->ensure_size for @undetermined_assets;
     my @existing_assets = $assets->search({-or => \@assets_query, size => \'is not null'});
     return [] if scalar @$parent_job_ids == 0 && scalar @assets_query == scalar @existing_assets;
     my %missing_assets = map { ("$_->{type}/$_->{name}" => 1) } @relevant_assets;
@@ -631,6 +634,16 @@ sub _create_clone ($self, $cluster_job_info, $clone, $prio, $skip_ok_result_chil
     return ($orig_id => $new_job);
 }
 
+sub _create_clone_with_parent ($res, $clones, $p, $dependency) {
+    $p = $clones->{$p}->id if defined $clones->{$p};
+    $res->parents->find_or_create({parent_job_id => $p, dependency => $dependency});
+}
+
+sub _create_clone_with_child ($res, $clones, $c, $dependency) {
+    $c = $clones->{$c}->id if defined $clones->{$c};
+    $res->children->find_or_create({child_job_id => $c, dependency => $dependency});
+}
+
 sub _create_clones ($self, $jobs, @clone_args) {
     # create the clones
     my $rset = $self->result_source->resultset;
@@ -650,47 +663,17 @@ sub _create_clones ($self, $jobs, @clone_args) {
                     dependency => OpenQA::JobDependencies::Constants::PARALLEL,
                 });
         }
-        for my $p (@{$info->{chained_parents}}) {
-            # normally we don't clone chained parents, but you never know
-            $p = $clones{$p}->id if defined $clones{$p};
-            $res->parents->find_or_create(
-                {
-                    parent_job_id => $p,
-                    dependency => OpenQA::JobDependencies::Constants::CHAINED,
-                });
-        }
-        for my $p (@{$info->{directly_chained_parents}}) {
-            $p = $clones{$p}->id if defined $clones{$p};
-            $res->parents->find_or_create(
-                {
-                    parent_job_id => $p,
-                    dependency => OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED,
-                });
-        }
-        for my $c (@{$info->{parallel_children}}) {
-            $c = $clones{$c}->id if defined $clones{$c};
-            $res->children->find_or_create(
-                {
-                    child_job_id => $c,
-                    dependency => OpenQA::JobDependencies::Constants::PARALLEL,
-                });
-        }
-        for my $c (@{$info->{chained_children}}) {
-            $c = $clones{$c}->id if defined $clones{$c};
-            $res->children->find_or_create(
-                {
-                    child_job_id => $c,
-                    dependency => OpenQA::JobDependencies::Constants::CHAINED,
-                });
-        }
-        for my $c (@{$info->{directly_chained_children}}) {
-            $c = $clones{$c}->id if defined $clones{$c};
-            $res->children->find_or_create(
-                {
-                    child_job_id => $c,
-                    dependency => OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED,
-                });
-        }
+        # normally we don't clone chained parents, but you never know
+        _create_clone_with_parent($res, \%clones, $_, OpenQA::JobDependencies::Constants::CHAINED)
+          for @{$info->{chained_parents}};
+        _create_clone_with_parent($res, \%clones, $_, OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED)
+          for @{$info->{directly_chained_parents}};
+        _create_clone_with_child($res, \%clones, $_, OpenQA::JobDependencies::Constants::PARALLEL)
+          for @{$info->{parallel_children}};
+        _create_clone_with_child($res, \%clones, $_, OpenQA::JobDependencies::Constants::CHAINED)
+          for @{$info->{chained_children}};
+        _create_clone_with_child($res, \%clones, $_, OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED)
+          for @{$info->{directly_chained_children}};
 
         # when dependency network is recreated, associate assets
         $res->register_assets_from_settings;
@@ -979,19 +962,6 @@ sub abort ($self) {
     log_debug("Sending abort command to worker $worker_id for job $job_id");
     $worker->send_command(command => 'abort', job_id => $job_id);
     return 1;
-}
-
-sub set_running ($self) {
-    $self->update({state => RUNNING, t_started => now()}) if $self->state eq ASSIGNED && $self->result eq NONE;
-
-    if ($self->state eq RUNNING) {
-        $self->log_debug_job('is in the running state');
-        return 1;
-    }
-    else {
-        $self->log_debug_job("is already in state '" . $self->state . "' with result '" . $self->result . "'");
-        return 0;
-    }
 }
 
 sub set_property ($self, $key, $value = undef) {
@@ -1443,18 +1413,30 @@ sub failed_modules ($self) {
 }
 
 sub update_status ($self, $status) {
-    my $ret = {result => 1};
-
-    # that is a bit of an abuse as we don't have anything of the
-    # other payload
+    # set job to UPLOADING if it is still executed
+    # note: That is a bit of an abuse as we don't have anything of the
+    #       other payload.
+    my $jobs = $self->result_source->schema->resultset('Jobs');
     if ($status->{uploading}) {
-        $self->update({state => UPLOADING});
-        return $ret;
+        my %cond = (id => $self->id, state => {-in => [EXECUTION_STATES]});
+        return {result => $jobs->search(\%cond)->update({state => UPLOADING}) != 0};
     }
+
+    # set job to RUNNING if it is still ASSIGNED/SETUP
+    my %cond = (id => $self->id, state => {-in => [ASSIGNED, SETUP]});
+    $jobs->search(\%cond)->update({state => RUNNING, t_started => now()});
+
+    # abort any further updates when we couldn't set the job to RUNNING
+    # note: That can be the case if the concurrently running stale job detection
+    #       wins the race updating the job state.
+    $self->discard_changes;
+    my $state = $self->state;
+    return {result => 0} unless $state eq RUNNING || $state eq UPLOADING;
 
     $self->append_log($status->{log}, "autoinst-log-live.txt");
     $self->append_log($status->{serial_log}, "serial-terminal-live.txt");
     $self->append_log($status->{serial_terminal}, "serial-terminal-live.txt");
+    $self->append_log($status->{serial_terminal_user}, "serial-terminal-live.txt");
     # delete from the hash so it becomes dumpable for debugging
     my $screen = delete $status->{screen};
     $self->save_screenshot($screen) if $screen;
@@ -1469,8 +1451,7 @@ sub update_status ($self, $status) {
               unless $self->update_module($name, $result->{$name}, \%known_image, \%known_files);
         }
     }
-    $ret->{known_images} = [sort keys %known_image];
-    $ret->{known_files} = [sort keys %known_files];
+    my $ret = {result => 1, known_images => [sort keys %known_image], known_files => [sort keys %known_files]};
     if (@failed_modules) {
         $ret->{error} = 'Failed modules: ' . join ', ', @failed_modules;
         $ret->{error_status} = 490;    # let the worker do its usual retries (see poo#91902)
@@ -1482,12 +1463,8 @@ sub update_status ($self, $status) {
         $assigned_worker->set_property(WORKER_HOSTNAME => ($status->{worker_hostname} // ''));
     }
 
-    $self->state(RUNNING) and $self->t_started(now()) if grep { $_ eq $self->state } (ASSIGNED, SETUP);
-    $self->update();
-
     # result=1 for the call, job_result for the current state
     $ret->{job_result} = $self->calculate_result();
-
     return $ret;
 }
 
@@ -1535,11 +1512,13 @@ sub register_assets_from_settings ($self) {
         $updated{$k} = $name;
     }
 
-    for my $asset_info (values %assets) {
+    # ensure assets are updated in a consistent order across multiple processes to avoid ordering deadlocks
+    for my $asset_info (sort { $a->{name} cmp $b->{name} } values %assets) {
         # avoid plain create or we will get unique constraint problems
         # in case ISO_1 and ISO_2 point to the same ISO
+        # note: Not updating the asset size here as doing it in this big transaction
+        #       would lead to deadlocks (see poo#120891).
         my $asset = $assets->find_or_create($asset_info);
-        $asset->ensure_size;
         $self->jobs_assets->find_or_create({asset_id => $asset->id});
     }
 
@@ -1817,7 +1796,7 @@ sub test_resultfile_list ($self) {
     for my $f (@filelist) {
         push(@$filelist_existing, $f) if -e "$testresdir/$f";
     }
-    for my $f (qw(serial_terminal.txt)) {
+    for my $f (qw(serial_terminal.txt serial_terminal_user.txt)) {
         push(@$filelist_existing, $f) if -s "$testresdir/$f";
     }
 

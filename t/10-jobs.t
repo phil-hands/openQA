@@ -781,21 +781,6 @@ subtest 'job with skipped modules' => sub {
     }
 };
 
-subtest 'job set_running()' => sub {
-    my %_settings = %settings;
-    $_settings{TEST} = 'L';
-    my $job = _job_create(\%_settings);
-    $job->update({state => OpenQA::Jobs::Constants::ASSIGNED});
-    is($job->set_running, 1, 'job was set to running');
-    is($job->state, OpenQA::Jobs::Constants::RUNNING, 'job state is now on running');
-    $job->update({state => OpenQA::Jobs::Constants::RUNNING});
-    is($job->set_running, 1, 'job already running');
-    is($job->state, OpenQA::Jobs::Constants::RUNNING, 'job state is now on running');
-    $job->update({state => 'foobar'});
-    is($job->set_running, 0, 'job not set to running');
-    is($job->state, 'foobar', 'job state is foobar');
-};
-
 $t->get_ok('/t99946')->status_is(302)->header_like(Location => qr{tests/99946});
 
 subtest 'delete job assigned as last use for asset' => sub {
@@ -851,6 +836,38 @@ subtest 'job setting based retriggering' => sub {
     }
     is $jobs->count, $jobs_nr + 3, 'job with retry configured + 2 retries have been triggered';
     is $jobs->find({id => $next_job_id - 1})->clone_id, undef, 'no clone exists for last retry';
+};
+
+subtest '"race" between status updates and stale job detection' => sub {
+    my $job = $jobs->create({TEST => 'test-job'});
+    is_deeply $job->update_status({}), {result => 0}, 'status update rejected for scheduled job';
+    is_deeply $job->update_status({uploading => 1}), {result => !!0},
+      'status update rejected for scheduled job (uploading)';
+    $job->discard_changes;
+    is $job->state, SCHEDULED, 'job is still scheduled';
+
+    $job->update({state => ASSIGNED});
+    is $job->reschedule_state, 1, 'assigned job can be set back to scheduled';
+    $job->discard_changes;
+    is $job->state, SCHEDULED, 'job is in fact scheduled again';
+
+    $job->update({state => ASSIGNED});
+    my $update = $job->update_status({});
+    is ref delete $update->{known_files}, 'ARRAY', 'known files returned';
+    is ref delete $update->{known_images}, 'ARRAY', 'known images returned';
+    is_deeply $update, {result => 1, job_result => INCOMPLETE}, 'status update accepted for assigned job (worker won)';
+    $job->discard_changes;
+    is $job->state, RUNNING, 'job is in fact running';
+    is $job->reschedule_state, 0, 'running job can NOT be set back to scheduled';
+    $job->discard_changes;
+    is $job->state, RUNNING, 'job is still running';
+
+    is_deeply $job->update_status({uploading => 1}), {result => 1}, 'job set to uploading';
+    $job->discard_changes;
+    is $job->state, UPLOADING, 'job is in fact uploading';
+    is $job->update_status({})->{result}, 1, 'status updates still possible if uploading';
+    $job->discard_changes;
+    is $job->state, UPLOADING, 'job is still uploading';
 };
 
 is $t->app->minion->jobs({states => ['failed']})->total, 0, 'No unexpected failed minion background jobs';

@@ -50,6 +50,7 @@ sub livelog_viewers { shift->{_livelog_viewers} }
 sub autoinst_log_offset { shift->{_autoinst_log_offset} }
 sub serial_log_offset { shift->{_serial_log_offset} }
 sub serial_terminal_offset { shift->{_serial_terminal_offset} }
+sub serial_terminal_user_offset { shift->{_serial_terminal_user_offset} }
 sub images_to_send { shift->{_images_to_send} }
 sub files_to_send { shift->{_files_to_send} }
 sub known_images { shift->{_known_images} }
@@ -77,6 +78,7 @@ sub new {
     $self->{_autoinst_log_offset} = 0;
     $self->{_serial_log_offset} = 0;
     $self->{_serial_terminal_offset} = 0;
+    $self->{_serial_terminal_user_offset} = 0;
     $self->{_images_to_send} = {};
     $self->{_files_to_send} = {};
     $self->{_known_images} = [];
@@ -445,7 +447,10 @@ sub _stop_step_4_upload ($self, $reason, $callback) {
             my @other = (
                 @{find_video_files($pooldir)->map('basename')->to_array},
                 COMMON_RESULT_FILES,
-                qw(serial0 video_time.vtt serial_terminal.txt virtio_console.log virtio_console1.log)
+                # NOTE: serial_terminal.txt is from svirt backend. But also
+                # virtio_console.log from qemu backend is renamed to
+                # serial_terminal.txt below.
+                qw(serial0 video_time.vtt serial_terminal.txt virtio_console.log virtio_console1.log virtio_console_user.log)
             );
             for my $other (@other) {
                 my $file = "$pooldir/$other";
@@ -455,7 +460,8 @@ sub _stop_step_4_upload ($self, $reason, $callback) {
                 # replace some file names
                 my $ofile = $file;
                 $ofile =~ s/serial0/serial0.txt/;
-                $ofile =~ s/virtio_console.log/serial_terminal.txt/;
+                $ofile =~ s/virtio_console(.*)\.log/serial_terminal$1.txt/;
+                $ofile =~ s/\.log/.txt/;
 
                 my %upload_parameter = (file => {file => $file, filename => basename($ofile)});
                 if (!$self->_upload_log_file_or_asset(\%upload_parameter)) {
@@ -814,6 +820,8 @@ sub _upload_results_step_0_prepare {
         $status{log} = $self->_log_snippet("$pool_directory/autoinst-log.txt", 'autoinst_log_offset');
         $status{serial_log} = $self->_log_snippet("$pool_directory/serial0", 'serial_log_offset');
         $status{serial_terminal} = $self->_log_snippet("$pool_directory/virtio_console.log", 'serial_terminal_offset');
+        $status{serial_terminal_user}
+          = $self->_log_snippet("$pool_directory/virtio_console_user.log", 'serial_terminal_user_offset');
         if (my $screen = $self->_read_last_screen) {
             $status{screen} = $screen;
         }
@@ -882,7 +890,7 @@ sub _upload_results_step_2_1_upload_images ($self) {
     my $images_to_send = $self->images_to_send;
     for my $md5 (keys %$images_to_send) {
         my $file = $images_to_send->{$md5};
-        _optimize_image($self->_result_file_path($file));
+        _optimize_image($self->_result_file_path($file), $self->{_settings});
 
         my %args
           = (file => {file => $self->_result_file_path($file), filename => $file}, image => 1, thumb => 0, md5 => $md5);
@@ -890,7 +898,7 @@ sub _upload_results_step_2_1_upload_images ($self) {
 
         my $thumb = $self->_result_file_path(".thumbs/$file");
         next unless -f $thumb;
-        _optimize_image($thumb);
+        _optimize_image($thumb, $self->{_settings});
         my %thumb_args = (file => {file => $thumb, filename => $file}, image => 1, thumb => 1, md5 => $md5);
         $self->_upload_log_file(\%thumb_args);
     }
@@ -1249,12 +1257,17 @@ sub _log_snippet {
 }
 
 sub _optimize_image {
-    my ($image) = @_;
+    my ($image, $job_settings) = @_;
     log_debug("Optimizing $image");
     {
-        # treat as "best-effort". If optipng is not found, ignore
+        # treat as "best-effort". If no pngquant nor optipng is found, ignore
         no warnings;
-        system('optipng', '-quiet', '-o2', $image);
+        if ($job_settings->{USE_PNGQUANT}) {
+            system('pngquant', '--force', '--output', $image, $image);
+        }
+        else {
+            system('optipng', '-quiet', '-o2', $image) if ($? == -1);
+        }
     }
     return undef;
 }

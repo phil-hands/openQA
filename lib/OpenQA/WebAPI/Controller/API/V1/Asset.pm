@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebAPI::Controller::API::V1::Asset;
-use Mojo::Base 'Mojolicious::Controller';
+use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use DBIx::Class::ResultClass::HashRefInflator;
 use OpenQA::App;
@@ -59,15 +59,28 @@ as its id, name, timestamp of creation and type is included.
 
 =cut
 
-sub list {
-    my $self = shift;
+sub list ($self) {
     my $schema = $self->schema;
     my $limits = OpenQA::App->singleton->config->{misc_limits};
-    my $limit = min($limits->{assets_max_limit}, $self->param('limit') // $limits->{assets_default_limit});
 
-    my $rs = $schema->resultset("Assets")->search({}, {rows => $limit});
+    my $validation = $self->validation;
+    $validation->optional('limit')->num;
+    $validation->optional('offset')->num;
+    return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
+
+    my $limit = min($limits->{assets_max_limit}, $validation->param('limit') // $limits->{assets_default_limit});
+    my $offset = $validation->param('offset') // 0;
+
+    # We request one more than the limit to check if there are more results for pagination
+    my $rs = $schema->resultset("Assets")->search({}, {rows => $limit + 1, offset => $offset});
     $rs->result_class('DBIx::Class::ResultClass::HashRefInflator');
-    $self->render(json => {assets => [$rs->all]});
+    my @all = $rs->all;
+
+    # Pagination
+    pop @all if my $has_more = @all > $limit;
+    $self->pagination_links_header($limit, $offset, $has_more);
+
+    $self->render(json => {assets => \@all});
 }
 
 sub trigger_cleanup {

@@ -88,7 +88,8 @@ like(
 my $worker = OpenQA::Worker->new({instance => 1, apikey => 'foo', apisecret => 'bar', verbose => 1, 'no-cleanup' => 1});
 ok($worker->no_cleanup, 'no-cleanup flag works');
 ok(my $settings = $worker->settings, 'settings instantiated');
-delete $settings->global_settings->{LOG_DIR};
+my $global_settings = $settings->global_settings;
+delete $global_settings->{LOG_DIR};
 combined_like { $worker->init }
 qr/Ignoring host.*Working directory does not exist/,
   'hosts with non-existent working directory ignored and error logged';
@@ -135,7 +136,6 @@ subtest 'capabilities' => sub {
     delete $worker->{_caps};
 
     subtest 'deduce worker class from CPU architecture' => sub {
-        my $global_settings = $worker->settings->global_settings;
         delete $global_settings->{WORKER_CLASS};
         $global_settings->{ARCH} = 'aarch64';
 
@@ -494,6 +494,32 @@ subtest 'checking and cleaning pool directory' => sub {
     $worker_mock->unmock('is_qemu_running');
     $worker->_clean_pool_directory;
     ok(!-f $pid_file, 'PID file deleted when QEMU not running');
+};
+
+subtest 'checking worker address' => sub {
+    my $fqdn_lookup_mock = Test::MockModule->new('OpenQA::Worker::Settings');
+    ok !$settings->is_local_worker, 'not considered local initially because we have https://remotehost configured';
+    $global_settings->{WORKER_HOSTNAME} = undef;
+    $settings->{_worker_address_auto_detected} = 0;
+    $fqdn_lookup_mock->redefine(hostfqdn => undef);    # no hostname at all
+    $settings->auto_detect_worker_address('some-fallback');
+    is $global_settings->{WORKER_HOSTNAME}, 'some-fallback', 'fallback assigned without anything else';
+    like $worker->check_availability, qr/Unable.*worker address/, 'the fallback is not considered good enough';
+
+    $fqdn_lookup_mock->redefine(hostfqdn => 'foo.bar');
+    is $worker->check_availability, undef, 'no error if FQDN becomes available';
+    is $global_settings->{WORKER_HOSTNAME}, 'foo.bar', 'FQDN assigned';
+
+    $fqdn_lookup_mock->redefine(hostfqdn => 'foobar');    # only a "short" hostname available but not an FQDN
+    $global_settings->{WORKER_HOSTNAME} = 'foo';    # but assume WORKER_HOSTNAME has been specified explicitly …
+    undef $settings->{_worker_address_auto_detected};    # … by resetting auto-detected/required flags
+    is $worker->check_availability, undef, 'no error if worker address explicitly specified (also if no FQDN)';
+    is $global_settings->{WORKER_HOSTNAME}, 'foo', 'explicitly specified worker address not overridden';
+
+    $global_settings->{WORKER_HOSTNAME} = undef;    # assume WORKER_HOSTNAME has not been explicitly specified
+    $settings->{_local} = 1;    # and that it is a local worker
+    is $worker->check_availability, undef, 'a local worker does not require auto-detection to work';
+    is $global_settings->{WORKER_HOSTNAME}, 'localhost', '"localhost" assumed as WORKER_HOSTNAME for local worker';
 };
 
 subtest 'handle client status changes' => sub {

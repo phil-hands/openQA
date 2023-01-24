@@ -49,7 +49,7 @@
 # The following line is generated from dependencies.yaml
 %define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious::Plugin::AssetPack) >= 1.36
 # The following line is generated from dependencies.yaml
-%define common_requires perl >= 5.20.0 perl(Archive::Extract) > 0.7 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.20 perl(Regexp::Common) perl(Storable) perl(Time::Moment) perl(Try::Tiny)
+%define common_requires perl >= 5.20.0 perl(Archive::Extract) > 0.7 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.30 perl(Regexp::Common) perl(Storable) perl(Time::Moment) perl(Try::Tiny)
 # runtime requirements for the main package that are not required by other sub-packages
 # The following line is generated from dependencies.yaml
 %define main_requires %assetpack_requires git-core hostname perl(BSD::Resource) perl(Carp) perl(CommonMark) perl(Config::Tiny) perl(DBD::Pg) >= 3.7.4 perl(DBI) >= 1.632 perl(DBIx::Class) >= 0.082801 perl(DBIx::Class::DeploymentHandler) perl(DBIx::Class::DynamicDefault) perl(DBIx::Class::OptimisticLocking) perl(DBIx::Class::ResultClass::HashRefInflator) perl(DBIx::Class::Schema::Config) perl(DBIx::Class::Storage::Statistics) perl(Date::Format) perl(DateTime) perl(DateTime::Duration) perl(DateTime::Format::Pg) perl(Exporter) perl(Fcntl) perl(File::Basename) perl(File::Copy) perl(File::Copy::Recursive) perl(File::Path) perl(File::Spec) perl(FindBin) perl(Getopt::Long::Descriptive) perl(IO::Handle) perl(IPC::Run) perl(JSON::Validator) perl(LWP::UserAgent) perl(Module::Load::Conditional) perl(Module::Pluggable) perl(Mojo::Base) perl(Mojo::ByteStream) perl(Mojo::IOLoop) perl(Mojo::JSON) perl(Mojo::Pg) perl(Mojo::RabbitMQ::Client) >= 0.2 perl(Mojo::URL) perl(Mojo::Util) perl(Mojolicious::Commands) perl(Mojolicious::Plugin) perl(Mojolicious::Static) perl(Net::OpenID::Consumer) perl(POSIX) perl(Pod::POM) perl(SQL::Translator) perl(Scalar::Util) perl(Sort::Versions) perl(Text::Diff) perl(Time::HiRes) perl(Time::ParseDate) perl(Time::Piece) perl(Time::Seconds) perl(URI::Escape) perl(YAML::PP) >= 0.026 perl(YAML::XS) perl(aliased) perl(base) perl(constant) perl(diagnostics) perl(strict) perl(warnings)
@@ -190,6 +190,8 @@ Requires(post): os-autoinst >= 4.6
 Recommends:     qemu
 # Needed for caching - not required if caching not used...
 Recommends:     rsync
+# Optionally enabled with USE_PNGQUANT=1
+Recommends:     pngquant
 %if 0%{?suse_version} >= 1330
 Requires(pre):  group(nogroup)
 %endif
@@ -222,6 +224,7 @@ Summary:        Helper package to ease setup of postgresql DB
 Group:          Development/Tools/Other
 Requires:       %name
 Requires:       postgresql-server
+BuildRequires:  postgresql-server
 Supplements:    packageand(%name:postgresql-server)
 
 %description local-db
@@ -232,7 +235,8 @@ next to the webui.
 Summary:        Convenience package for a single-instance setup
 Group:          Development/Tools/Other
 Requires:       %{name}-local-db
-Requires:       %{name}-worker
+Requires:       %{name} = %{version}
+Requires:       %{name}-worker = %{version}
 Requires:       apache2
 
 %description single-instance
@@ -534,8 +538,11 @@ fi
 %{_unitdir}/openqa-webui.service
 %{_unitdir}/openqa-livehandler.service
 %{_unitdir}/openqa-gru.service
+%dir %{_unitdir}/openqa-gru.service.requires
 %{_unitdir}/openqa-scheduler.service
+%dir %{_unitdir}/openqa-scheduler.service.requires
 %{_unitdir}/openqa-websockets.service
+%dir %{_unitdir}/openqa-websockets.service.requires
 %{_unitdir}/openqa-enqueue-audit-event-cleanup.service
 %{_unitdir}/openqa-enqueue-audit-event-cleanup.timer
 %{_unitdir}/openqa-enqueue-asset-cleanup.service
@@ -706,6 +713,9 @@ fi
 
 %files local-db
 %{_unitdir}/openqa-setup-db.service
+%{_unitdir}/openqa-gru.service.requires/postgresql.service
+%{_unitdir}/openqa-scheduler.service.requires/postgresql.service
+%{_unitdir}/openqa-websockets.service.requires/postgresql.service
 %{_datadir}/openqa/script/setup-db
 %{_bindir}/openqa-setup-db
 

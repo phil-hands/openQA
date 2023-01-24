@@ -132,6 +132,7 @@ our @EXPORT = qw(
   check_df
   download_rate
   download_speed
+  is_host_local
 );
 
 our @EXPORT_OK = qw(
@@ -319,11 +320,9 @@ sub run_cmd_with_log {
     return run_cmd_with_log_return_error($cmd)->{status};
 }
 
-sub run_cmd_with_log_return_error {
-    my ($cmd, %args) = @_;
+sub run_cmd_with_log_return_error ($cmd, %args) {
     my $stdout_level = $args{stdout} // 'debug';
     my $stderr_level = $args{stderr} // 'debug';
-
     log_info('Running cmd: ' . join(' ', @$cmd));
     try {
         my ($stdin, $stdout_err, $stdout, $stderr) = ('') x 4;
@@ -607,19 +606,11 @@ sub human_readable_size {
 
     my $p = ($size < 0) ? '-' : '';
     $size = abs($size);
-    if ($size < 3000) {
-        return "$p$size Byte";
-    }
+    return "$p$size Byte" if $size < 3000;
     $size /= 1024.;
-    if ($size < 1024) {
-        return $p . _round_a_bit($size) . " KiB";
-    }
-
+    return $p . _round_a_bit($size) . " KiB" if $size < 1024;
     $size /= 1024.;
-    if ($size < 1024) {
-        return $p . _round_a_bit($size) . " MiB";
-    }
-
+    return $p . _round_a_bit($size) . " MiB" if $size < 1024;
     $size /= 1024.;
     return $p . _round_a_bit($size) . " GiB";
 }
@@ -953,5 +944,7 @@ sub download_speed ($start, $end, $bytes) {
     my $human = human_readable_size($rate);
     return "$human/s";
 }
+
+sub is_host_local ($host) { $host eq 'localhost' || $host eq '127.0.0.1' || $host eq '[::1]' }
 
 1;
