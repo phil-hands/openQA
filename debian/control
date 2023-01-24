@@ -186,7 +186,7 @@ Package: openqa-common
 Architecture: all
 Depends: ${misc:Depends},
          ${perl:Depends},
-         libmojolicious-perl (>= 9.20),
+         libmojolicious-perl (>= 9.30),
          libjs-chosen,
 ### for test&runtime
          libdbd-sqlite3-perl,
@@ -239,7 +239,7 @@ Depends: ${misc:Depends},
          libjson-perl,
          libconfig-inifiles-perl,
          libdata-dump-perl,
-         libmojolicious-perl (>= 9.20),
+         libmojolicious-perl (>= 9.30),
          openqa-common (= ${source:Version}),
 Suggests: python3,
           python3-future,
