@@ -2,6 +2,11 @@ etc/apache2/vhosts.d/openqa.conf.template
 etc/apache2/vhosts.d/openqa-common.inc
 etc/apache2/vhosts.d/openqa-ssl.conf.template
 
+# this seems to be part of a scheme to make postgresql optional on SUSE
+usr/lib/systemd/system/openqa-gru.service.requires/postgresql.service
+usr/lib/systemd/system/openqa-scheduler.service.requires/postgresql.service
+usr/lib/systemd/system/openqa-websockets.service.requires/postgresql.service
+
 # ignore openSUSE specific scripts
 usr/share/openqa/script/openqa-auto-update
 usr/share/openqa/script/openqa-bootstrap
