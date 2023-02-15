@@ -24,8 +24,8 @@ usr/lib/systemd/system/openqa-enqueue-bug-cleanup.timer /lib/systemd/system/
 usr/lib/systemd/system/openqa-setup-db.service /lib/systemd/system/
 usr/lib/systemd/system/openqa-reload-worker-auto-restart@.path /lib/systemd/system/
 usr/lib/systemd/system/openqa-reload-worker-auto-restart@.service /lib/systemd/system/
-debian/tmp/usr/lib/sysusers.d/geekotest.conf /lib/sysusers.d/
-usr/lib/tmpfiles.d/openqa-webui.conf /lib/tmpfiles.d/
+usr/lib/sysusers.d/geekotest.conf
+usr/lib/tmpfiles.d/openqa-webui.conf
 usr/share/openqa/lib/DBIx/
 usr/share/openqa/lib/OpenQA/LiveHandler.pm
 usr/share/openqa/lib/OpenQA/Resource/
