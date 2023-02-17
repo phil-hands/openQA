@@ -1,9 +1,9 @@
-openqa (4.6.1674490999.b00c12673-1.1) UNRELEASED; urgency=medium
+openqa (4.6.1674490999.b00c12673-2) unstable; urgency=medium
 
-  * Non-maintainer upload.
+  [ Michael Biebl ]
   * Install tmpfiles and sysusers configuration into correct paths.
 
- -- Michael Biebl <biebl@debian.org>  Thu, 02 Feb 2023 11:23:38 +0100
+ -- Philip Hands <phil@hands.com>  Fri, 17 Feb 2023 14:12:14 +0100
 
 openqa (4.6.1674490999.b00c12673-1) unstable; urgency=medium
 
