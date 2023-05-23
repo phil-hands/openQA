@@ -1,5 +1,8 @@
 include:
   - https://salsa.debian.org/salsa-ci-team/pipeline/raw/master/recipes/debian.yml
 
+# Everything here is 'Architecture: all', so disable these irrelevant tests:
 variables:
+  SALSA_CI_DISABLE_BLHC: 1
+  SALSA_CI_DISABLE_BUILD_PACKAGE_ANY: 1
   SALSA_CI_DISABLE_CROSSBUILD_ARM64: 1
