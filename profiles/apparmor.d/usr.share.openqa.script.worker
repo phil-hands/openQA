@@ -168,7 +168,7 @@
   /usr/share/qemu/* rk,
   /usr/share/seabios/* r,
   /usr/share/qemu/keymaps/* r,
-  /usr/share/OVMF/* rk,
+  /usr/share/{AA,O}VMF/* rk,
   /var/lib/apt/** r,
   /var/lib/dpkg/status r,
   /var/lib/openqa/cache/ r,
