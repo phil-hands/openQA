@@ -20,6 +20,90 @@ use List::Util qw(min);
 
 use constant DEPENDENCY_DEBUG_INFO => $ENV{OPENQA_DEPENDENCY_DEBUG_INFO};
 
+
+# inspired by assets/stylesheets/openqa_theme.scss
+# some colors changed to improve readability of white text
+my %BADGE_RESULT_COLORS = (
+    passed => '#4c1',
+    failed => '#e05d44',
+    parallel_failed => '#e05d44',
+    softfailed => '#EEB560',
+    incomplete => '#AF1E11',
+    timeout_exceeded => '#AF1E11',
+    blocked => '#9167b7',
+    scheduled => '#67A2B7',
+    cancelled => '#aaaaaa',
+    user_cancelled => '#aaaaaa',
+    assigned => '#8BDFFF',
+    running => '#8BDFFF',
+    uploading => '#7DC8E5',
+);
+
+# scaling factors for chars - determined by using a test page (see https://progress.opensuse.org/issues/124173#note-12)
+# showing 20x the same char in a badge with one badge for each char or symbol
+# and then adjusting the lookup table values until the size of each badge matched.
+my %BADGE_CHARLENS = (
+    a => 0.62,
+    b => 0.64,
+    c => 0.55,
+    d => 0.64,
+    e => 0.62,
+    f => 0.35,
+    g => 0.64,
+    h => 0.64,
+    i => 0.28,
+    j => 0.28,
+    k => 0.58,
+    l => 0.28,
+    m => 0.97,
+    n => 0.64,
+    o => 0.61,
+    p => 0.64,
+    q => 0.64,
+    r => 0.40,
+    s => 0.53,
+    t => 0.40,
+    u => 0.64,
+    v => 0.60,
+    w => 0.82,
+    x => 0.60,
+    y => 0.60,
+    z => 0.53,
+    A => 0.71,
+    B => 0.69,
+    C => 0.70,
+    D => 0.77,
+    E => 0.63,
+    F => 0.58,
+    G => 0.78,
+    H => 0.76,
+    I => 0.30,
+    J => 0.30,
+    K => 0.66,
+    L => 0.56,
+    M => 0.87,
+    N => 0.75,
+    O => 0.79,
+    P => 0.61,
+    Q => 0.79,
+    R => 0.70,
+    S => 0.64,
+    T => 0.60,
+    U => 0.73,
+    V => 0.69,
+    W => 0.99,
+    X => 0.69,
+    Y => 0.61,
+    Z => 0.69,
+    ' ' => 0.38,
+    '#' => 0.84,
+    ':' => 0.34,
+    '-' => 0.37,
+    '\.' => 0.32,
+    '\!' => 0.40,
+    '[0-9]' => 0.64
+);
+
 sub referer_check ($self) {
     return $self->reply->not_found if (!defined $self->param('testid'));
     my $referer = $self->req->headers->header('Referer') // '';
@@ -163,7 +247,10 @@ sub list_running_ajax {
                 progress => $job->progress_info,
             });
     }
-    $self->render(json => {data => \@running});
+    my %response = (data => \@running);
+    my $max_running = OpenQA::App->singleton->config->{scheduler}->{max_running_jobs};
+    $response{max_running_jobs} = $max_running if $max_running >= 0 && @running >= $max_running;
+    $self->render(json => \%response);
 }
 
 sub list_scheduled_ajax {
@@ -421,6 +508,35 @@ sub _show {
     $self->render('test/result');
 }
 
+sub badge ($self) { $self->_badge($self->_get_current_job(1)) }
+
+sub _badge ($self, $job) {
+    my $badge_text = 'Error 404: Job not found!';
+    my $badge_color = $BADGE_RESULT_COLORS{cancelled};
+    my $status = 404;
+
+    if ($job) {
+        my $result = $job->concise_result;
+        $badge_color = $BADGE_RESULT_COLORS{$result} // $BADGE_RESULT_COLORS{cancelled};
+        $badge_text = $result =~ s/_/ /rg;
+        $badge_text = $job->BUILD . ': ' . $badge_text if ($self->param('show_build'));
+        $status = 200;
+    }
+
+    # determine the approximate required width of the badge
+    my $charlen = 11;
+    my $badge_prefix_width = 85;
+    my $badge_suffix_padding = 2 * 5;
+    my $badge_width = $badge_prefix_width + $badge_suffix_padding + $charlen * length($badge_text);
+    for my $char (keys %BADGE_CHARLENS) {
+        $badge_width -= $charlen * (() = $badge_text =~ /$char/g) * (1 - $BADGE_CHARLENS{$char});
+    }
+
+    $self->stash({badge_text => $badge_text, badge_color => $badge_color, badge_width => $badge_width});
+    $self->res->headers->cache_control('max-age=0, no-cache');
+    $self->render('test/badge', format => 'svg', status => $status);
+}
+
 sub job_next_previous_ajax ($self) {
     return $self->reply->not_found unless my $main_job = $self->_get_current_job;
     my $main_jobid = $main_job->id;
@@ -437,6 +553,10 @@ sub job_next_previous_ajax ($self) {
         next_limit => $n_limit,
     );
     my @jobs = $jobs_rs->all;
+
+    my $failed_modules_by_job = $self->_fetch_failed_modules_by_jobs([map $_->id, @jobs]);
+    my ($children_by_job, $parents_by_job) = $self->_fetch_dependencies_by_jobs([map $_->id, @jobs]);
+
     my $comment_data = $self->schema->resultset('Comments')->comment_data_for_jobs(\@jobs, {bugdetails => 1});
     my $latest = 1;
     my @data;
@@ -447,6 +567,7 @@ sub job_next_previous_ajax ($self) {
         if (my $cd = $comment_data->{$job_id}) {
             $rendered_data = $self->_render_comment_data_for_ajax($job_id, $cd);
         }
+        my $dependencies = $job->dependencies($children_by_job->{$job_id} || [], $parents_by_job->{$job_id} || []);
         push(
             @data,
             {
@@ -456,12 +577,12 @@ sub job_next_previous_ajax ($self) {
                 distri => $job->DISTRI,
                 version => $job->VERSION,
                 build => $job->BUILD,
-                deps => $job->dependencies,
+                deps => $dependencies,
                 result => $job->result,
                 result_stats => $job->result_stats,
                 state => $job->state,
                 clone => $job->clone_id,
-                failedmodules => $job->failed_modules(),
+                failedmodules => $failed_modules_by_job->{$job_id},
                 iscurrent => $job_id == $main_jobid ? 1 : undef,
                 islatest => $job_id == $latest ? 1 : undef,
                 finished => $job->t_finished ? $job->t_finished->datetime() . 'Z' : undef,
@@ -551,35 +672,18 @@ sub _prepare_job_results ($self, $all_jobs, $limit) {
       = $schema->resultset('TestSuites')->search({name => \%desc_args}, {columns => [qw(name description)]});
     my %descriptions = map { $_->name => $_->description } @descriptions;
 
-    my $failed_modules_by_job = $schema->resultset('JobModules')->search(
-        {job_id => {-in => [@jobids]}, result => 'failed'},
-        {select => [qw(name job_id)], order_by => 't_updated'},
-    );
-    my %failed_modules_by_job;
-    push @{$failed_modules_by_job{$_->job_id}}, $_->name for $failed_modules_by_job->all;
-    my %children_by_job;
-    my %parents_by_job;
-    my $s = $schema->resultset('JobDependencies')->search(
-        {
-            -or => [
-                parent_job_id => {-in => \@jobids},
-                child_job_id => {-in => \@jobids},
-            ],
-        });
-    while (my $dep = $s->next) {
-        push @{$children_by_job{$dep->parent_job_id}}, $dep;
-        push @{$parents_by_job{$dep->child_job_id}}, $dep;
-    }
+    my $failed_modules_by_job = $self->_fetch_failed_modules_by_jobs(\@jobids);
+    my ($children_by_job, $parents_by_job) = $self->_fetch_dependencies_by_jobs(\@jobids);
     foreach my $job (@jobs) {
         my $id = $job->id;
         my $result = $job->overview_result(
             $comment_data, $aggregated, $failed_modules,
-            $failed_modules_by_job{$id} || [],
+            $failed_modules_by_job->{$id} || [],
             $self->param('todo')) or next;
         my $test = $job->TEST;
         my $flavor = $job->FLAVOR || 'sweet';
         my $arch = $job->ARCH || 'noarch';
-        $result->{deps} = to_json($job->dependencies($children_by_job{$id} || [], $parents_by_job{$id} || []));
+        $result->{deps} = to_json($job->dependencies($children_by_job->{$id} || [], $parents_by_job->{$id} || []));
 
         # Append machine name to TEST if it does not match the most frequently used MACHINE
         # for the jobs architecture
@@ -613,6 +717,34 @@ sub _prepare_job_results ($self, $all_jobs, $limit) {
         $results{$distri}{$version}{$flavor}{$test}{description} //= $description;
     }
     return ($limit_exceeded, \%archs, \%results, $aggregated);
+}
+
+# avoid running a SELECT for each job
+sub _fetch_failed_modules_by_jobs ($self, $ids) {
+    my $schema = $self->schema;
+    my $modules = $schema->resultset('JobModules')
+      ->search({job_id => {-in => $ids}, result => 'failed'}, {select => [qw(name job_id)], order_by => 't_updated'},);
+    my %failed;
+    push @{$failed{$_->job_id}}, $_->name for $modules->all;
+    return \%failed;
+}
+
+sub _fetch_dependencies_by_jobs ($self, $ids) {
+    my $schema = $self->schema;
+    my %children;
+    my %parents;
+    my $s = $schema->resultset('JobDependencies')->search(
+        {
+            -or => [
+                parent_job_id => {-in => $ids},
+                child_job_id => {-in => $ids},
+            ],
+        });
+    while (my $dep = $s->next) {
+        push @{$children{$dep->parent_job_id}}, $dep;
+        push @{$parents{$dep->child_job_id}}, $dep;
+    }
+    return (\%children, \%parents);
 }
 
 # appends the specified $distri and $version to $array_to_add_parts_to as string or if $raw as Mojo::ByteStream
@@ -704,19 +836,24 @@ sub overview {
         html => {template => 'test/overview'});
 }
 
-sub latest {
-    my ($self) = @_;
+sub _get_latest_job ($self) {
     my %search_args = (limit => 1);
     for my $arg (OpenQA::Schema::Result::Jobs::SCENARIO_WITH_MACHINE_KEYS) {
         my $key = lc $arg;
         next unless defined $self->param($key);
         $search_args{$key} = $self->param($key);
     }
-    my $job = $self->schema->resultset("Jobs")->complex_query(%search_args)->first;
+    return $self->schema->resultset("Jobs")->complex_query(%search_args)->first;
+}
+
+sub latest ($self) {
+    my $job = $self->_get_latest_job();
     return $self->render(text => 'No matching job found', status => 404) unless $job;
     $self->stash(testid => $job->id);
     return $self->_show($job);
 }
+
+sub latest_badge ($self) { $self->_badge($self->_get_latest_job) }
 
 sub module_fails {
     my ($self) = @_;

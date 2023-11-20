@@ -1,11 +1,11 @@
 #!BuildTag: openqa_dev
-FROM opensuse/leap:15.4
+FROM opensuse/leap:15.5
 
 # Define environment variable
 ENV NAME openQA test environment
 ENV LANG en_US.UTF-8
 
-RUN zypper ar -f -G 'http://download.opensuse.org/repositories/devel:/openQA:/Leap:/15.4/15.4' devel_openqa
+RUN zypper ar -f -G 'http://download.opensuse.org/repositories/devel:/openQA:/Leap:/15.5/15.5' devel_openqa
 
 # hadolint ignore=DL3037
 RUN zypper in -y -C \
@@ -32,11 +32,11 @@ RUN zypper in -y -C \
        postgresql-devel \
        qemu \
        qemu-tools \
+       bsdtar \
        tar \
        optipng \
        python3-base \
        python3-requests \
-       python3-future \
        sqlite3 \
        postgresql-server \
        which \
@@ -49,7 +49,6 @@ RUN zypper in -y -C \
        python3-yamllint \
        sudo \
        'perl(App::cpanminus)' \
-       'perl(Archive::Extract)' \
        'perl(BSD::Resource)' \
        'perl(CSS::Minifier::XS)' \
        'perl(Carp::Always)' \

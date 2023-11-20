@@ -42,21 +42,21 @@
 %endif
 # runtime requirements that also the testsuite needs
 %if %{with python_scripts}
-%define python_scripts_requires python3-base python3-requests python3-future openQA-client
+%define python_scripts_requires python3-base python3-requests openQA-client
 %else
 %define python_scripts_requires %{nil}
 %endif
 # The following line is generated from dependencies.yaml
 %define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious::Plugin::AssetPack) >= 1.36
 # The following line is generated from dependencies.yaml
-%define common_requires perl >= 5.20.0 perl(Archive::Extract) > 0.7 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.30 perl(Regexp::Common) perl(Storable) perl(Time::Moment) perl(Try::Tiny)
+%define common_requires ntp-daemon perl >= 5.20.0 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.340.0 perl(Regexp::Common) perl(Storable) perl(Time::Moment) perl(Try::Tiny)
 # runtime requirements for the main package that are not required by other sub-packages
 # The following line is generated from dependencies.yaml
-%define main_requires %assetpack_requires git-core hostname perl(BSD::Resource) perl(Carp) perl(CommonMark) perl(Config::Tiny) perl(DBD::Pg) >= 3.7.4 perl(DBI) >= 1.632 perl(DBIx::Class) >= 0.082801 perl(DBIx::Class::DeploymentHandler) perl(DBIx::Class::DynamicDefault) perl(DBIx::Class::OptimisticLocking) perl(DBIx::Class::ResultClass::HashRefInflator) perl(DBIx::Class::Schema::Config) perl(DBIx::Class::Storage::Statistics) perl(Date::Format) perl(DateTime) perl(DateTime::Duration) perl(DateTime::Format::Pg) perl(Exporter) perl(Fcntl) perl(File::Basename) perl(File::Copy) perl(File::Copy::Recursive) perl(File::Path) perl(File::Spec) perl(FindBin) perl(Getopt::Long::Descriptive) perl(IO::Handle) perl(IPC::Run) perl(JSON::Validator) perl(LWP::UserAgent) perl(Module::Load::Conditional) perl(Module::Pluggable) perl(Mojo::Base) perl(Mojo::ByteStream) perl(Mojo::IOLoop) perl(Mojo::JSON) perl(Mojo::Pg) perl(Mojo::RabbitMQ::Client) >= 0.2 perl(Mojo::URL) perl(Mojo::Util) perl(Mojolicious::Commands) perl(Mojolicious::Plugin) perl(Mojolicious::Static) perl(Net::OpenID::Consumer) perl(POSIX) perl(Pod::POM) perl(SQL::Translator) perl(Scalar::Util) perl(Sort::Versions) perl(Text::Diff) perl(Time::HiRes) perl(Time::ParseDate) perl(Time::Piece) perl(Time::Seconds) perl(URI::Escape) perl(YAML::PP) >= 0.026 perl(YAML::XS) perl(aliased) perl(base) perl(constant) perl(diagnostics) perl(strict) perl(warnings)
+%define main_requires %assetpack_requires bsdtar git-core hostname perl(BSD::Resource) perl(Carp) perl(CommonMark) perl(Config::Tiny) perl(DBD::Pg) >= 3.7.4 perl(DBI) >= 1.632 perl(DBIx::Class) >= 0.082801 perl(DBIx::Class::DeploymentHandler) perl(DBIx::Class::DynamicDefault) perl(DBIx::Class::OptimisticLocking) perl(DBIx::Class::ResultClass::HashRefInflator) perl(DBIx::Class::Schema::Config) perl(DBIx::Class::Storage::Statistics) perl(Date::Format) perl(DateTime) perl(DateTime::Duration) perl(DateTime::Format::Pg) perl(Exporter) perl(Fcntl) perl(File::Basename) perl(File::Copy) perl(File::Copy::Recursive) perl(File::Path) perl(File::Spec) perl(FindBin) perl(Getopt::Long::Descriptive) perl(IO::Handle) perl(IPC::Run) perl(JSON::Validator) perl(LWP::UserAgent) perl(Module::Load::Conditional) perl(Module::Pluggable) perl(Mojo::Base) perl(Mojo::ByteStream) perl(Mojo::IOLoop) perl(Mojo::JSON) perl(Mojo::Pg) perl(Mojo::RabbitMQ::Client) >= 0.2 perl(Mojo::URL) perl(Mojo::Util) perl(Mojolicious::Commands) perl(Mojolicious::Plugin) perl(Mojolicious::Plugin::OAuth2) perl(Mojolicious::Static) perl(Net::OpenID::Consumer) perl(POSIX) perl(Pod::POM) perl(SQL::Translator) perl(Scalar::Util) perl(Sort::Versions) perl(Text::Diff) perl(Time::HiRes) perl(Time::ParseDate) perl(Time::Piece) perl(Time::Seconds) perl(URI::Escape) perl(YAML::PP) >= 0.026 perl(YAML::XS) perl(aliased) perl(base) perl(constant) perl(diagnostics) perl(strict) perl(warnings)
 # The following line is generated from dependencies.yaml
 %define client_requires curl git-core jq perl(Getopt::Long::Descriptive) perl(IO::Socket::SSL) >= 2.009 perl(IPC::Run) perl(JSON::Validator) perl(LWP::Protocol::https) perl(LWP::UserAgent) perl(Test::More) perl(YAML::PP) >= 0.020 perl(YAML::XS)
 # The following line is generated from dependencies.yaml
-%define worker_requires openQA-client optipng os-autoinst < 5 perl(Capture::Tiny) perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.7 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
+%define worker_requires bsdtar openQA-client optipng os-autoinst < 5 perl(Capture::Tiny) perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.7 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
 # The following line is generated from dependencies.yaml
 %define build_requires %assetpack_requires rubygem(sass)
 
@@ -64,14 +64,16 @@
 # Do not require on this in individual sub-packages except for the devel
 # package.
 # The following line is generated from dependencies.yaml
-%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires ShellCheck curl jq os-autoinst-devel perl(App::cpanminus) perl(Mojolicious::Plugin::OAuth2) perl(Perl::Critic) perl(Perl::Critic::Freenode) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-setuptools python3-yamllint
+%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires ShellCheck curl jq openssh-common os-autoinst-devel perl(App::cpanminus) perl(Perl::Critic) perl(Perl::Critic::Freenode) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-setuptools python3-yamllint
 %ifarch x86_64
 %define qemu qemu qemu-kvm
 %else
 %define qemu qemu
 %endif
 # The following line is generated from dependencies.yaml
-%define devel_no_selenium_requires %build_requires %qemu %test_requires curl perl(Devel::Cover) perl(Devel::Cover::Report::Codecovbash) perl(Perl::Tidy) postgresql-devel rsync sudo tar xorg-x11-fonts
+%define cover_requires perl(Devel::Cover) perl(Devel::Cover::Report::Codecovbash)
+# The following line is generated from dependencies.yaml
+%define devel_no_selenium_requires %build_requires %cover_requires %qemu %test_requires curl perl(Perl::Tidy) postgresql-devel rsync sudo tar xorg-x11-fonts
 # The following line is generated from dependencies.yaml
 %define devel_requires %devel_no_selenium_requires chromedriver
 
@@ -115,7 +117,12 @@ Recommends:     perl(Mojolicious::Plugin::OAuth2)
 Recommends:     perl(IO::Uncompress::UnXz)
 # server needs to run an rsync server if worker caching is used
 Recommends:     rsync
-BuildArch:      noarch
+# We cannot use noarch because of the strict perl-Mojolicious-Plugin-AssetPack
+# requirement. With noarch it can happen that the rpm built on aarch64 gets
+# uploaded to download.opensuse.org, and aarch for some reason has an older
+# version of that module. Then when we install on Tumbleweed, it doesn't
+# have that older version anymore
+#BuildArch:      noarch
 ExcludeArch:    i586
 %{?systemd_requires}
 %if %{with tests}
@@ -160,7 +167,7 @@ Development package pulling in all build+test dependencies except chromedriver f
 Summary:        Development package pulling in all build+test dependencies
 Group:          Development/Tools/Other
 Requires:       %{devel_requires}
-%ifarch ppc ppc64 ppc64le s390x
+%ifarch s390x
 # missing chromedriver dependency
 ExclusiveArch:  do_not_build
 %endif
@@ -192,6 +199,8 @@ Recommends:     qemu
 Recommends:     rsync
 # Optionally enabled with USE_PNGQUANT=1
 Recommends:     pngquant
+# for Build Service Authentication
+Recommends:     openssh-common
 %if 0%{?suse_version} >= 1330
 Requires(pre):  group(nogroup)
 %endif
@@ -222,7 +231,7 @@ Additional scripts for the use of openQA in the python programming language.
 %package local-db
 Summary:        Helper package to ease setup of postgresql DB
 Group:          Development/Tools/Other
-Requires:       %name
+Requires:       %{name} = %{version}
 Requires:       postgresql-server
 BuildRequires:  postgresql-server
 Supplements:    packageand(%name:postgresql-server)
@@ -232,14 +241,27 @@ You only need this package if you have a local postgresql server
 next to the webui.
 
 %package single-instance
-Summary:        Convenience package for a single-instance setup
+Summary:        Convenience package for a single-instance setup using apache proxy
 Group:          Development/Tools/Other
+Provides:       %{name}-single-instance-apache
+Provides:       %{name}-single-instance-apache2
 Requires:       %{name}-local-db
 Requires:       %{name} = %{version}
 Requires:       %{name}-worker = %{version}
 Requires:       apache2
 
 %description single-instance
+Use this package to setup a local instance with all services provided together.
+
+%package single-instance-nginx
+Summary:        Convenience package for a single-instance setup using nginx proxy
+Group:          Development/Tools/Other
+Requires:       %{name}-local-db
+Requires:       %{name} = %{version}
+Requires:       %{name}-worker = %{version}
+Requires:       nginx
+
+%description single-instance-nginx
 Use this package to setup a local instance with all services provided together.
 
 %package bootstrap
@@ -280,6 +302,19 @@ Use this package to install and enable a systemd service for continuously
 upgrading the system if devel:openQA packages are stable and contain updates. It
 is complementary to auto-update which also reboots the system and does updates
 regardless of whether devel:openQA contains updates.
+
+%package munin
+Summary:        Munin scripts
+Group:          Development/Tools/Other
+Requires:       munin
+Requires:       munin-node
+Requires:       curl
+Requires:       perl
+
+%description munin
+Use this package to install munin scripts that allow to monitor some openQA
+statistics.
+
 
 %prep
 %setup -q -a1
@@ -328,6 +363,8 @@ export OPENQA_TEST_TIMEOUT_SCALE_CI=10
 # packaging
 export CONTAINER_TEST=0
 export HELM_TEST=0
+# We don't want fatal warnings during package building
+export PERL_TEST_WARNINGS_ONLY_REPORT_WARNINGS=1
 make test PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=%{buildroot}/DB
 rm -rf %{buildroot}/DB
 %endif
@@ -360,6 +397,12 @@ ln -s %{_datadir}/openqa/script/setup-db %{buildroot}%{_bindir}/openqa-setup-db
 %if %{with python_scripts}
 ln -s %{_datadir}/openqa/script/openqa-label-all %{buildroot}%{_bindir}/openqa-label-all
 %endif
+
+# munin
+install -d -m 755 %{buildroot}/%{_prefix}/lib/munin/plugins
+install -m 755 contrib/munin/plugins/minion %{buildroot}/%{_prefix}/lib/munin/plugins/openqa_minion_
+install -d -m 755 %{buildroot}/%{_sysconfdir}/munin/plugin-conf.d
+install -m 644 contrib/munin/config/minion.config %{buildroot}/%{_sysconfdir}/munin/plugin-conf.d/openqa-minion
 
 cd %{buildroot}
 grep -rl %{_bindir}/env . | while read file; do
@@ -434,7 +477,8 @@ if [ ! -e %{_localstatedir}/log/openqa ]; then
 fi
 
 if [ $1 -eq 1 ]; then
-    echo "### copy and edit %{_sysconfdir}/apache2/vhosts.d/openqa.conf.template!"
+    echo "### copy and edit %{_sysconfdir}/apache2/vhosts.d/openqa.conf.template if using apache!"
+    echo "### copy and edit %{_sysconfdir}/nginx/vhosts.d/openqa.conf.template if using nginx!"
     echo "### run sudo %{_datadir}/openqa/script/fetchneedles"
 else
     if [ -d "%{_localstatedir}/lib/openqa/share/testresults" ]; then
@@ -526,8 +570,14 @@ fi
 %dir %{_sysconfdir}/apache2
 %dir %{_sysconfdir}/apache2/vhosts.d
 %config %{_sysconfdir}/apache2/vhosts.d/openqa.conf.template
-%config %{_sysconfdir}/apache2/vhosts.d/openqa-common.inc
+%config(noreplace) %{_sysconfdir}/apache2/vhosts.d/openqa-common.inc
 %config %{_sysconfdir}/apache2/vhosts.d/openqa-ssl.conf.template
+# nginx vhost
+%dir %{_sysconfdir}/nginx
+%dir %{_sysconfdir}/nginx/vhosts.d
+%config %{_sysconfdir}/nginx/vhosts.d/openqa.conf.template
+%config(noreplace) %{_sysconfdir}/nginx/vhosts.d/openqa-locations.inc
+%config(noreplace) %{_sysconfdir}/nginx/vhosts.d/openqa-upstreams.inc
 # apparmor profile
 %dir %{_sysconfdir}/apparmor.d
 %config %{_sysconfdir}/apparmor.d/usr.share.openqa.script.openqa
@@ -647,6 +697,7 @@ fi
 %dir %{_unitdir}
 %{_systemdgeneratordir}
 %{_unitdir}/openqa-worker.target
+%{_unitdir}/openqa-worker.slice
 %{_unitdir}/openqa-worker@.service
 %{_unitdir}/openqa-worker-plain@.service
 %{_unitdir}/openqa-worker-cacheservice-minion.service
@@ -721,6 +772,8 @@ fi
 
 %files single-instance
 
+%files single-instance-nginx
+
 %files bootstrap
 %{_datadir}/openqa/script/openqa-bootstrap
 %{_datadir}/openqa/script/openqa-bootstrap-container
@@ -734,5 +787,15 @@ fi
 %dir %{_unitdir}
 %{_unitdir}/openqa-continuous-update.*
 %{_datadir}/openqa/script/openqa-continuous-update
+
+%files munin
+%defattr(-,root,root)
+%doc contrib/munin/config/minion.config
+%dir %{_prefix}/lib/munin
+%dir %{_prefix}/lib/munin/plugins
+%dir %{_sysconfdir}/munin
+%dir %{_sysconfdir}/munin/plugin-conf.d
+%{_prefix}/lib/munin/plugins/openqa_minion_
+%config(noreplace) %{_sysconfdir}/munin/plugin-conf.d/openqa-minion
 
 %changelog

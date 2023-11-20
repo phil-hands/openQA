@@ -15,7 +15,7 @@ BEGIN {
     $cachedir->make_path->realpath;
     $db_file = $cachedir->child('cache.sqlite');
     $ENV{OPENQA_CONFIG} = path($cached, 'config')->make_path;
-    path($ENV{OPENQA_CONFIG})->child("workers.ini")->spurt("
+    path($ENV{OPENQA_CONFIG})->child("workers.ini")->spew("
 [global]
 CACHEDIRECTORY = $cachedir
 CACHEWORKERS = 10
@@ -89,7 +89,7 @@ $cache_log = '';
 my $local_cache_dir = $cachedir->child('127.0.0.1');
 $local_cache_dir->make_path;
 for my $i (1 .. 3) {
-    my $file = $local_cache_dir->child("$i.qcow2")->spurt("\0" x 84);
+    my $file = $local_cache_dir->child("$i.qcow2")->spew("\0" x 84);
     if ($i % 2) {
         my $sql = "INSERT INTO assets (filename,size, etag, last_use, pending)
                 VALUES ( ?, ?, 'Not valid', strftime('\%s','now'), 0);";
@@ -297,12 +297,12 @@ $cache_log = '';
 subtest 'track assets' => sub {
     $cache->sqlite->db->query('delete from assets');
     my $fake_asset = $cachedir->child('test.qcow2');
-    $fake_asset->spurt('');
+    $fake_asset->spew('');
     ok -e $fake_asset, 'Asset is there';
     $cache->asset_lookup($fake_asset->to_string);
     ok !-e $fake_asset, 'Asset was purged since was not tracked';
 
-    $fake_asset->spurt('');
+    $fake_asset->spew('');
     ok -e $fake_asset, 'Asset is there';
     $cache->purge_asset($fake_asset->to_string);
     ok !-e $fake_asset, 'Asset was purged';
@@ -443,22 +443,29 @@ subtest 'checking limits' => sub {
     my $df_mock = Test::MockModule->new('Filesys::Df', no_auto => 1);
     $df_mock->redefine(df => {bavail => 100, blocks => 1000});
 
+    $cache->init;
     $cache->limit(0)->min_free_percentage(0);
     is $cache->_exceeds_limit(5000), 0, 'limits not exceeded when none specified';
 
+    $cache->init;
     $cache->limit(6000);
-    is $cache->_exceeds_limit(1000), 0, 'limits not exceeded as current size + needed size below limit';
-    is $cache->_exceeds_limit(5000), 1, 'limits exceeded as current size + needed size exceeds limit';
+    $cache->_increase(1000);
+    is $cache->_exceeds_limit(5000), 0, 'limits not exceeded as current size + needed size below limit';
+    is $cache->_exceeds_limit(5001), 1, 'limits exceeded as current size + needed size exceeds limit';
 
-    $cache->limit(0)->min_free_percentage(20);
-    is $cache->_exceeds_limit(100), 0, 'limits not exceeded with enough free disk space';
-    is $cache->_exceeds_limit(101), 1, 'limits exceeded when not enough free disk space';
+    $cache->init;
+    $cache->limit(0)->min_free_percentage(8);
+    is $cache->_exceeds_limit(100), 1, 'requesting all available free disk space';
+    is $cache->_exceeds_limit(101), 1, 'requesting more than the available free disk space';
+    is $cache->_exceeds_limit(20), 0, 'limits not exceeded with enough free disk space';
+    is $cache->_exceeds_limit(21), 1, 'limits exceeded when not enough free disk space';
 
     $df_mock->redefine(df => {});
     $cache_log = '';
-    is $cache->_exceeds_limit(101), 0, 'limit ignored when free disk space cannot be determined';
+    is $cache->_exceeds_limit(21), 0, 'limit ignored when free disk space cannot be determined';
     like $cache_log, qr/.*Unable to determine disk usage of.*/,
       'warning shown when free disk space cannot be determined';
+    $cache_log = '';
 };
 
 done_testing();

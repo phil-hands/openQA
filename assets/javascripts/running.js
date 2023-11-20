@@ -176,22 +176,6 @@ function updateTestStatus(newStatus) {
     });
 }
 
-function sendCommand(command) {
-  var wid = testStatus.workerid;
-  if (wid == null) return false;
-  var url = $('#canholder').data('url').replace('WORKERID', wid);
-  $.ajax({
-    url: url,
-    type: 'POST',
-    data: {command: command},
-    success: function (resp) {
-      setTimeout(function () {
-        updateStatus();
-      }, 0);
-    }
-  });
-}
-
 function updateStatus() {
   // prevent status updates when window.enableStatusUpdates is set by test environment
   if (window.enableStatusUpdates !== undefined && !window.enableStatusUpdates) {
@@ -258,7 +242,7 @@ function addDataListener(elem, callback) {
         var newStartIndex = newLength - maxLiveLogLength;
 
         // discard one (probably) partial line (in accordance with OpenQA::WebAPI::Controller::Running::streamtext)
-        for (; catData[newStartIndex] !== '\n'; ++newStartIndex);
+        for (; newStartIndex < catData.length && catData[newStartIndex] !== '\n'; ++newStartIndex);
 
         firstElement.innerHTML = catData.substr(newStartIndex);
       }

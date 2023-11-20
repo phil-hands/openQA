@@ -4,7 +4,6 @@
 # from dependencies.yaml
 ##################################################
 
-requires 'Archive::Extract', '> 0.7';
 requires 'BSD::Resource';
 requires 'CSS::Minifier::XS', '>= 0.01';
 requires 'Capture::Tiny';
@@ -64,10 +63,11 @@ requires 'Mojo::RabbitMQ::Client', '>= v0.2';
 requires 'Mojo::SQLite';
 requires 'Mojo::URL';
 requires 'Mojo::Util';
-requires 'Mojolicious', '>= 9.30';
+requires 'Mojolicious', '>= 9.34';
 requires 'Mojolicious::Commands';
 requires 'Mojolicious::Plugin';
 requires 'Mojolicious::Plugin::AssetPack', '>= 1.36';
+requires 'Mojolicious::Plugin::OAuth2';
 requires 'Mojolicious::Static';
 requires 'Net::OpenID::Consumer';
 requires 'POSIX';
@@ -97,7 +97,6 @@ requires 'warnings';
 
 on 'test' => sub {
     requires 'App::cpanminus';
-    requires 'Mojolicious::Plugin::OAuth2';
     requires 'Perl::Critic';
     requires 'Perl::Critic::Freenode';
     requires 'Selenium::Remote::Driver', '>= 1.23';
@@ -116,9 +115,7 @@ on 'test' => sub {
 };
 
 on 'devel' => sub {
-    requires 'Devel::Cover';
-    requires 'Devel::Cover::Report::Codecovbash';
-    requires 'Perl::Tidy', '== 20221112';
+    requires 'Perl::Tidy', '== 20230912.0.0';
 
 };
 

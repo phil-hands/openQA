@@ -7,6 +7,7 @@ use Mojo::Base 'Mojolicious::Controller', -signatures;
 use OpenQA::Schema;
 use OpenQA::Log qw(log_trace);
 use Mojo::Util qw(hmac_sha1_sum secure_compare);
+use Mojo::URL;
 
 sub check ($self) {
     if ($self->app->config->{no_localhost_auth}) {
@@ -120,6 +121,7 @@ sub _token_auth ($self, $reason, $userinfo) {
             if (my $api_key = $self->schema->resultset('ApiKeys')->find({key => $key})) {
                 my $user = $api_key->user;
                 my $name = $user->name;
+                $self->stash(webhook_validation_secret => join(':', $name, $key, $secret));
                 if ($user && secure_compare($name, $username)) {
                     return ($user, undef) if secure_compare($api_key->secret, $secret);
                     $log->debug("$reject_msg, wrong secret");
@@ -158,17 +160,15 @@ sub _key_auth ($self, $reason, $key) {
           = sprintf 'Rejecting authentication for user "%s" with ip "%s", valid key "%s", secret "%s"',
           $username, $self->tx->remote_address, $api_key->key, $api_key->secret;
         if (!_is_timestamp_valid($build_tx_timestamp, $timestamp)) {
-            $log->debug("$reject_msg, $reason");
-            $reason = 'timestamp mismatch';
+            $reason = 'timestamp mismatch - check whether clocks on the local host and the web UI host are in sync';
         }
         elsif (_is_expired($api_key)) {
-            $log->debug("$reject_msg, $reason");
             $reason = 'api key expired';
         }
         else {
-            $log->debug("$reject_msg, $reason");
             $reason = 'unknown error (wrong secret?)';
         }
+        $log->debug("$reject_msg, $reason");
     }
     elsif ($key) { $log->debug("API key \"$key\" not found") }
 
@@ -180,7 +180,9 @@ sub _valid_hmac ($self, $hash, $request, $build_tx_timestamp, $timestamp, $api_k
     return 0 if _is_expired($api_key);
     return 0 unless $api_key->secret;
 
-    my $sum = hmac_sha1_sum($request . $timestamp, $api_key->secret);
+    my $base_url = $self->app->config->{global}->{base_url};
+    my $base_path = $base_url ? Mojo::URL->new($base_url)->path->leading_slash(0) : '';
+    my $sum = hmac_sha1_sum($base_path . $request . $timestamp, $api_key->secret);
     return $sum eq $hash;
 }
 

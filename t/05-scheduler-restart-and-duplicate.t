@@ -3,12 +3,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Mojo::Base -signatures;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
-use OpenQA::Resource::Jobs;
+use OpenQA::Resource::Jobs qw(job_restart);
 use OpenQA::Resource::Locks;
 use OpenQA::Utils;
 use OpenQA::Test::Database;
@@ -27,18 +28,13 @@ embed_server_for_testing(
     client => OpenQA::WebSockets::Client->singleton,
 );
 
-sub list_jobs {
-    [map { $_->to_hash() } $schema->resultset('Jobs')->all];
+my $jobs_rs = $schema->resultset('Jobs');
+sub job_get_rs ($id) { $jobs_rs->find({id => $id}) }
+sub list_jobs () {
+    return [map { $_->to_hash() } $jobs_rs->all];
 }
-
-sub job_get_rs {
-    my ($id) = @_;
-    return $schema->resultset("Jobs")->find({id => $id});
-}
-
-sub job_get {
-    my $job = job_get_rs(@_);
-    return unless $job;
+sub job_get ($id) {
+    return undef unless my $job = job_get_rs($id);
     return $job->to_hash;
 }
 
@@ -133,12 +129,13 @@ subtest 'restart with (directly) chained child' => sub {
     );
     my $job_data_99926;
     subtest 'cluster jobs for 99937 which has one chained child and one chained parent' => sub {
+        job_get_rs(99926)->update({result => FAILED});
         is_deeply job_get_rs(99937)->cluster_jobs, \%expected_cluster,
-          'chained parent considered for restarting as its result is not ok';
+          'chained parent considered for restarting as its result is failed';
         job_get_rs(99926)->update({result => SOFTFAILED});
         $job_data_99926 = delete $expected_cluster{99926};
         is_deeply job_get_rs(99937)->cluster_jobs, \%expected_cluster,
-          'only child considered for restarting as the parent result is ok';
+          'only child considered for restarting as the parent result is not failed';
     };
 
     # restart the job
@@ -265,5 +262,93 @@ job_get_rs($job3->{id})->done(result => OpenQA::Jobs::Constants::INCOMPLETE);
 my $round5 = job_get_rs($round3->id)->auto_duplicate;
 ok(defined $round5, "manual-duplicate works");
 $job3 = job_get($round5->id);
+
+sub _print_job_cluster ($jobs) {
+    return undef unless $ENV{HARNESS_IS_VERBOSE};
+    my $cluster_jobs = $jobs->[0]->cluster_jobs;    # uncoverable
+    note 'job ' . $_->TEST . ': ' . $_->id for @$jobs;    # uncoverable
+    diag explain $cluster_jobs;    # uncoverable
+}
+
+subtest 'restarting one of two independent root jobs (only related indirectly via parallel dependency)' => sub {
+    # setup jobs with dependencies
+    my $root_1 = $jobs_rs->create({TEST => 'root1', state => RUNNING});
+    my $root_2 = $jobs_rs->create({TEST => 'root2', state => RUNNING});
+    my $parallel_parent = $jobs_rs->create({TEST => 'parallel-parent', state => SCHEDULED});
+    my $parallel_child = $jobs_rs->create({TEST => 'parallel-child', state => SCHEDULED});
+    my $nested_chained_child = $jobs_rs->create({TEST => 'nested-child', state => SCHEDULED});
+    my $chained_child = $jobs_rs->create({TEST => 'chained-child', state => SCHEDULED});
+    my $deps_rs = $schema->resultset('JobDependencies');
+    $deps_rs->create({parent_job_id => $root_1->id, child_job_id => $parallel_parent->id, dependency => CHAINED});
+    $deps_rs->create({parent_job_id => $root_2->id, child_job_id => $parallel_child->id, dependency => CHAINED});
+    $deps_rs->create({parent_job_id => $root_2->id, child_job_id => $chained_child->id, dependency => CHAINED});
+    $deps_rs->create(
+        {parent_job_id => $parallel_child->id, child_job_id => $nested_chained_child->id, dependency => CHAINED});
+    $deps_rs->create(
+        {parent_job_id => $parallel_parent->id, child_job_id => $parallel_child->id, dependency => PARALLEL});
+
+    # print the job cluster info to verify whether the setup is correct
+    my @jobs = ($root_1, $root_2, $parallel_parent, $parallel_child, $nested_chained_child, $chained_child);
+    $_->discard_changes for @jobs;
+    _print_job_cluster(\@jobs);
+
+    $schema->txn_begin;
+
+    # set root1 to INCOMPLETE first as it would happen in production
+    # note: This should stop/skip the parallel jobs and the nested chained child.
+    is $root_1->done(result => INCOMPLETE), INCOMPLETE, 'root1 set to INCOMPLETE';
+
+    # clone root1 and check whether dependencies are (not) cloned as expected
+    # note: In production this happens via a Minion job enqueued by `done` when the job is automatically restarted
+    #       or if a user restarts the job manually.
+    my $res = $root_1->auto_duplicate;
+    is ref $res, 'OpenQA::Schema::Result::Jobs', 'no error when duplicating root1' or diag explain $res;
+    my $cloned = $res->{cluster_cloned};
+    diag explain $cloned;
+    my @should_have_been_cloned = ($root_1, $parallel_parent, $parallel_child, $nested_chained_child);
+    my @should_not_have_been_cloned = ($root_2, $chained_child);
+    ok exists $cloned->{$_->id}, $_->TEST . ' has been cloned' for @should_have_been_cloned;
+    ok !exists $cloned->{$_->id}, $_->TEST . ' has not been cloned' for @should_not_have_been_cloned;
+
+    # verify the dependencies' states/results
+    my @should_have_been_skipped = ($parallel_parent, $parallel_child, $nested_chained_child);
+    $_->discard_changes for @jobs;
+    is $root_1->result, INCOMPLETE, 'root1 is incomplete';
+    is $_->result, SKIPPED, $_->TEST . ' has been skipped' for @should_have_been_skipped;
+    is $root_2->state, RUNNING, 'root2 is still running';
+    is $root_2->result, NONE, 'root2 has no result yet';
+    is $chained_child->state, SCHEDULED, 'chained-child is still scheduled';
+    is $chained_child->result, NONE, 'chained-child has no result yet';
+
+    subtest 'restarting 2nd root after all is possible' => sub {
+        $res = $root_2->auto_duplicate;
+        is ref $res, 'OpenQA::Schema::Result::Jobs', 'no error when duplicating root2' or diag explain $res;
+        $cloned = $res->{cluster_cloned};
+        ok exists $cloned->{$_->id}, $_->TEST . ' has been cloned after all' for @should_not_have_been_cloned;
+    };
+
+    subtest 'restarting via the API behaves consistently' => sub {
+        $schema->txn_rollback;
+        $_->discard_changes for @jobs;
+
+        my $res = job_restart([$root_1->id]);
+        my $duplicates = delete $res->{duplicates};
+        is @$duplicates, 1, 'one set of duplicates generated';
+        my $cloned = $duplicates->[0];
+        ok exists $cloned->{$_->id}, $_->TEST . ' has been cloned' for @should_have_been_cloned;
+        ok !exists $cloned->{$_->id}, $_->TEST . ' has not been cloned' for @should_not_have_been_cloned;
+        is_deeply $res, {enforceable => 0, errors => [], warnings => []}, 'no warnings or errors' or expain $res;
+
+        $_->discard_changes for @jobs;
+        is $root_1->state, RUNNING,
+          'root1 is still running (cancelled would work as well), worker is supposed to set it to DONE';
+        is $root_1->result, USER_RESTARTED, 'root1 itself has been marked as USER_RESTARTED';
+        is $_->result, SKIPPED, $_->TEST . ' has been skipped' for @should_have_been_skipped;
+        is $root_2->state, RUNNING, 'root2 is still running';
+        is $root_2->result, NONE, 'root2 has no result yet';
+        is $chained_child->state, SCHEDULED, 'chained-child is still scheduled';
+        is $chained_child->result, NONE, 'chained-child has no result yet';
+    };
+};
 
 done_testing;

@@ -30,6 +30,10 @@ my $schema = $test_case->init_data(
 );
 my $jobs = $schema->resultset('Jobs');
 
+# avoid enqueuing Minion jobs
+my $jobs_mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs');
+$jobs_mock->noop(qw(enqueue_finalize_job_results enqueue_restart));
+
 # prepare needles dir
 my $needle_dir_fixture = $schema->resultset('NeedleDirs')->find(1);
 my $needle_dir = prepare_clean_needles_dir;
@@ -147,7 +151,8 @@ subtest 'show job modules execution time' => sub {
 subtest 'displaying image result with candidates' => sub {
     $driver->find_element('[href="#step/bootloader/1"]')->click();
     wait_for_ajax;
-    is_deeply(find_candidate_needles, {'inst-bootmenu' => []}, 'correct tags displayed');
+    my $needles = find_candidate_needles;
+    is_deeply($needles, {'inst-bootmenu' => []}, 'correct tags displayed') or diag explain $needles;
 };
 
 subtest 'filtering' => sub {
@@ -236,7 +241,7 @@ subtest 'bug reporting' => sub {
 
 subtest 'scheduled product shown' => sub {
     # still on test 99937
-    my $scheduled_product_link = $driver->find_element('#scheduled-product-info a');
+    my $scheduled_product_link = $driver->find_element('#scheduled-product-info > a');
     my $expected_scheduled_product_id = $schema->resultset('Jobs')->find(99937)->scheduled_product_id;
     is($scheduled_product_link->get_text(), 'distri-dvd-1234', 'scheduled product name');
     like(
@@ -244,6 +249,14 @@ subtest 'scheduled product shown' => sub {
         qr/\/admin\/productlog\?id=$expected_scheduled_product_id/,
         'scheduled product href'
     );
+    my $reschedule_link = $driver->find_element('#scheduled-product-info div > a');
+    my $expected_params = qr/scheduled_product_clone_id=$expected_scheduled_product_id&TEST=kde/;
+    like $reschedule_link->get_attribute('data-url'), $expected_params, 'reschedule link shown';
+    $reschedule_link->click;
+    $driver->accept_alert;
+    wait_for_ajax msg => 'message for rescheduling';
+    element_visible '#flash-messages .alert > span', qr/Scheduled product to clone settings from misses DISTRI/, undef,
+      'error shown';
     $driver->get('/tests/99963');
     like(
         $driver->find_element_by_id('scheduled-product-info')->get_text(),
@@ -330,10 +343,10 @@ subtest 'running job' => sub {
         ok $step_detail_element, 'step detail present' or return;
         like $step_detail_element->get_text, qr/Unable to read/, '"Unable to read…" shown in the first place';
         # pretend the text result has been uploaded
-        $aplay_text_result->spurt('some text result');
+        $aplay_text_result->spew('some text result');
         update_status sub {
-            $step_detail_element = $driver->find_element('#module_aplay .links');
-            $step_detail_element && $step_detail_element->get_text !~ qr/Unable to read/;
+            my $text = $driver->execute_script('return document.querySelector("#module_aplay .links")?.textContent');
+            ($text !~ qr/Unable to read/) && ($step_detail_element = $driver->find_element('#module_aplay .links'));
         }, 'step detail shows no longer "Unable to read"';
         ok $step_detail_element, 'step detail still present' or return;
         like $step_detail_element->get_text, qr/some text result/, 'text result finally shown';
@@ -462,7 +475,11 @@ subtest 'misc details: title, favicon, go back, go to source view, go to log vie
     like $driver->find_element_by_id('asset-list')->get_text,
       qr/openSUSE-13.1-DVD-i586-Build0091-Media.iso \(0 Byte\)[\n|\s]+openSUSE-13.1-x86_64.hda \(does not exist\)/,
       'asset list';
+    like $driver->find_element('#asset-list li:first-child a + a')->get_attribute('href'),
+      qr{/admin/assets\?search=openSUSE-13\.1-DVD-i586-Build0091-Media\.iso},
+      'link to asset table';
     $driver->find_element_by_link_text('autoinst-log.txt')->click;
+
     wait_for_ajax msg => 'log contents';
     like $driver->find_element('.embedded-logfile .ansi-blue-fg')->get_text, qr/send(autotype|key)/, 'log is colorful';
 };
@@ -472,6 +489,18 @@ my $t = Test::Mojo->new('OpenQA::WebAPI');
 subtest 'scheduled job' => sub {
     $t->get_ok('/tests/99927/infopanel_ajax')->status_is(200);
     $t->content_like(qr/scheduled.*, created.*\d\d\d\d-\d\d-\d\d \d\d:\d\d:\d\d/s, 'creation date displayed');
+};
+
+subtest 'svg badge' => sub {
+    $t->get_ok('/tests/99927/badge')->status_is(200)->content_type_is('image/svg+xml')
+      ->header_is('Cache-Control' => 'max-age=0, no-cache')->element_exists('svg', 'valid svg badge');
+    $t->get_ok('/tests/9992711111/badge')->status_is(404)->content_type_is('image/svg+xml')->element_exists('svg')
+      ->content_like(qr/404/, 'valid 404 svg badge');
+    $t->get_ok('/tests/latest/badge?test=kde&machine=32bit')->status_is(200)->content_type_is('image/svg+xml')
+      ->element_exists('svg', 'valid latest svg badge');
+    $jobs->find(99928)->update({state => SCHEDULED, result => NONE, blocked_by_id => 99927});
+    $t->get_ok('/tests/99928/badge')->status_is(200)->content_type_is('image/svg+xml')->element_exists('svg')
+      ->content_like(qr/blocked/, 'valid blocked svg badge');
 };
 
 subtest 'route to latest' => sub {
@@ -526,7 +555,7 @@ my $ntext = <<EOM;
   ]
 }
 EOM
-$needle_dir->child("$_.json")->spurt($ntext) for qw(sudo-passwordprompt-lxde sudo-passwordprompt);
+$needle_dir->child("$_.json")->spew($ntext) for qw(sudo-passwordprompt-lxde sudo-passwordprompt);
 
 sub test_with_error {
     my ($needle_to_modify, $error, $tags, $expect, $test_name) = @_;
@@ -539,7 +568,7 @@ sub test_with_error {
         my $detail = $details->[0];
         $detail->{needles}->[$needle_to_modify]->{error} = $error if defined $needle_to_modify && defined $error;
         $detail->{tags} = $tags if defined $tags;
-        $details_file->spurt(encode_json($details));
+        $details_file->spew(encode_json($details));
     }
 
     # check whether candidates are displayed as expected
@@ -659,6 +688,22 @@ subtest 'test module flags are displayed correctly' => sub {
 subtest 'number of restarts displayed (zero times)' => sub {
     $driver->get('/tests/99947');
     $driver->find_element_by_id('clones')->text_unlike(qr/restarted/, 'not restarted');
+};
+
+subtest 'helper functions of investigation tab' => sub {
+    is $driver->execute_script('return githashToLink("foobar")'), undef, 'null returned for invalid value';
+
+    my $value = '9b8aaf060 Containers: Inc…\n stat1\n stat2\na54a4bb34 Remove select…\n stat3\n stat4\n';
+    my @expected_links = (
+        {link => '<a href="test/9b8aaf060">9b8aaf060</a>', msg => 'Containers: Inc…', stat => [' stat1', ' stat2']},
+        {link => '<a href="test/a54a4bb34">a54a4bb34</a>', msg => 'Remove select…', stat => [' stat3', ' stat4']},
+    );
+    my $links = $driver->execute_script("return githashToLink(\"$value\", 'test/')");
+    is_deeply $links, \@expected_links, 'links returned for valid value' or diag explain $links;
+
+    $value = '9b8aaf060 Containers: Inc…\n stat1\n stat2\na54a4bb34Remove select…\n stat3\n stat4\n';
+    $links = $driver->execute_script("return githashToLink(\"$value\", 'test/')");
+    is_deeply $links, undef, 'null returned as second line is invalid' or diag explain $links;
 };
 
 subtest 'additional investigation notes provided on new failed' => sub {

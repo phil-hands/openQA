@@ -4,7 +4,8 @@
 package OpenQA::Schema::Result::Comments;
 use Mojo::Base 'DBIx::Class::Core', -signatures;
 
-use OpenQA::Utils qw(find_labels find_bugref find_bugrefs);
+use OpenQA::Jobs::Constants;
+use OpenQA::Utils qw(find_labels find_flags find_bugref find_bugrefs);
 use OpenQA::Markdown qw(markdown_to_html);
 use List::Util qw(first);
 
@@ -106,6 +107,17 @@ sub label ($self) {
     return find_labels($self->text)->[0];
 }
 
+=head2 text_flags
+
+Returns flag values if C<$self> has flags, e.g. 'flag:carryover flag:foobar' returns a hashref with the keys 'carryover' and 'foobar'
+=cut
+sub text_flags ($self) {
+    my $flags = find_flags($self->text);
+    my %flag_hash;
+    @flag_hash{@$flags} = ();
+    return \%flag_hash;
+}
+
 =head2 force_result
 
 Returns new result value if C<$self> is a special "force_result" label, e.g.
@@ -132,7 +144,7 @@ e.g. 'tag:0123:important:GM' returns a list of '0123', 'important' and 'GM'.
 =cut
 sub tag ($self) {
     $self->text
-      =~ /\btag:((?<version>[-.@\d\w]+)-)?(?<build>[-.@\d\w]+):(?<type>[-@\d\w]+)(:(?<description>[-.@\d\w]+))?\b/;
+      =~ /\btag:(((?<version>[-.@\d\w]+)-)?(?<build>[-.@\d\w]+)|"((?<version>[-.@\d\w]+)-)?(?<build>[-.@\d\w\s\+:]+)"):(?<type>[-@\d\w]+)(:(?<description>[-.@\d\w]+))?\b/;
     return $+{build}, $+{type}, $+{description}, $+{version};
 }
 
@@ -157,16 +169,42 @@ sub event_data ($self) {
     return $data;
 }
 
-sub extended_hash ($self) {
+sub extended_hash ($self, $render_markdown = 1) {
     return {
         id => $self->id,
         text => $self->text,
-        renderedMarkdown => $self->rendered_markdown->to_string,
+        renderedMarkdown => ($render_markdown) ? $self->rendered_markdown->to_string : undef,
         bugrefs => $self->bugrefs,
         created => $self->t_created->strftime("%Y-%m-%d %H:%M:%S %z"),
         updated => $self->t_updated->strftime("%Y-%m-%d %H:%M:%S %z"),
         userName => $self->user->name
     };
+}
+
+sub handle_special_contents ($self, $c = undef) {
+    $self->_insert_bugs;
+    $self->_control_job_result($c);
+}
+
+sub _control_job_result ($self, $c) {
+    return undef unless my ($new_result, $description) = $self->force_result;
+    return undef unless $new_result;
+    die "Invalid result '$new_result' for force_result\n"
+      unless grep { $_ eq $new_result } OpenQA::Jobs::Constants::RESULTS;
+    die "force_result labels only allowed for operators\n" if $c && !$c->is_operator;
+    my $force_result_re = OpenQA::App->singleton->config->{global}->{force_result_regex} // '';
+    die "force_result description '$description' does not match pattern '$force_result_re'\n"
+      unless ($description // '') =~ /$force_result_re/;
+    my $job = $self->job;
+    die "force_result only allowed on finished jobs\n"
+      unless OpenQA::Jobs::Constants::meta_state($job->state) eq OpenQA::Jobs::Constants::FINAL;
+    $job->update_result($new_result, OpenQA::Jobs::Constants::DONE);
+    return undef;
+}
+
+sub _insert_bugs ($self) {
+    my $bugs = $self->result_source->schema->resultset('Bugs');
+    $bugs->get_bug($_) for @{$self->bugrefs};
 }
 
 1;

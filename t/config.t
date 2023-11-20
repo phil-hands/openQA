@@ -66,6 +66,7 @@ subtest 'Test configuration default modes' => sub {
         },
         'scheduler' => {
             max_job_scheduled_time => 7,
+            max_running_jobs => -1,
         },
         openid => {
             provider => 'https://www.opensuse.org/openid/user/',
@@ -114,12 +115,20 @@ subtest 'Test configuration default modes' => sub {
             queue_limit => 200,
             concurrency => 2,
             project_status_url => '',
+            username => '',
+            ssh_key_file => '',
         },
         cleanup => {
             concurrent => 0,
         },
         default_group_limits => {
             asset_size_limit => OpenQA::JobGroupDefaults::SIZE_LIMIT_GB,
+            log_storage_duration => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
+            important_log_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
+            result_storage_duration => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
+            important_result_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_RESULTS_IN_DAYS,
+        },
+        no_group_limits => {
             log_storage_duration => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
             important_log_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
             result_storage_duration => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
@@ -164,6 +173,7 @@ subtest 'Test configuration default modes' => sub {
             lookup_depth => 10,
             state_changes_limit => 3,
         },
+        secrets => {github_token => ''},
     };
 
     # Test configuration generation with "test" mode
@@ -209,7 +219,7 @@ subtest 'Test configuration override from file' => sub {
         "ignored_failed_minion_jobs = foo boo\n"
 
     );
-    $t_dir->child("openqa.ini")->spurt(@data);
+    $t_dir->child("openqa.ini")->spew(join '', @data);
     combined_like sub { OpenQA::Setup::read_config($app) }, qr/Deprecated.*blacklist/, 'notice about deprecated key';
 
     ok -e $t_dir->child("openqa.ini");
@@ -239,7 +249,7 @@ subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
         hide_asset_types = repo iso  
         recognized_referers =   bugzilla.suse.com   progress.opensuse.org github.com
     ';
-    $t_dir->child('openqa.ini')->spurt($data);
+    $t_dir->child('openqa.ini')->spew($data);
     OpenQA::Setup::read_config($app);
     ok($app->config->{global}->{appname} eq 'openQA', 'appname');
     ok($app->config->{global}->{hide_asset_types} eq 'repo iso', 'hide_asset_types');

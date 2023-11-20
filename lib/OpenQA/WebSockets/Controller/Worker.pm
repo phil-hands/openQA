@@ -7,7 +7,7 @@ use Mojo::Base 'Mojolicious::Controller';
 use DBIx::Class::Timestamps 'now';
 use OpenQA::Schema;
 use OpenQA::Log qw(log_debug log_error log_info log_warning log_trace);
-use OpenQA::Constants qw(WEBSOCKET_API_VERSION);
+use OpenQA::Constants qw(WEBSOCKET_API_VERSION MIN_TIMER);
 use OpenQA::WebSockets::Model::Status;
 use OpenQA::Jobs::Constants;
 use OpenQA::Scheduler::Client;
@@ -47,6 +47,7 @@ sub _finish {
     }
     $reason = ($reason ? ": $reason" : '');
     log_info("Worker $worker->{id} websocket connection closed - $code$reason");
+    delete $worker->{last_seen};
 
     # note: Not marking the worker immediately as offline because it is expected to reconnect if the connection
     #       is lost unexpectedly. It will be considered offline after the configured timeout expires.
@@ -57,20 +58,21 @@ sub _message {
 
     my $app = $self->app;
     my $schema = $app->schema;
+    my $tx = $self->tx;
 
     # find relevant worker
-    my $worker = OpenQA::WebSockets::Model::Status->singleton->worker_by_transaction->{$self->tx};
-    unless ($worker) {
+    my $worker_status = OpenQA::WebSockets::Model::Status->singleton->worker_by_transaction->{$tx};
+    unless ($worker_status) {
         $app->log->warn("A message received from unknown worker connection");
         log_debug(sprintf('A message received from unknown worker connection (terminating ws): %s', dumper($json)));
         $self->finish("1008", "Connection terminated from WebSocket server - thought dead");
         return undef;
     }
-    my $worker_id = $worker->{id};
-    my $worker_db = $worker->{db};
+    my $worker_id = $worker_status->{id};
+    my $worker_db = $worker_status->{db};
 
     # check whether the worker/job had was idle before despite a job assignment and unset that flag
-    my $worker_previously_idle = delete $worker->{idle_despite_job_assignment};
+    my $worker_previously_idle = delete $worker_status->{idle_despite_job_assignment};
 
     unless (ref($json) eq 'HASH') {
         log_error(sprintf('Received unexpected WS message "%s from worker %u', dumper($json), $worker_id));
@@ -150,35 +152,37 @@ sub _message {
         log_trace "Received from worker $worker_id worker_status message: " . dumper($json)
           if LOG_WORKER_STATUS_MESSAGES;
 
-        # log that we 'saw' the worker
-        try {
-            $schema->txn_do(
-                sub {
-                    return undef unless my $w = $schema->resultset("Workers")->find($worker_id);
-                    log_debug("Updating seen of worker $worker_id from worker_status ($current_worker_status)");
-                    $w->seen;
-                    $w->update({error => $current_worker_error});
-                });
+        # detect if the websocket server is running too close to its limit and falling behind with status updates
+        # (the status "working" is special because it will be sent immediately after a worker started a new job)
+        my ($last_seen, $now) = ($worker_status->{last_seen}, time);
+        if ($last_seen && ($last_seen + MIN_TIMER) > $now) {
+            log_info("Received worker $worker_id status too close to the last update,"
+                  . " websocket server possibly overloaded or worker misconfigured")
+              if $current_worker_status ne 'working';
         }
-        catch {
-            log_error("Failed updating seen and error status of worker $worker_id: $_");    # uncoverable statement
-        };
+        $worker_status->{last_seen} = $now;
 
-        # send worker population
-        try {
-            my $workers_population = $schema->resultset("Workers")->count();
-            my $msg = {type => 'info', population => $workers_population};
-            $self->tx->send({json => $msg} => sub { log_trace("Sent population to worker: " . pp($msg)) });
+        my $workers = $schema->resultset('Workers');
+        my $worker = $workers->find($worker_id);
+
+        # log that we 'saw' the worker
+        if ($worker) {
+            try {
+                log_debug("Updating seen of worker $worker_id from worker_status ($current_worker_status)");
+                $worker->seen({error => $current_worker_error});
+
+                # Tell the worker that we saw it (used for tests and debugging)
+                $tx->send({json => {type => 'info', seen => 1}});
+            }
+            catch {
+                log_error("Failed updating seen and error status of worker $worker_id: $_");    # uncoverable statement
+            };
         }
-        catch {
-            log_debug("Could not send the population number to worker $worker_id: $_");    # uncoverable statement
-        };
 
         # find the job currently associated with that worker and check whether the worker still
         # executes the job it is supposed to
         my $current_job_id;
         try {
-            my $worker = $schema->resultset('Workers')->find($worker_id);
             return undef unless $worker;
 
             my $registered_job_token;
@@ -228,10 +232,11 @@ sub _message {
         };
 
         # consider the worker idle unless it claims to be broken or work on a job
-        $worker->{idle_despite_job_assignment} = !$worker_is_broken && !defined $job_id && defined $current_job_id;
+        $worker_status->{idle_despite_job_assignment}
+          = !$worker_is_broken && !defined $job_id && defined $current_job_id;
     }
     else {
-        log_error(sprintf('Received unknown message type "%s" from worker %u', $message_type, $worker->{id}));
+        log_error(sprintf('Received unknown message type "%s" from worker %u', $message_type, $worker_status->{id}));
     }
 }
 

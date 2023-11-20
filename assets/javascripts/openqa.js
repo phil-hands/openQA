@@ -213,10 +213,22 @@ function showJobRestartResults(responseJSON, newJobUrl, retryFunction, targetEle
   return true;
 }
 
-function forceJobRestartViaRestartLink(restartLink) {
-  if (!restartLink.href.endsWith('?force=1')) {
-    restartLink.href += '?force=1';
+function addParam(path, key, value) {
+  const paramsStart = path.indexOf('?');
+  let params;
+  if (paramsStart === -1) {
+    params = new URLSearchParams();
+    path = path + '?';
+  } else {
+    params = new URLSearchParams(path.substr(paramsStart + 1));
+    path = path.substr(0, paramsStart + 1);
   }
+  params.set(key, value);
+  return path + params.toString();
+}
+
+function forceJobRestartViaRestartLink(restartLink) {
+  restartLink.href = addParam(restartLink.href, 'force', '1');
   restartLink.click();
 }
 
@@ -242,7 +254,13 @@ function restartJob(ajaxUrl, jobId) {
       } catch {
         // Intentionally ignore all errors
       }
-      if (showJobRestartResults(responseJSON, newJobUrl, restartJob.bind(undefined, ajaxUrl + '?force=1', jobId))) {
+      if (
+        showJobRestartResults(
+          responseJSON,
+          newJobUrl,
+          restartJob.bind(undefined, addParam(ajaxUrl, 'force', '1'), jobId)
+        )
+      ) {
         return;
       }
       if (newJobUrl) {
@@ -273,7 +291,7 @@ function renderSearchResults(query, url) {
   var spinner = document.getElementById('progress-indication');
   spinner.style.display = 'block';
   var request = new XMLHttpRequest();
-  request.open('GET', '/api/v1/experimental/search?q=' + encodeURIComponent(query));
+  request.open('GET', urlWithBase('/api/v1/experimental/search?q=' + encodeURIComponent(query)));
   request.setRequestHeader('Accept', 'application/json');
   request.onload = function () {
     // Make sure we have valid JSON here
@@ -290,27 +308,44 @@ function renderSearchResults(query, url) {
     }
     spinner.style.display = 'none';
     var heading = document.getElementById('results-heading');
-    heading.appendChild(document.createTextNode(': ' + json.data.length + ' matches found'));
+    heading.appendChild(document.createTextNode(': ' + json.data.total_count + ' matches found'));
     var results = document.createElement('div');
     results.id = 'results';
     results.className = 'list-group';
-    json.data.forEach(function (value, index) {
-      var item = document.createElement('div');
-      item.className = 'list-group-item';
-      var header = document.createElement('div');
-      header.className = 'd-flex w-100 justify-content-between';
-      var title = document.createElement('h5');
-      title.className = 'occurrence mb-1';
-      title.appendChild(document.createTextNode(value.occurrence));
-      header.appendChild(title);
-      item.appendChild(header);
-      if (value.contents) {
-        var contents = document.createElement('pre');
-        contents.className = 'contents mb-1';
-        contents.appendChild(document.createTextNode(value.contents));
-        item.appendChild(contents);
+    const types = {code: 'Test modules', modules: 'Job modules', templates: 'Job Templates'};
+
+    Object.keys(types).forEach(function (searchtype) {
+      var searchresults = json.data.results[searchtype];
+      if (searchresults.length > 0) {
+        const item = document.createElement('div');
+        item.className = 'list-group-item';
+        const header = document.createElement('h3');
+        item.appendChild(header);
+        header.id = searchtype;
+        const bold = document.createElement('strong');
+        const textnode = document.createTextNode(types[searchtype] + ': ' + searchresults.length);
+        bold.appendChild(textnode);
+        header.appendChild(bold);
+        results.append(item);
       }
-      results.append(item);
+      searchresults.forEach(function (value, index) {
+        const item = document.createElement('div');
+        item.className = 'list-group-item';
+        const header = document.createElement('div');
+        header.className = 'd-flex w-100 justify-content-between';
+        const title = document.createElement('h5');
+        title.className = 'occurrence mb-1';
+        title.appendChild(document.createTextNode(value.occurrence));
+        header.appendChild(title);
+        item.appendChild(header);
+        if (value.contents) {
+          const contents = document.createElement('pre');
+          contents.className = 'contents mb-1';
+          contents.appendChild(document.createTextNode(value.contents));
+          item.appendChild(contents);
+        }
+        results.append(item);
+      });
     });
     const oldResults = document.getElementById('results');
     oldResults.parentElement.replaceChild(results, oldResults);
@@ -355,7 +390,7 @@ function testStateHTML(job) {
 }
 
 function renderTestState(item, job) {
-  item.href = '/tests/' + job.id;
+  item.href = urlWithBase('/tests/' + job.id);
   while (item.firstChild) {
     item.firstChild.remove();
   }
@@ -389,7 +424,7 @@ function updateTestState(job, name, timeago, reason) {
 
 function renderJobStatus(item, id) {
   const request = new XMLHttpRequest();
-  request.open('GET', '/api/v1/jobs/' + id);
+  request.open('GET', urlWithBase('/api/v1/jobs/' + id));
   request.setRequestHeader('Accept', 'application/json');
   request.onload = function () {
     // Make sure we have valid JSON here
@@ -549,4 +584,8 @@ function renderHttpUrlAsLink(value) {
   }
   span.appendChild(document.createTextNode(value));
   return span;
+}
+
+function getXhrError(jqXHR, textStatus, errorThrown) {
+  return jqXHR.responseJSON?.error || jqXHR.responseText || errorThrown || textStatus;
 }

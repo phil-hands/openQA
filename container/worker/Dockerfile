@@ -1,13 +1,21 @@
-#!BuildTag: openqa_worker
-FROM opensuse/leap:15.4
-LABEL maintainer Jan Sedlak <jsedlak@redhat.com>, Josef Skladanka <jskladan@redhat.com>, wnereiz <wnereiz@eienteiland.org>, Sergio Lindo Mansilla <slindomansilla@suse.com>
-LABEL version="0.3"
+# SPDX-License-Identifier: MIT
+#!BuildTag: openqa_worker:latest opensuse/openqa-worker:latest opensuse/openqa-worker:%PKG_VERSION% opensuse/openqa-worker:%PKG_VERSION%.%RELEASE%
+FROM opensuse/leap:15.5
+
+# labelprefix=org.opensuse.openqa-worker
+LABEL org.opencontainers.image.title="openQA worker container"
+LABEL org.opencontainers.image.description="An openQA worker instance to execute openQA tests"
+LABEL org.opencontainers.image.version="%PKG_VERSION%.%RELEASE%"
+LABEL org.opensuse.reference="registry.opensuse.org/opensuse/openqa-worker:%PKG_VERSION%.%RELEASE%"
+LABEL org.openbuildservice.disturl="%DISTURL%"
+LABEL org.opencontainers.image.created="%BUILDTIME%"
+# endlabelprefix
 
 # hadolint ignore=DL3037
-RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/15.4 devel_openQA && \
-    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.4/15.4 devel_openQA_Leap && \
+RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/15.5 devel_openQA && \
+    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.5/15.5 devel_openQA_Leap && \
     zypper --gpg-auto-import-keys ref && \
-    zypper in -yl ca-certificates-mozilla curl gzip rsync && \
+    zypper in -yl ca-certificates-mozilla curl gzip rsync xz && \
     zypper in -yl openQA-worker os-autoinst-s390-deps && \
     zypper in -yl qemu-arm qemu-ppc qemu-x86 qemu-tools && \
     zypper in -yl qemu-hw-display-virtio-gpu qemu-hw-display-virtio-gpu-pci qemu-hw-display-virtio-vga && \

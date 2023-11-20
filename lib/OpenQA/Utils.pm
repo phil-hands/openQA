@@ -31,10 +31,11 @@ use File::Spec::Functions qw(catfile catdir);
 use Fcntl;
 use Mojo::JSON qw(encode_json decode_json);
 use Mojo::Util 'xml_escape';
+use List::Util qw(min);
 
 my $FRAG_REGEX = FRAGMENT_REGEX;
 
-my (%BUGREFS, %BUGURLS, $MARKER_REFS, $MARKER_URLS);
+my (%BUGREFS, %BUGURLS, $MARKER_REFS, $MARKER_URLS, $BUGREF_REGEX);
 BEGIN {
     %BUGREFS = (
         bnc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
@@ -51,6 +52,7 @@ BEGIN {
         jsc => 'https://jira.suse.de/browse/',
         pio => 'https://pagure.io/',
         ggo => 'https://gitlab.gnome.org/',
+        gfs => 'https://gitlab.com/fedora/sigs/',
     );
     %BUGURLS = (
         'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
@@ -67,22 +69,29 @@ BEGIN {
         $BUGREFS{jsc} => 'jsc',
         $BUGREFS{pio} => 'pio',
         $BUGREFS{ggo} => 'ggo',
+        $BUGREFS{gfs} => 'gfs',
     );
 
     $MARKER_REFS = join('|', keys %BUGREFS);
     $MARKER_URLS = join('|', keys %BUGURLS);
+
+    # <marker>[#<project/repo>]#<id>
+    $BUGREF_REGEX = qr{(?<match>(?<marker>$MARKER_REFS)\#?(?<repo>[a-zA-Z/-]+)?\#(?<id>([A-Z]+-)?\d+))};
 }
 
-# <marker>[#<project/repo>]#<id>
-use constant BUGREF_REGEX =>
-  qr{(?:^|(?<=\s|,))(?<match>(?<marker>$MARKER_REFS)\#?(?<repo>[a-zA-Z/-]+)?\#(?<id>([A-Z]+-)?\d+))(?![\w\"])};
-
+use constant UNCONSTRAINED_BUGREF_REGEX => $BUGREF_REGEX;
+use constant BUGREF_REGEX => qr{(?:^|(?<=<p>)|(?<=\s|,))$BUGREF_REGEX(?![\w\"])};
 use constant LABEL_REGEX => qr/\blabel:(?<match>([\w:#]+))\b/;
+use constant FLAG_REGEX => qr/\bflag:(?<match>([\w:#]+))\b/;
+
+use constant ONE_SECOND_IN_MICROSECONDS => 1_000_000;
 
 our $VERSION = sprintf "%d.%03d", q$Revision: 1.12 $ =~ /(\d+)/g;
 our @EXPORT = qw(
-  LABEL_REGEX
+  UNCONSTRAINED_BUGREF_REGEX
   BUGREF_REGEX
+  LABEL_REGEX
+  FLAG_REGEX
   locate_needle
   needledir
   productdir
@@ -94,6 +103,7 @@ our @EXPORT = qw(
   run_cmd_with_log_return_error
   parse_assets_from_settings
   find_labels
+  find_flags
   find_bugref
   find_bugrefs
   bugurl
@@ -116,11 +126,6 @@ our @EXPORT = qw(
   loaded_plugins
   hashwalker
   read_test_modules
-  feature_scaling
-  logistic_map_steps
-  logistic_map
-  rand_range
-  in_range
   walker
   ensure_timestamp_appended
   set_listen_address
@@ -133,6 +138,8 @@ our @EXPORT = qw(
   download_rate
   download_speed
   is_host_local
+  format_tx_error
+  regex_match
 );
 
 our @EXPORT_OK = qw(
@@ -147,6 +154,8 @@ our @EXPORT_OK = qw(
   get_ws_status_only_url
   random_string
   random_hex
+  regex_match
+  usleep_backoff
 );
 
 # override OPENQA_BASEDIR for tests
@@ -423,6 +432,12 @@ sub find_labels {
     return \@labels;
 }
 
+sub find_flags ($text) {
+    my @flags;
+    push @flags, $+{match} while $text =~ /${\FLAG_REGEX}/g;
+    return \@flags;
+}
+
 sub find_bugref {
     my ($text) = @_;
     $text //= '';
@@ -681,24 +696,16 @@ sub read_test_modules {
 }
 
 # parse comments of the specified (parent) group and store all mentioned builds in $res (hashref)
-sub parse_tags_from_comments {
-    my ($group, $res) = @_;
-
-    my $comments = $group->comments;
-    return unless ($comments);
+sub parse_tags_from_comments ($group, $res) {
+    return unless my $comments = $group->comments;
 
     while (my $comment = $comments->next) {
         my @tag = $comment->tag;
-        my $build = $tag[0];
-        next unless $build;
+        next unless my $build = $tag[0];
 
         my $version = $tag[3];
         my $tag_id = $version ? "$version-$build" : $build;
-
-        log_debug('Tag found on build ' . $build . ' of type ' . $tag[1]);
-        log_debug('description: ' . $tag[2]) if $tag[2];
         if ($tag[1] eq '-important') {
-            log_debug('Deleting tag on build ' . $build);
             delete $res->{$tag_id};
             next;
         }
@@ -818,22 +825,6 @@ sub walker {
     }
 }
 
-
-# Args:
-# First is i-th element, Second is maximum element number, Third and Fourth are the range limit (lower and upper)
-# $i, $imax, MIN, MAX
-sub feature_scaling { $_[2] + ((($_[0] - 1) * ($_[3] - $_[2])) / (($_[1] - 1) || 1)) }
-# $r, $xn
-sub logistic_map { $_[0] * $_[1] * (1 - $_[1]) }
-# $steps, $r, $xn
-sub logistic_map_steps {
-    $_[2] = 0.1 if $_[2] <= 0;    # do not let population die. - with this change we get more "chaos"
-    $_[2] = logistic_map($_[1], $_[2]) for (1 .. $_[0]);
-    $_[2];
-}
-sub rand_range { $_[0] + rand($_[1] - $_[0]) }
-sub in_range { $_[0] >= $_[1] && $_[0] <= $_[2] ? 1 : 0 }
-
 sub set_listen_address {
     my $port = shift;
 
@@ -946,5 +937,31 @@ sub download_speed ($start, $end, $bytes) {
 }
 
 sub is_host_local ($host) { $host eq 'localhost' || $host eq '127.0.0.1' || $host eq '[::1]' }
+
+sub format_tx_error ($err) {
+    $err->{code} ? "$err->{code} response: $err->{message}" : "Connection error: $err->{message}";
+}
+
+# compiles the specified $regex_string and matches it against $string
+# note: Regexp warnings are treated as failures and will not show up in the server logs. This is useful
+#       for using user-provided regexes that may be invalid.
+sub regex_match ($regex_string, $string) {
+    use warnings FATAL => 'regexp';
+    my $match = eval { $string =~ /$regex_string/ };
+    die "invalid regex: $@" if $@;
+    return $match;
+}
+
+# Returns a microsecond value suitable for use with "usleep". For the first iteration it returns the minimum value plus
+# random 0-1 second padding, and starting with the second iteration the delay increases by one second plus 0-1 second
+# padding, up to the maximum.
+sub usleep_backoff ($iteration, $min_seconds, $max_seconds, $padding = int(rand(ONE_SECOND_IN_MICROSECONDS))) {
+
+    # To allow for backoff to be disabled easily
+    return 0 if $min_seconds == 0;
+
+    my $delay = (($min_seconds + $iteration - 1) * ONE_SECOND_IN_MICROSECONDS) + $padding;
+    return min($max_seconds * ONE_SECOND_IN_MICROSECONDS, $delay);
+}
 
 1;

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Mojo::Base -signatures;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
@@ -20,7 +21,10 @@ use Test::Mojo;
 use Test::MockModule;
 use Test::Output qw(combined_like);
 use Test::Warnings ':report_warnings';
+use Test::Exception;
 use OpenQA::Schema::Result::Jobs;
+use OpenQA::App;
+use OpenQA::WebAPI;
 use OpenQA::WebAPI::Controller::API::V1::Worker;
 use OpenQA::Test::TimeLimit '10';
 
@@ -42,7 +46,9 @@ $mock_result->redefine(
 
 my $schema = OpenQA::Test::Database->new->create;
 my $jobs = $schema->resultset('Jobs');
+my $workers = $schema->resultset('Workers');
 my $t = Test::Mojo->new('OpenQA::Scheduler');
+OpenQA::App->set_singleton(OpenQA::WebAPI->new);
 
 subtest 'Authentication' => sub {
     $t->get_ok('/test')->status_is(404)->content_like(qr/Not found/);
@@ -95,13 +101,13 @@ $workercaps->{cpu_opmode} = '32-bit, 64-bit';
 $workercaps->{mem_max} = '4096';
 $workercaps->{websocket_api_version} = WEBSOCKET_API_VERSION;
 $workercaps->{isotovideo_interface_version} = WEBSOCKET_API_VERSION;
-sub register_worker { $c->_register($schema, 'host', '1', $workercaps) }
+sub register_worker ($host = 'host', $instance = 1) { $c->_register($schema, $host, $instance, $workercaps) }
 
 my ($id, $worker, $worker_db_obj);
 subtest 'worker registration' => sub {
     is($id = register_worker, 1, 'new worker registered');
 
-    $worker_db_obj = $schema->resultset('Workers')->find($id);
+    $worker_db_obj = $workers->find($id);
     $worker = $worker_db_obj->info;
 
     is($worker->{id}, $id, 'id set');
@@ -301,10 +307,92 @@ subtest 'job grab (failed to send job to worker)' => sub {
     is_deeply($allocated, [], 'no workers/jobs allocated');
 };
 
+subtest 'job grab (no jobs because max_running_jobs is 0)' => sub {
+    $job->update({state => DONE});
+    $job2->update({state => DONE});
+    undef $ws_send_error;
+    $worker_db_obj->discard_changes;
+    my @jobs;
+    push @jobs, $jobs->create_from_settings(\%settings2) for 1 .. 10;
+    local OpenQA::App->singleton->config->{scheduler}->{max_running_jobs} = 0;
+    my $res = OpenQA::Scheduler::Model::Jobs->singleton->schedule();
+    is @$res, 0, 'schedule() returns empty arrayref';
+
+    my $scheduled = list_jobs(state => SCHEDULED);
+    my $assigned = list_jobs(state => ASSIGNED);
+    is scalar @$assigned, 0, 'No jobs assigned';
+    is scalar @$scheduled, 10, '10 jobs still scheduled';
+    $jobs->find($_->id)->delete for @jobs;
+};
+
+subtest 'scheduler limits' => sub {
+    my @workers;
+    for my $wid (2 .. 5) {
+        is(my $id = register_worker(host => $wid), $wid, 'new worker registered');
+        my $worker = $workers->find($id);
+        $worker->set_property(WORKER_CLASS => 'qemu_x86_64');
+        push @workers, $worker;
+    }
+    my @classes = qw(atari c64 quantum qemu_x86_64);
+    my @jobs;
+    for my $i (1 .. 12) {
+        my %set = %settings2;
+        $set{WORKER_CLASS} = $classes[$i % 4];
+        push @jobs, $jobs->create_from_settings(\%set);
+    }
+
+    subtest 'job grab (no jobs because max_running_jobs limit is exceeded)' => sub {
+        my $log_mock = Test::MockModule->new('OpenQA::Scheduler::Model::Jobs');
+        my $log = '';
+        $log_mock->redefine(log_debug => sub { $log .= "$_[0]\n" });
+
+        local OpenQA::App->singleton->config->{scheduler}->{max_running_jobs} = 2;
+        my $res = OpenQA::Scheduler::Model::Jobs->singleton->schedule();
+        is @$res, 2, 'schedule() returns 2 items';
+        like $log,
+          qr/limit reached, scheduling no additional jobs .max_running_jobs=2, free workers=5, running=0, allocated=2./,
+          'Log message about exceeded limit';
+
+        my $scheduled = list_jobs(state => SCHEDULED);
+        my $assigned = list_jobs(state => ASSIGNED);
+        is scalar @$assigned, 2, '2 jobs assigned';
+        is scalar @$scheduled, 10, '10 jobs still scheduled';
+    };
+
+    $_->state(SCHEDULED) for @jobs;
+
+    subtest 'job grab (statistics about rejected jobs)' => sub {
+        my $log_mock = Test::MockModule->new('OpenQA::Scheduler::Model::Jobs');
+        my @classes = qw(atari c64 quantum);
+        my $scheduler = OpenQA::Scheduler::Model::Jobs->singleton;
+        my $scheduled_jobs = $scheduler->determine_scheduled_jobs;
+        my $free_workers = OpenQA::Scheduler::Model::Jobs::determine_free_workers();
+        my %rejected;
+        for my $jobinfo (values %$scheduled_jobs) {
+            $jobinfo->{matching_workers}
+              = OpenQA::Scheduler::Model::Jobs::_matching_workers($jobinfo, $free_workers, \%rejected);
+        }
+        my $expected = {atari => 3, c64 => 3, quantum => 3};
+        is_deeply \%rejected, $expected, 'Rejected worker classes statistics like expected';
+
+        my $log = '';
+        $log_mock->redefine(log_debug => sub { $log .= "$_[0]\n" });
+        $scheduler->schedule;
+        like $log,
+          qr/Skipping 9 jobs because of no free workers for requested worker classes .atari:3,c64:3,quantum:3./,
+          'Log message about rejected jobs';
+    };
+
+    $jobs->find($_->id)->delete for @jobs;
+    $_->delete for @workers;
+};
+
 subtest 'job grab (successful assignment)' => sub {
+    $job->update({state => SCHEDULED});
+    $job2->update({state => SCHEDULED});
     my $rjobs_before = list_jobs(state => RUNNING);
     undef $ws_send_error;
-    OpenQA::Scheduler::Model::Jobs->singleton->schedule();
+    my $res = OpenQA::Scheduler::Model::Jobs->singleton->schedule();
     $worker_db_obj->discard_changes;
 
     my $grabbed = $sent->{$worker->{id}}->{job}->to_hash;
@@ -416,6 +504,67 @@ subtest 'test job cancellation after max job scheduled time timeout' => sub {
     is($job5->state, CANCELLED, 'Job 5 is cancelled by scheduler');
     is($job5->result, OBSOLETED, 'Job5 result is OBSOLETED');
     is($job5->reason, 'scheduled for more than 7 days');
+};
+
+sub _get_job_networks ($job_networks) {
+    [map { [$_->job_id, $_->name, $_->vlan] } $job_networks->search({}, {order_by => [qw(job_id name vlan)]})]
+}
+
+subtest 'allocating network' => sub {
+    my $worker = $workers->first;
+    ok $worker, 'has worker';
+    my $job_networks = $schema->resultset('JobNetworks');
+    is $job_networks->count, 0, 'no job networks so far';
+    my $job = $jobs->create_from_settings({TEST => 'network-job', NICTYPE => 'test', NETWORKS => 'foo,bar'});
+    my $job_id = $job->id;
+    my $parallel_job;
+    my @expected_networks = ([$job_id, 'bar', 2], [$job_id, 'foo', 1]);
+    $schema->txn_begin;
+
+    subtest 'networks allocated when preparing job for work' => sub {
+        $job->prepare_for_work($worker);
+        my $networks = _get_job_networks($job_networks);
+        is_deeply $networks, \@expected_networks, 'created 2 job networks' or diag explain $networks;
+        is delete $job->{_settings}->{NICVLAN}, '1,2', 'NICVLAN assigned';
+    };
+
+    subtest 'invoking preparation again without prior cleanup does not fail' => sub {
+        $job->prepare_for_work($worker);
+        my $networks = _get_job_networks($job_networks);
+        is_deeply $networks, \@expected_networks, 'still just 2 job networks' or diag explain $networks;
+        is delete $job->{_settings}->{NICVLAN}, '1,2', 'the same NICVLAN simply assigned again';
+
+        # try again, this time assume _find_network did not reveal any results although we later encounter some
+        # note: This test case is very contrived. Normally this should not happen. However, the previous use of
+        #       a transaction (as of 3c52abbe3d6364c02f73c6f9fe4afe44f89688f6) makes one think it may be
+        #       necassary. If we ever encounter this error in production we should find out what exactly is
+        #       causing it and what behavior would make most sense in that situation.
+        my $jobs_mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs');
+        $jobs_mock->redefine(_find_network => undef);
+        throws_ok { $job->prepare_for_work($worker) } qr/unable to alloc.*foo.*already exists/i,
+          'explicit error if network to be created already exists';
+        $networks = _get_job_networks($job_networks);
+        is_deeply $networks, \@expected_networks, 'still only 2 job networks' or diag explain $networks;
+    };
+
+    $schema->txn_rollback;
+
+    subtest 'jobs in the same cluster get the network allocated as well' => sub {
+        $parallel_job = $jobs->create_from_settings({TEST => 'parallel-job', _PARALLEL_JOBS => $job_id});
+        my $parallel_job_id = $parallel_job->id;
+        push @expected_networks, [$parallel_job_id, 'bar', 2], [$parallel_job_id, 'foo', 1];
+        $job->prepare_for_work($worker);
+        my $networks = _get_job_networks($job_networks);
+        is_deeply $networks, \@expected_networks, 'now 4 job networks have been assigned' or diag explain $networks;
+        is delete $job->{_settings}->{NICVLAN}, '1,2', 'the same NICVLAN simply assigned again';
+    };
+
+    subtest 'releasing networks' => sub {
+        $job->release_networks;
+        $parallel_job->release_networks;
+        my $networks = _get_job_networks($job_networks);
+        is_deeply $networks, [], 'all networks have been deleted again' or diag explain $networks;
+    }
 };
 
 done_testing;

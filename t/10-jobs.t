@@ -20,7 +20,7 @@ use OpenQA::Jobs::Constants;
 use OpenQA::Test::Case;
 use Test::MockModule 'strict';
 use Test::Mojo;
-use Test::Warnings ':report_warnings';
+use Test::Warnings qw(:report_warnings warning);
 use Mojo::File 'path';
 use Mojo::JSON qw(decode_json encode_json);
 use OpenQA::Test::Utils qw(perform_minion_jobs redirect_output);
@@ -436,9 +436,15 @@ subtest 'carry over, including soft-fails' => sub {
     subtest 'additional investigation notes provided on new failed' => sub {
         my $job_mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs', no_auto => 1);
         my $got_limit = 0;
+        my $got_diff_limit = 0;
         $job_mock->redefine(
             git_log_diff => sub ($self, $dir, $range, $limit) {
                 $got_limit = $limit;
+                return $fake_git_log;
+            });
+        $job_mock->redefine(
+            git_diff => sub ($self, $dir, $range, $limit = undef) {
+                $got_diff_limit = $limit;
                 return $fake_git_log;
             });
         path('t/data/last_good.json')->copy_to(path(($job->_previous_scenario_jobs)[1]->result_dir(), 'vars.json'));
@@ -494,7 +500,8 @@ subtest 'carry over, including soft-fails' => sub {
         path('t/data/last_good.json')->copy_to($last_good_path);
         my $last_good_vars = decode_json $last_good_path->slurp;
         $last_good_vars->{TEST_GIT_HASH} = 'UNKNOWN';
-        $last_good_path->spurt(encode_json $last_good_vars);
+        $last_good_vars->{NEEDLES_GIT_HASH} = 'UNKNOWN';
+        $last_good_path->spew(encode_json $last_good_vars);
         ok my $inv = $job->investigate, 'job can provide investigation details';
         is ref(my $last_good = $inv->{last_good}), 'HASH', 'previous job identified as last good and it is a hash';
         is $last_good->{link}, '/tests/99997', 'last_good hash has the correct link';
@@ -803,12 +810,14 @@ subtest 'delete job assigned as last use for asset' => sub {
 };
 
 subtest 'job setting based retriggering' => sub {
+    my $minion = $t->app->minion;
     my %_settings = %settings;
     $_settings{TEST} = 'no_retry';
     my $jobs_nr = $jobs->count;
     my $job = _job_create(\%_settings);
     is $jobs->count, $jobs_nr + 1, 'one more job';
     $job->done(result => FAILED);
+    perform_minion_jobs($minion);
     is $jobs->count, $jobs_nr + 1, 'no additional job triggered (without retry)';
     is $job->clone_id, undef, 'no clone';
     $jobs_nr = $jobs->count;
@@ -816,26 +825,50 @@ subtest 'job setting based retriggering' => sub {
     $_settings{RETRY} = '2:bug#42';
     $job = _job_create(\%_settings);
     $job->done(result => PASSED);
+    perform_minion_jobs($minion);
     is $jobs->count, $jobs_nr + 1, 'no additional job retriggered if PASSED (with retry)';
     $job->update({state => SCHEDULED, result => NONE});
+    $job->done(result => USER_CANCELLED);
+    perform_minion_jobs($minion);
+    is $jobs->count, $jobs_nr + 1, 'no additional job retriggered if USER_CANCELLED (with retry)';
+    my $get_jobs = sub ($task) {
+        $minion->backend->pg->db->query(q{select * from minion_jobs where task = $1 order by id asc}, $task)->hashes;
+        # note: Querying DB directly as `$minion->jobs({tasks => [$task]})` does not return parents.
+    };
+    my $restart_job_count_before = @{$get_jobs->('restart_job')};
+    my $finalize_job_count_before = @{$get_jobs->('finalize_job_results')};
+    $job->update({state => SCHEDULED, result => NONE});
     $job->done(result => FAILED);
+    perform_minion_jobs($minion);
     is $jobs->count, $jobs_nr + 2, 'job retriggered as it FAILED (with retry)';
     $job->update;
     $job->discard_changes;
     is $job->comments->first->text, 'Restarting because RETRY is set to 2 (and only restarted 0 times so far)',
       'comment about retry';
     is $jobs->count, $jobs_nr + 2, 'job is automatically retriggered';
+    my $restart_jobs = $get_jobs->('restart_job');
+    my $finalize_jobs = $get_jobs->('finalize_job_results');
+    is @$restart_jobs, $restart_job_count_before + 1, 'one restart job has been triggered';
+    is @$finalize_jobs, $finalize_job_count_before + 1, 'one finalize job has been triggered';
+    ok $finalize_jobs->[-1]->{lax}, 'finalize job would also run if restart job fails';
+    is_deeply $finalize_jobs->[-1]->{parents}, [$restart_jobs->[-1]->{id}], 'finalize job triggered after restart job'
+      or diag explain $finalize_jobs;
+    my $first_job = $job;
     my $next_job_id = $job->id + 1;
     for (1 .. 2) {
         is $jobs->find({id => $next_job_id - 1})->clone_id, $next_job_id, "clone exists for retry nr. $_";
         $job = $jobs->find({id => $next_job_id});
         $jobs->find({id => $next_job_id})->done(result => FAILED);
         $job->update;
+        perform_minion_jobs($minion);
         $job->discard_changes;
         ++$next_job_id;
     }
     is $jobs->count, $jobs_nr + 3, 'job with retry configured + 2 retries have been triggered';
-    is $jobs->find({id => $next_job_id - 1})->clone_id, undef, 'no clone exists for last retry';
+    my $lastest_job = $jobs->find({id => $next_job_id - 1});
+    is $lastest_job->clone_id, undef, 'no clone exists for last retry';
+    is $first_job->latest_job->id, $lastest_job->id, 'found the latest job from the first job';
+    is $lastest_job->latest_job->id, $lastest_job->id, 'found the latest job from latest job itself';
 };
 
 subtest '"race" between status updates and stale job detection' => sub {
@@ -868,8 +901,98 @@ subtest '"race" between status updates and stale job detection' => sub {
     is $job->update_status({})->{result}, 1, 'status updates still possible if uploading';
     $job->discard_changes;
     is $job->state, UPLOADING, 'job is still uploading';
+
+    $job->update({state => CANCELLED});
+    $update = $job->update_status({});
+    is $update->{job_result}, 'incomplete', 'cancelled jobs will still get a status update';
 };
 
 is $t->app->minion->jobs({states => ['failed']})->total, 0, 'No unexpected failed minion background jobs';
+
+subtest 'special cases when restarting job via Minion task' => sub {
+    local $ENV{OPENQA_JOB_RESTART_ATTEMPTS} = 2;
+    local $ENV{OPENQA_JOB_RESTART_DELAY} = 1;
+
+    my $minion = $t->app->minion;
+    my $test = sub ($args, $expected_state, $expected_result, $test, $task = 'restart_job') {
+        subtest $test => sub {
+            my $job_id = $minion->enqueue($task => $args);
+            perform_minion_jobs($minion);
+            my $job_info = $minion->job($job_id)->info;
+            is $job_info->{state}, $expected_state, 'state';
+            is $job_info->{result}, $expected_result, 'result';
+            return $job_id;
+        };
+    };
+    $test->([], 'failed', 'No job ID specified.',
+        'error without openQA job ID (can happen if job is enqueued via CLI)');
+    $test->(
+        [45678], 'finished',
+        'Job 45678 does not exist.',
+        'no error if openQA job does not exist (maybe job has already been deleted)'
+    );
+    $test->(
+        [99945], 'finished',
+        'Specified job 99945 has already been cloned as 99946',
+        'no error if openQA job already restarted but result still assigned accordingly'
+    );
+
+    # fake a different error
+    my $job_mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs');
+    $job_mock->redefine(auto_duplicate => 'some error');
+
+    # run into error assuming there's one retry attempt left
+    $test->([99945], 'inactive', undef, 'retry scheduled if an error occurs and there are attempts left');
+
+    # run into error assuming there are no retry attempts left
+    local $ENV{OPENQA_JOB_RESTART_ATTEMPTS} = 1;
+    $test->([99945], 'failed', 'some error', 'error if an error occurs and there are no attempts left');
+};
+
+subtest 'git log diff' => sub {
+    my $job_mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs', no_auto => 1);
+    $job_mock->redefine(
+        run_cmd_with_log_return_error => sub ($cmd, %opt) {
+            my $rc = 0;
+            my $stdout = '';
+            if ("@$cmd" =~ m/rev-list --count/) {
+                if ("@$cmd" =~ m/revlistfail/) { $stdout = "git failed"; $rc = 1; }
+                elsif ("@$cmd" =~ m/nonumber/) { $stdout = "NaN"; }
+                else { $stdout = 10; }
+            }
+            elsif ("@$cmd" =~ m/diff --stat/) {
+                if ("@$cmd" =~ m/difffail/) { $stdout = "git failed"; $rc = 1; }
+                else { $stdout = "2 files changed"; }
+            }
+            return {stdout => $stdout, return_code => $rc, stderr => ''};
+        });
+    my %_settings = %settings;
+    $_settings{TEST} = 'L';
+    my $job = _job_create(\%_settings);
+
+    my $too_big = $job->git_diff('/foo', '123..456', 5);
+    like $too_big, qr{Too many commits}, 'Too many commits';
+
+    my $warning = warning {
+        my $non_numeric = $job->git_diff('/foo', 'nonumber..123456', 10);
+        like $non_numeric, qr{Cannot display diff because of a git problem}, 'rev-list --count returned no number';
+    };
+    like $warning, qr{returned non-numeric string}, 'rev-list --count returned no number - warning is logged';
+
+    $warning = warning {
+        my $fail = $job->git_diff('/foo', 'revlistfail..456', 10);
+        like $fail, qr{Cannot display diff because of a git problem}, 'git rev-list exited with non-zero';
+    };
+    like $warning, qr{git failed}, 'git rev-list exited with non-zero - warning is logged';
+
+    $warning = warning {
+        my $fail = $job->git_diff('/foo', 'difffail..456', 10);
+        like $fail, qr{Cannot display diff because of a git problem}, 'git diff exited with non-zero';
+    };
+    like $warning, qr{git failed}, 'git diff exited with non-zero - warning is logged';
+
+    my $ok = $job->git_diff('/foo', '123..456', 10);
+    like $ok, qr{2 files changed}, 'expected git_diff output';
+};
 
 done_testing();

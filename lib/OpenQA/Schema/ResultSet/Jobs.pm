@@ -86,7 +86,7 @@ the return array.
 =cut
 
 sub latest_jobs ($self, $until = undef) {
-    my @jobs = $self->search($until ? {t_created => {'<=' => $until}} : undef, {order_by => ['me.id DESC']});
+    my @jobs = $self->search($until ? {'me.t_created' => {'<=' => $until}} : undef, {order_by => ['me.id DESC']});
 
     my @latest;
     my %seen;
@@ -214,7 +214,7 @@ sub _search_modules ($self, $module_re) {
         my $stderr;
         IPC::Run::run(\@cmd, \undef, \$stdout, \$stderr);
         next if $stderr;
-        push(@results, map { $_ =~ s/\..*$//; basename $_} split(/\n/, $stdout));
+        push(@results, map { $_ =~ s/\..*$//; basename $_ } split(/\n/, $stdout));
     }
     return \@results;
 }

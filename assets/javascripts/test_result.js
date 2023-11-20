@@ -601,12 +601,17 @@ function setCurrentPreviewFromStepLinkIfPossible(stepLink) {
 }
 
 function githashToLink(value, repo) {
+  if (!value.match(/^([0-9a-f]+) /)) {
+    return null;
+  }
   const logItems = value.split(/(?=^[0-9a-f])/gm);
-  logItems.shift();
   const commits = [];
   for (let i = 0; i < logItems.length; i++) {
     const item = logItems[i];
-    const match = item.match(/^([0-9a-f]{9}) (.*)/);
+    const match = item.match(/^([0-9a-f]+) (.*)/);
+    if (match === null) {
+      return null;
+    }
     const sha = match[1];
     const msg = match[2];
     commits.push({link: sha.link(repo + sha), msg: msg, stat: item.match(/^ .*/gm)});
@@ -639,16 +644,20 @@ function renderTestModules(response) {
     setCurrentPreviewFromStepLinkIfPossible($("[href='" + hash + "'], [data-href='" + hash + "']"));
   }
 
-  // setup keyboard navigation through test details
-  $(window).keydown(handleKeyDownOnTestDetails);
+  // setup event handlers for the window
+  if (!this.hasWindowEventHandlers) {
+    // setup keyboard navigation through test details
+    $(window).keydown(handleKeyDownOnTestDetails);
 
-  // ensure the size of the preview container is adjusted when the window size changes
-  $(window).resize(function () {
-    const currentPreview = $('.current_preview');
-    if (currentPreview.length) {
-      setCurrentPreview($('.current_preview'), true);
-    }
-  });
+    // ensure the size of the preview container is adjusted when the window size changes
+    $(window).resize(function () {
+      const currentPreview = $('.current_preview');
+      if (currentPreview.length) {
+        setCurrentPreview($('.current_preview'), true);
+      }
+    });
+    this.hasWindowEventHandlers = true;
+  }
 
   // setup result filter, define function to apply filter changes
   const detailsFilter = $('#details-filter');
@@ -772,7 +781,7 @@ function renderCommentsTab(response) {
         return;
       }
       const id = found[1];
-      const url = '/api/v1/experimental/jobs/' + id + '/status';
+      const url = urlWithBase('/api/v1/experimental/jobs/' + id + '/status');
       $.ajax(url)
         .done(function (response) {
           const i = document.createElement('i');
@@ -852,7 +861,7 @@ function renderInvestigationTab(response) {
       if (repoUrl) {
         var gitstats = githashToLink(value, repoUrl);
         // assume string 'No test changes..'
-        if (gitstats == null) {
+        if (gitstats === null) {
           preElement.appendChild(document.createTextNode(value));
         } else {
           for (let i = 0; i < gitstats.length; i++) {
@@ -1027,7 +1036,7 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
           tr.node().className = 'current';
         } else {
           var testNameLink = testNameTd.append('a');
-          testNameLink.attr('href', '/tests/' + node.id + '#dependencies');
+          testNameLink.attr('href', urlWithBase('/tests/' + node.id) + '#dependencies');
           testNameLink.text(node.label);
         }
 
@@ -1116,6 +1125,13 @@ function renderDependencyGraph(container, nodes, edges, cluster, currentNode) {
   svg.attr('height', g.graph().height + 40);
 
   // note: centering is achieved by centering the svg element itself like any other html block element
+}
+
+function rescheduleProductForJob(link) {
+  if (window.confirm('Do you really want to partially reschedule the product of this job?')) {
+    rescheduleProduct(link.dataset.url);
+  }
+  return false; // avoid usual link handling
 }
 
 module = {};

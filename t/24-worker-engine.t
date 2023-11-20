@@ -185,12 +185,13 @@ subtest 'asset caching' => sub {
     is $error, $test_dir, 'Cache directory updated';
 };
 
-sub _mock_cache_service_client ($status_data) {
+sub _mock_cache_service_client ($status_data, $error = undef) {
     my $cache_client_mock = Test::MockModule->new('OpenQA::CacheService::Client');
     $cache_client_mock->redefine(enqueue => 'some enqueue error');
     $cache_client_mock->redefine(
         info => OpenQA::CacheService::Response::Info->new(data => {active_workers => 1}, error => undef));
-    $cache_client_mock->redefine(status => OpenQA::CacheService::Response::Status->new(data => $status_data));
+    $cache_client_mock->redefine(
+        status => OpenQA::CacheService::Response::Status->new(data => $status_data, error => $error));
     return $cache_client_mock;
 }
 
@@ -217,6 +218,14 @@ subtest 'problems when caching assets' => sub {
     Mojo::IOLoop->start;
     is $error->{error}, 'Failed to download FOO to some/path', 'asset not found';
     is $error->{category}, WORKER_EC_ASSET_FAILURE, 'category set so problem is treated as asset failure';
+
+    $cache_client_mock = _mock_cache_service_client {}, 'some severe error';
+    $cache_client_mock->redefine(asset_request => Test::FakeRequest->new);
+    $cache_client_mock->redefine(enqueue => 0);
+    @assets = ('ISO_1');
+    OpenQA::Worker::Engines::isotovideo::cache_assets(OpenQA::CacheService::Client->new, @args);
+    Mojo::IOLoop->start;
+    is $error->{error}, 'some severe error', 'job not "processed" due to some error';
 };
 
 subtest '_handle_asset_processed' => sub {
@@ -428,21 +437,33 @@ subtest 'behavior with ABSOLUTE_TEST_CONFIG_PATHS=1' => sub {
     };
 };
 
-subtest 'symlink asset' => sub {
+subtest 'link asset' => sub {
     my $pool_directory = tempdir('poolXXXX');
     my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
-    my $settings
-      = {JOBTOKEN => 'token000', ISO => 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso', HDD_1 => 'foo.qcow2'};
+    my $settings = {
+        JOBTOKEN => 'token000',
+        ISO => 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso',
+        HDD_1 => 'foo.qcow2',
+        HDD_2 => 'symlink.qcow2',
+    };
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 16, settings => $settings});
     combined_like { my $result = _run_engine($job) }
     qr/Linked asset/, 'linked asset';
     my $vars_data = get_job_json_data($pool_directory);
-    ok(-e "$pool_directory/openSUSE-13.1-DVD-x86_64-Build0091-Media.iso", 'the iso is symlinked to pool directory');
-    ok(-e "$pool_directory/foo.qcow2", 'the hdd is symlinked to pool directory');
+    my $orig_hdd = locate_asset('hdd', 'foo.qcow2');
+    my $orig_iso = locate_asset('iso', 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso');
+    my $linked_iso = "$pool_directory/openSUSE-13.1-DVD-x86_64-Build0091-Media.iso";
+    my $linked_hdd = "$pool_directory/foo.qcow2";
+    my $linked_hdd2 = "$pool_directory/symlink.qcow2";
+    ok -e $linked_iso, 'the iso is linked to pool directory';
+    ok -e $linked_hdd, 'the hdd is linked to pool directory';
+    ok -l $linked_hdd2, 'the hdd 2 is symlinked to pool directory';
+    is((stat $linked_hdd)[1], (stat $orig_hdd)[1], 'hdd is hardlinked');
+    is((stat $linked_iso)[1], (stat $orig_iso)[1], 'iso is hardlinked');
     is $vars_data->{ISO}, 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso',
-      'the value of ISO is basename when doing symlink';
-    is $vars_data->{HDD_1}, 'foo.qcow2', 'the value of HDD_1 is basename when doing symlink';
+      'the value of ISO is basename when doing link';
+    is $vars_data->{HDD_1}, 'foo.qcow2', 'the value of HDD_1 is basename when doing link';
 };
 
 done_testing();

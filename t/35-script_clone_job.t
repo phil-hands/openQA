@@ -212,12 +212,11 @@ subtest 'get 2 nodes HA cluster with get_deps' => sub {
             Parallel => [7935, 7936],
         },
     );
-    my ($chained, $directly_chained, $parallel)
-      = OpenQA::Script::CloneJob::get_deps(\%supportserver_job, \%options, 'children');
+    my ($chained, $directly_chained, $parallel) = OpenQA::Script::CloneJob::get_deps(\%supportserver_job, 'children');
     is_deeply($parallel, [7935, 7936], 'getting children nodes jobid from supportserver');
-    ($chained, $directly_chained, $parallel) = OpenQA::Script::CloneJob::get_deps(\%node1_job, \%options, 'parents');
+    ($chained, $directly_chained, $parallel) = OpenQA::Script::CloneJob::get_deps(\%node1_job, 'parents');
     is_deeply($parallel, [7934], 'getting supportserver jobid from node1');
-    ($chained, $directly_chained, $parallel) = OpenQA::Script::CloneJob::get_deps(\%node2_job, \%options, 'parents');
+    ($chained, $directly_chained, $parallel) = OpenQA::Script::CloneJob::get_deps(\%node2_job, 'parents');
     is_deeply($parallel, [7934], 'getting supportserver jobid from node2');
 };
 
@@ -231,7 +230,8 @@ subtest 'error handling' => sub {
     $tx->res->code(200)->body('{"foo": "bar"}');
     throws_ok { $test->() } qr/Failed to create job, server replied: \{ foo => "bar" \}/, 'unexpected JSON handled';
     ($tx = Mojo::Transaction->new)->res->code(200)->body('{"ids": {"42": 43}}');
-    combined_like { $test->() } qr|Created job #43: testjob -> https://base-url/t43|, 'expected response';
+    combined_like { $test->() } qr|1 job has been created:.* - testjob -> https://base-url/tests/43|s,
+      'expected response';
 };
 
 subtest 'export command' => sub {
@@ -242,6 +242,27 @@ subtest 'export command' => sub {
     my $clone_mock = Test::MockModule->new('OpenQA::Script::CloneJob');
     $clone_mock->redefine(clone_job_get_job => sub ($job_id, @args) { {id => $job_id, settings => \%job_settings} });
     combined_like { clone_jobs(42, \%options) } $expected_cmd, 'openqa-cli command printed';
+};
+
+subtest 'cloning with repeat count' => sub {
+    my $ua_mock = Test::MockModule->new('Mojo::UserAgent');
+    my $clone_mock = Test::MockModule->new('OpenQA::Script::CloneJob');
+    my @post_args;
+    my $tx_handled = 0;
+    $ua_mock->redefine(post => sub { push @post_args, [@_] });
+    $clone_mock->redefine(handle_tx => sub ($tx, $url_handler, $options, $jobs) { $tx_handled = 1 });
+    my %fake_jobs = (42 => {id => 42, name => 'myjob', settings => {TEST => 'myjob'}});
+    $clone_mock->redefine(clone_job_get_job => sub ($job_id, @args) { $fake_jobs{$job_id} });
+    my %options = (host => 'foo', from => 'bar', repeat => 100, apikey => 'bar', apisecret => 'bar');
+    OpenQA::Script::CloneJob::clone_jobs(42, \%options);
+    is $options{repeat}, undef, 'repeat count has been removed from options';
+    subtest 'post args' => sub {
+        is scalar @post_args, 100, 'exactly 100 post calls made';
+        # check Nth test name ends with -N
+        is $post_args[0]->[3]->{'TEST:42'}, 'myjob-001', 'first index has been appended to test name';
+        is $post_args[41]->[3]->{'TEST:42'}, 'myjob-042', 'random index has been appended to test name';
+        is $post_args[99]->[3]->{'TEST:42'}, 'myjob-100', 'last index has been appended to test name';
+    } or diag explain \@post_args;
 };
 
 subtest 'overall cloning with parallel and chained dependencies' => sub {
@@ -269,7 +290,7 @@ subtest 'overall cloning with parallel and chained dependencies' => sub {
 
     my %options
       = (host => 'foo', from => 'bar', 'clone-children' => 1, 'skip-download' => 1, verbose => 1, args => ['FOO=bar']);
-    throws_ok { OpenQA::Script::CloneJob::clone_jobs(42, \%options) } qr|API key/secret missing|,
+    throws_ok { OpenQA::Script::CloneJob::clone_jobs(42, \%options) } qr|API key/secret for 'foo' missing|,
       'dies on missing API credentials';
 
     $options{apikey} = $options{apisecret} = 'bar';
@@ -314,20 +335,20 @@ subtest 'overall cloning with parallel and chained dependencies' => sub {
     subtest 'clone only parallel children, enable json output' => sub {
         # invoke handle_tx with fake data
         $clone_mock->redefine(
-            handle_tx => sub (@) {
+            handle_tx => sub ($orig_tx, $url_handler, $options, $jobs) {
                 my $res = Test::MockObject->new->set_always(json => {ids => {1 => 2}});
                 my $tx = Test::MockObject->new->set_false('error')->set_always(res => $res);
-                $clone_mock->original('handle_tx')->($tx, undef, \%options, undef);
+                $clone_mock->original('handle_tx')->($tx, $url_handler, \%options, {1 => {name => 'testjob'}});
             });
 
         @post_args = ();
         $fake_jobs{41}->{children}->{Chained} = [7];
         $options{'parental-inheritance'} = undef;
-        $options{'json-output'} = 1;
+        local $options{'json-output'} = 1;
         push @{$options{args}}, 'TEST+=:suffix';
         my ($stdout, $stderr) = output_from { OpenQA::Script::CloneJob::clone_jobs(41, \%options) };
         my $json_output = decode_json $stdout;
-        like $stderr, qr/cloning/i, 'logs end up in stderr';
+        unlike $stderr, qr/cloning/i, 'no extra logs end up in stderr';
         is_deeply $json_output, {1 => 2}, 'fake response printed as JSON' or diag explain $json_output;
         subtest 'post args' => sub {
             my $params = $check_common_post_args->(':suffix') or return;
@@ -335,6 +356,49 @@ subtest 'overall cloning with parallel and chained dependencies' => sub {
             is delete $params->{'FOO:42'}, 'bar', 'setting passed to child job';
             is delete $params->{"CLONED_FROM:$_"}, "https://bar/tests/$_", "CLONED_FROM set ($_)" for 41, 42;
             is scalar keys %$params, 0, 'exactly 2 jobs posted, so no further settings';
+        } or diag explain \@post_args;
+    };
+
+    subtest 'skip-deps affects only parents' => sub {
+        @post_args = ();
+
+        local $options{'clone-children'} = 1;
+        local $options{'skip-deps'} = 1;
+
+        my ($stdout, $stderr) = output_from { OpenQA::Script::CloneJob::clone_jobs(42, \%options) };
+        like $stdout, qr/1 job has been created/, 'Normal output on stdout';
+        like $stderr, qr/cloning/i, 'Extra output on stderr';
+        subtest 'post args' => sub {
+            my $params = $post_args[0]->[3] // {};
+            is $params->{'CLONED_FROM:42'}, 'https://bar/tests/42', 'main job has been cloned';
+            is $params->{'CLONED_FROM:43'}, 'https://bar/tests/43', 'child job has been clones';
+            is $params->{'_START_AFTER:43'}, '42', 'child job cloned to start after main job 42';
+            ok !$params->{'CLONED_FROM:41'}, 'parent job has not been cloned';
+        } or diag explain \@post_args;
+    };
+
+    subtest 'skip-chained-deps affects only parents' => sub {
+        @post_args = ();
+
+        # Replace parallel parent job with chained one for this test
+        local $fake_jobs{41}
+          = {id => 41, name => 'parent', settings => {TEST => 'parent'}, children => {Chained => [42]}};
+        local $fake_jobs{42} = {
+            id => 42,
+            name => 'main',
+            settings => {TEST => 'main', group_id => 21},
+            parents => {Chained => [41]},
+            children => {Chained => [43]}};
+
+        local $options{'clone-children'} = 1;
+        local $options{'skip-chained-deps'} = 1;
+
+        combined_like { OpenQA::Script::CloneJob::clone_jobs(42, \%options) } qr/cloning/i, 'output logged';
+        subtest 'post args' => sub {
+            my $params = $post_args[0]->[3] // {};
+            is $params->{'CLONED_FROM:42'}, 'https://bar/tests/42', 'main job has been cloned';
+            is $params->{'CLONED_FROM:43'}, 'https://bar/tests/43', 'child job has been clones';
+            ok !$params->{'CLONED_FROM:41'}, 'parent job has not been cloned';
         } or diag explain \@post_args;
     };
 };

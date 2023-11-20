@@ -43,6 +43,7 @@ use OpenQA::Test::TimeLimit '150';
 plan skip_all => "set FULLSTACK=1 (be careful)" unless $ENV{FULLSTACK};
 
 setup_mojo_app_with_default_worker_timeout;
+OpenQA::Setup::read_config(OpenQA::App->singleton);
 
 # setup directories and database
 my $tempdir = setup_fullstack_temp_dir('scheduler');
@@ -129,7 +130,7 @@ subtest 'Scheduler worker job allocation' => sub {
 subtest 're-scheduling and incompletion of jobs when worker rejects jobs or goes offline' => sub {
     # avoid wasting time waiting for status updates
     my $web_ui_connection_mock = Test::MockModule->new('OpenQA::Worker::WebUIConnection');
-    $web_ui_connection_mock->redefine(_calculate_status_update_interval => .1);
+    $web_ui_connection_mock->redefine(calculate_status_update_interval => .1);
 
     my $jobs = $schema->resultset('Jobs');
     my @latest = $jobs->latest_jobs;

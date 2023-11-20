@@ -11,7 +11,7 @@ use OpenQA::Jobs::Constants;
 use OpenQA::Worker::Engines::isotovideo;
 use OpenQA::Worker::Isotovideo::Client;
 use OpenQA::Log qw(log_error log_warning log_debug log_info redact_settings_in_file);
-use OpenQA::Utils qw(find_video_files);
+use OpenQA::Utils qw(find_video_files usleep_backoff);
 
 use Digest::MD5;
 use Fcntl;
@@ -24,6 +24,8 @@ use Mojo::File 'path';
 use Try::Tiny;
 use Scalar::Util 'looks_like_number';
 use File::Map 'map_file';
+use List::Util 'max';
+use Time::HiRes qw(usleep);
 
 # define attributes for public properties
 has 'worker';
@@ -75,6 +77,7 @@ sub new {
     $self->{_id} = $job_info->{id};
     $self->{_info} = $job_info;
     $self->{_livelog_viewers} = 0;
+    $self->{_livelog_viewers_before} = 0;
     $self->{_autoinst_log_offset} = 0;
     $self->{_serial_log_offset} = 0;
     $self->{_serial_terminal_offset} = 0;
@@ -308,6 +311,7 @@ sub _handle_engine_startup ($self, $engine, $max_job_time) {
     # stop execution if timeout has been exceeded
     $self->_set_timeout($max_job_time, $engine);
 
+    $self->_add_livelog_viewers(0);
     $self->_set_status(running => {});
 }
 
@@ -404,7 +408,7 @@ sub _stop_step_4_upload ($self, $reason, $callback) {
 
     # upload logs and assets
     return Mojo::IOLoop->next_tick(sub { $self->_stop_step_5_1_upload($reason, $callback) })
-      if $reason eq WORKER_COMMAND_QUIT || $reason eq 'abort' || $reason eq WORKER_SR_API_FAILURE;
+      if $reason eq WORKER_COMMAND_QUIT || $reason eq WORKER_COMMAND_ABORT || $reason eq WORKER_SR_API_FAILURE;
     Mojo::IOLoop->subprocess(
         sub {
             # upload ulogs
@@ -498,8 +502,8 @@ sub _stop_step_5_2_upload ($self, $reason, $callback) {
         return $self->_upload_results(sub { $callback->({result => INCOMPLETE, newbuild => 1}) });
     }
     if ($reason eq WORKER_COMMAND_CANCEL) {
-        log_debug("Considering job $job_id as cancelled/restarted by the user");
-        return $self->_upload_results(sub { $callback->({result => USER_CANCELLED}) });
+        log_debug("Considering job $job_id as cancelled/restarted by the user");    # uncoverable statement
+        return $self->_upload_results(sub { $callback->({result => USER_CANCELLED}) });    # uncoverable statement
     }
     if ($reason eq WORKER_SR_DONE) {
         log_debug("Considering job $job_id as regularly done");
@@ -549,9 +553,20 @@ sub _stop_step_5_2_upload ($self, $reason, $callback) {
         });
 }
 
-sub _format_reason {
-    my ($self, $result, $reason) = @_;
+sub _read_state_file ($self) {
+    my $state_file = path($self->worker->pool_directory)->child(BASE_STATEFILE);
+    return {} unless -e $state_file;
+    my $state = eval {
+        my $state = decode_json($state_file->slurp);
+        die 'top-level element is not a hash' unless ref $state eq 'HASH';
+        return $state;
+    };
+    return $state unless my $error = $@;
+    log_warning "Found $state_file but failed to parse the JSON: $error";
+    return undef;
+}
 
+sub _format_reason ($self, $state, $result, $reason) {
     # format stop reasons from the worker itself
     return 'timeout: ' . ($self->{_engine} ? 'test execution exceeded MAX_JOB_TIME' : 'setup exceeded MAX_SETUP_TIME')
       if $reason eq WORKER_SR_TIMEOUT;
@@ -565,32 +580,27 @@ sub _format_reason {
     return undef if $reason eq WORKER_COMMAND_CANCEL;
 
     # consider other reasons as os-autoinst specific; retrieve extended reason if available
-    my $state_file = path($self->worker->pool_directory)->child(BASE_STATEFILE);
-    try {
-        if (-e $state_file) {
-            my $state = decode_json($state_file->slurp);
-            die 'top-level element is not a hash' unless ref $state eq 'HASH';
-            if (my $component = $state->{component}) {
-                # prepent the relevant component, e.g. turn "died" into "backend died" or "tests died"
-                $reason = "$component $reason" unless $component =~ qr/$[\w\d]^/;
-            }
-            if (my $msg = $state->{msg}) {
-                # append additional information, e.g. turn "backend died" into "backend died: qemu crashed"
-                my $first_line = ($msg =~ /\A(.*?)$/ms)[0];
-                $reason = "$reason: $first_line";
-            }
+    if ($state) {
+        if (my $component = $state->{component}) {
+            # prepent the relevant component, e.g. turn "died" into "backend died" or "tests died"
+            $reason = "$component $reason" unless $component =~ qr/$[\w\d]^/;
+        }
+        if (my $msg = $state->{msg}) {
+            # append additional information, e.g. turn "backend died" into "backend died: qemu crashed"
+            my $first_line = ($msg =~ /\A(.*?)$/ms)[0];
+            $reason = "$reason: $first_line";
+        }
 
-            # when a job is incomplete with an unknown QEMU issue,
-            # we parse the autoinst-log to get more details in some scenario.
-            my @match_content
-              = ('Failed to allocate KVM .* Cannot allocate memory', 'Could not find .*smbd.*please install it');
-            if ($reason =~ /backend died: QEMU exited unexpectedly|backend died: QEMU terminated/) {
-                my $msg = $self->_parse_log_file(join('|', @match_content));
-                $reason = "QEMU terminated$msg, see log output of details" if $msg;
-            }
+        # when a job is incomplete with an unknown QEMU issue,
+        # we parse the autoinst-log to get more details in some scenario.
+        my @match_content
+          = ('Failed to allocate KVM .* Cannot allocate memory', 'Could not find .*smbd.*please install it');
+        if ($reason =~ /backend died: QEMU exited unexpectedly|backend died: QEMU terminated/) {
+            my $msg = $self->_parse_log_file(join('|', @match_content));
+            $reason = "QEMU terminated$msg, see log output of details" if $msg;
         }
     }
-    catch {
+    else {
         my $msg = $self->_parse_log_file('No space left on device');
         # read autoinst-log.txt to check the reason, see poo#80334
         if ($reason eq WORKER_SR_DONE) {
@@ -599,8 +609,7 @@ sub _format_reason {
         else {
             $reason = "terminated prematurely: Encountered corrupted state file$msg, see log output for details";
         }
-        log_warning("Found $state_file but failed to parse the JSON: $_");
-    };
+    }
 
     # return generic phrase if the reason would otherwise just be died
     return "$reason: terminated prematurely, see log output for details" if $reason eq WORKER_SR_DIED;
@@ -617,7 +626,9 @@ sub _format_reason {
 sub _set_job_done ($self, $reason, $params, $callback) {
 
     # pass the reason if it is an additional specification of the result
-    my $formatted_reason = $self->_format_reason($params->{result}, $reason);
+    my $state = $self->_read_state_file;
+    my $result = ($params->{result} //= $state->{result});
+    my $formatted_reason = $self->_format_reason($state, $result, $reason);
     $params->{reason} = $formatted_reason if defined $formatted_reason;
 
     my $job_id = $self->id;
@@ -653,37 +664,25 @@ sub is_backend_running {
     return !exists $engine->{child} ? !!0 : $engine->{child}->is_running;
 }
 
-sub start_livelog {
-    my ($self) = @_;
-
-    return undef unless $self->is_backend_running;
-
+# starts/stops the livelog
+sub start_livelog ($self) { $self->_add_livelog_viewers(1) }
+sub stop_livelog ($self) { $self->_add_livelog_viewers(-1) }
+sub _add_livelog_viewers ($self, $viewer_count_diff) {
+    my $viewer_count_after = $self->{_livelog_viewers} = max(0, $self->{_livelog_viewers} + $viewer_count_diff);
+    return undef unless $self->is_backend_running;    # skip evaluating viewers if backend has not been started yet
+    my $viewer_count_before = $self->{_livelog_viewers_before};    # the viewers we had before the last evaluation
     my $pooldir = $self->worker->pool_directory;
-    my $livelog_viewers = $self->livelog_viewers + 1;
-    if ($livelog_viewers == 1) {
+    if ($viewer_count_before < 1 && $viewer_count_after >= 1) {
         log_debug('Starting livelog');
-        open(my $fh, '>', "$pooldir/live_log") or die "Cannot create live_log file";
-        close($fh);
+        path("$pooldir/live_log")->touch;
+        $self->_upload_results(sub { });    # trigger result upload immediately
     }
-    $self->{_livelog_viewers} = $livelog_viewers;
-    $self->upload_results_interval(undef);
-    $self->_upload_results(sub { });
-}
-
-sub stop_livelog {
-    my ($self) = @_;
-
-    return unless $self->is_backend_running;
-
-    my $pooldir = $self->worker->pool_directory;
-    my $livelog_viewers = $self->livelog_viewers;
-    $livelog_viewers -= 1 if $livelog_viewers >= 1;
-    if ($livelog_viewers == 0) {
+    elsif ($viewer_count_before >= 1 && $viewer_count_after < 1) {
         log_debug('Stopping livelog');
         unlink "$pooldir/live_log";
     }
-    $self->{_livelog_viewers} = $livelog_viewers;
-    $self->upload_results_interval(undef);
+    $self->{_livelog_viewers_before} = $viewer_count_after;
+    $self->upload_results_interval(undef);    # unset interval so it'll be recomputed
 }
 
 # posts the setup status
@@ -1003,8 +1002,10 @@ sub _upload_asset {
     my $job_id = $self->id;
     my $filename = $upload_parameter->{file}->{filename};
     my $file = $upload_parameter->{file}->{file};
-    my $chunk_size = $self->worker->settings->global_settings->{UPLOAD_CHUNK_SIZE} // 1000000;
-    my $local_upload = $self->worker->settings->global_settings->{LOCAL_UPLOAD} // 1;
+    my $global_settings = $self->worker->settings->global_settings;
+    my $chunk_size = $global_settings->{UPLOAD_CHUNK_SIZE} // 1000000;
+    my $retries = $global_settings->{UPLOAD_RETRIES} // 10;
+    my $local_upload = $global_settings->{LOCAL_UPLOAD} // 1;
     my $ua = $self->client->ua;
     my @channels_worker_only = ('worker');
     my @channels_both = ('autoinst', 'worker');
@@ -1039,11 +1040,11 @@ sub _upload_asset {
             );
         });
 
-    my $response_cb = sub ($upload, $tx) {
+    my $response_cb = sub ($upload, $tx, $retries) {
         if ($tx->res->is_server_error) {
             log_error($tx->res->json->{error}, channels => \@channels_both, default => 1)
               if $tx->res->json && $tx->res->json->{error};
-            my $msg = "Failed uploading asset";
+            my $msg = "Failure during asset upload (attempts remaining: $retries)";
             log_error($msg, channels => \@channels_both, default => 1);
         }
         $self->_log_upload_error($filename, $tx);
@@ -1051,9 +1052,14 @@ sub _upload_asset {
     $ua->upload->on('upload_local.response' => $response_cb);
     $ua->upload->on('upload_chunk.response' => $response_cb);
     $ua->upload->on(
-        'upload_chunk.fail' => sub ($upload, $res, $chunk) {
-            log_error('Upload failed for chunk ' . $chunk->index, channels => \@channels_both, default => 1);
-            sleep UPLOAD_DELAY;    # do not choke webui
+        'upload_chunk.fail' => sub ($upload, $res, $chunk, $attempts, $max_attempts) {
+            my $index = $chunk->index;
+            log_error(
+                "Upload failed for chunk $index (attempts: $attempts/$max_attempts)",
+                channels => \@channels_both,
+                default => 1
+            );
+            usleep usleep_backoff($attempts, UPLOAD_DELAY, 30);    # do not choke webui
         });
 
     $ua->upload->once(
@@ -1074,7 +1080,8 @@ sub _upload_asset {
                 name => $filename,
                 asset => $upload_parameter->{asset},
                 chunk_size => $chunk_size,
-                local => $local_upload
+                local => $local_upload,
+                retries => $retries
             });
     };
     log_error($@, channels => \@channels_both, default => 1) if $@;

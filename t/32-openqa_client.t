@@ -22,11 +22,6 @@ my $chunk_size = 10000000;
 # allow up to 200MB - videos mostly
 $ENV{MOJO_MAX_MESSAGE_SIZE} = 207741824;
 
-OpenQA::Events->singleton->on(
-    'chunk_upload.end' => sub {
-        Devel::Cover::report() if Devel::Cover->can('report');
-    });
-
 my @client_args = (apikey => 'PERCIVALKEY02', apisecret => 'PERCIVALSECRET02');
 my $t = client(Test::Mojo->new('OpenQA::WebAPI'), @client_args);
 my $client = $t->ua;
@@ -150,7 +145,7 @@ subtest 'upload other assets' => sub {
     $t->json_is('/name' => '00099963-hdd_image3.xml', 'name is expected for other asset');
 };
 
-subtest 'upload retrials' => sub {
+subtest 'upload retries' => sub {
     my $chunkdir = 't/data/openqa/share/factory/tmp/other/00099963-hdd_image4.xml.CHUNKS/';
     my $rp = "t/data/openqa/share/factory/other/00099963-hdd_image4.xml";
 
@@ -197,11 +192,11 @@ subtest 'upload failures' => sub {
         });
 
     eval {
-        $t->ua->upload->asset(
-            99963 => {chunk_size => $chunk_size, file => $filename, name => 'hdd_image5.xml', asset => 'other'});
+        $t->ua->upload->asset(99963 =>
+              {chunk_size => $chunk_size, file => $filename, name => 'hdd_image5.xml', asset => 'other', retries => 7});
     };
     ok !$@, 'No function errors on upload failures' or die diag $@;
-    is $fail_chunk, 5, 'All chunks failed, no recovery on upload failures';
+    is $fail_chunk, 7, 'All attempts failed, no recovery on upload failures';
     is $errored, 1, 'Upload errors';
     ok !-d $chunkdir, 'Chunk directory should not exist anymore';
     ok !-e $rp, 'Asset does not exist after upload on upload failures';
@@ -226,7 +221,7 @@ subtest 'upload internal errors' => sub {
             99963 => {chunk_size => $chunk_size, file => $filename, name => 'hdd_image6.xml', asset => 'other'});
     };
     ok !$@, 'No function errors on internal errors' or die diag $@;
-    is $fail_chunk, 5, 'All chunks failed, no recovery on internal errors';
+    is $fail_chunk, 10, 'All chunks failed, no recovery on internal errors';
     like $e, qr/Subdly/, 'Internal error seen';
     ok !-d $chunkdir, 'Chunk directory should not exist anymore';
     ok !-e $rp, 'Asset does not exist after upload on internal errors';

@@ -1,11 +1,19 @@
-#!BuildTag: openqa_webui
-FROM opensuse/leap:15.4
-LABEL maintainer Jan Sedlak <jsedlak@redhat.com>, Josef Skladanka <jskladan@redhat.com>, wnereiz <wnereiz@eienteiland.org>, Sergio Lindo Mansilla <slindomansilla@suse.com>
-LABEL version="0.3"
+# SPDX-License-Identifier: MIT
+#!BuildTag: openqa_webui:latest opensuse/openqa-webui:latest opensuse/openqa-webui:%PKG_VERSION% opensuse/openqa-webui:%PKG_VERSION%.%RELEASE%
+FROM opensuse/leap:15.5
+
+# labelprefix=org.opensuse.openqa-webui
+LABEL org.opencontainers.image.title="openQA webui container"
+LABEL org.opencontainers.image.description="An openQA webui instance including Apache webserver"
+LABEL org.opencontainers.image.version="%PKG_VERSION%.%RELEASE%"
+LABEL org.opensuse.reference="registry.opensuse.org/opensuse/openqa-webui:%PKG_VERSION%.%RELEASE%"
+LABEL org.openbuildservice.disturl="%DISTURL%"
+LABEL org.opencontainers.image.created="%BUILDTIME%"
+# endlabelprefix
 
 # hadolint ignore=DL3037
-RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/15.4 devel_openQA && \
-    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.4/15.4 devel_openQA_Leap && \
+RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/15.5 devel_openQA && \
+    zypper ar -p 90 -f http://download.opensuse.org/repositories/devel:openQA:Leap:15.5/15.5 devel_openQA_Leap && \
     zypper --gpg-auto-import-keys ref && \
     # openQA might need rubygem:sass to compile assets in this context due to
     # unknown reasons even though the package should use the precompiled
@@ -21,8 +29,7 @@ RUN zypper ar -p 95 -f http://download.opensuse.org/repositories/devel:openQA/15
     a2enmod rewrite && \
     a2enflag SSL
 
-COPY openqa-ssl.conf /etc/apache2/vhosts.d/openqa-ssl.conf
-COPY openqa.conf /etc/apache2/vhosts.d/openqa.conf
+COPY openqa-ssl.conf openqa.conf /etc/apache2/vhosts.d/
 COPY run_openqa.sh /root/
 
 # set-up shared data and configuration

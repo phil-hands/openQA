@@ -187,14 +187,24 @@ subtest 'HTTP features' => sub {
     is decode_json($stdout)->{body}, 'Hello openQA!', 'request body';
 
     ($stdout, @result) = capture_stdout sub { $api->run(@host, '-a', 'X-Test: works', $path) };
-    is decode_json($stdout)->{headers}{'X-Test'}, 'works', 'X-Test header';
+    my $data = decode_json $stdout;
+    is $data->{headers}{'User-Agent'}, 'openqa-cli', 'User-Agent header';
+    is $data->{headers}{'X-Test'}, 'works', 'X-Test header';
 
     ($stdout, @result) = capture_stdout sub { $api->run(@host, '--header', 'X-Test: works', $path) };
-    is decode_json($stdout)->{headers}{'X-Test'}, 'works', 'X-Test header';
+    $data = decode_json $stdout;
+    is $data->{headers}{'User-Agent'}, 'openqa-cli', 'User-Agent header';
+    is $data->{headers}{'X-Test'}, 'works', 'X-Test header';
+
+    ($stdout, @result)
+      = capture_stdout sub { $api->run(@host, '--header', 'X-Test: works', '--name', 'openqa-whatever', $path) };
+    $data = decode_json $stdout;
+    is $data->{headers}{'User-Agent'}, 'openqa-whatever', 'User-Agent header';
+    is $data->{headers}{'X-Test'}, 'works', 'X-Test header';
 
     ($stdout, @result)
       = capture_stdout sub { $api->run(@host, '-a', 'X-Test: works', '-a', 'X-Test2: works too', $path) };
-    my $data = decode_json $stdout;
+    $data = decode_json $stdout;
     is $data->{headers}{'X-Test'}, 'works', 'X-Test header';
     is $data->{headers}{'X-Test2'}, 'works too', 'X-Test2 header';
 
@@ -366,14 +376,14 @@ subtest 'JSON form data' => sub {
 
 subtest 'Data file' => sub {
     my $path = 'test/pub/http';
-    my $file = tempfile->spurt('Hello from a file!');
+    my $file = tempfile->spew('Hello from a file!');
     my ($stdout, @result) = capture_stdout sub { $api->run(@host, '-D', "$file", '-X', 'POST', $path) };
     my $data = decode_json $stdout;
     is $data->{method}, 'POST', 'POST request';
     is_deeply $data->{params}, {}, 'no params';
     is $data->{body}, 'Hello from a file!', 'request body';
 
-    $file->spurt('{"foo":"bar"}');
+    $file->spew('{"foo":"bar"}');
     ($stdout, @result) = capture_stdout sub { $api->run(@host, '--form', '-D', "$file", '-X', 'PUT', $path) };
     $data = decode_json $stdout;
     is $data->{method}, 'PUT', 'PUT request';
@@ -392,14 +402,14 @@ subtest 'Data file' => sub {
     is_deeply $data->{params}, {}, 'no params';
     is $data->{body}, '{"foo":"bar"}', 'request body';
 
-    $file->spurt(encode('UTF-8', '{"foo":"some täst"}'));
+    $file->spew(encode('UTF-8', '{"foo":"some täst"}'));
     ($stdout, @result) = capture_stdout sub { $api->run(@host, '-f', '-D', "$file", '-X', 'PUT', $path) };
     $data = decode_json $stdout;
     is $data->{method}, 'PUT', 'PUT request';
     is_deeply $data->{params}, {foo => 'some täst'}, 'params';
     is $data->{body}, 'foo=some+t%C3%A4st', 'request body';
 
-    $file->spurt(encode('UTF-8', '{"foo":"some täst"}'));
+    $file->spew(encode('UTF-8', '{"foo":"some täst"}'));
     ($stdout, @result) = capture_stdout sub { $api->run(@host, '-f', '-D', "$file", $path) };
     $data = decode_json $stdout;
     is $data->{method}, 'GET', 'GET request';
@@ -441,6 +451,11 @@ EOF
 
     ($stdout, $stderr, @result) = capture sub { $api->run('--retries', '1', @params) };
     like $stdout, qr/failed.*retrying/, 'requests are retried on error if requested';
+
+    @params = ('--host', 'http://localhost:123456', '--retries', 1, 'api', 'test');
+    ($stdout, $stderr, @result) = capture sub { $api->run(@params) };
+    like $stderr, qr/Connection refused/, 'aborts on connection refused';
+    like $stdout, qr/failed.*retrying/, 'requests are retried on error if requested';
 };
 
 subtest 'Pretty print JSON' => sub {
@@ -479,7 +494,7 @@ subtest 'Pagination links' => sub {
 
 subtest 'PIPE input' => sub {
     my $file = tempfile;
-    my $fh = $file->spurt('Hello openQA!')->open('<');
+    my $fh = $file->spew('Hello openQA!')->open('<');
     local *STDIN = $fh;
     my ($stdout, @result) = capture_stdout sub { $api->run(@host, 'test/pub/http') };
     is decode_json($stdout)->{body}, 'Hello openQA!', 'request body';
@@ -496,7 +511,7 @@ subtest 'YAML Templates' => sub {
     is decode_json($stdout)->{job_group_id}, '1', 'YAML template as param';
     is_deeply \@result, [0], 'YAML template as param - exit code';
     is $stderr, '', 'YAML template as param - stderr quiet';
-    my $file = tempfile->spurt($yaml_text);
+    my $file = tempfile->spew($yaml_text);
     ($stdout, $stderr, @result) = capture sub { $api->run(@params, "template=$file") };
     is_deeply \@result, [1], 'File name as template - right error code';
     like $stderr, qr/400 Bad Request/, 'File name as template - right error msg';
@@ -504,6 +519,14 @@ subtest 'YAML Templates' => sub {
     is decode_json($stdout)->{job_group_id}, '1', 'YAML template by file';
     is_deeply \@result, [0], 'YAML template by file - exit code';
     is $stderr, '', 'YAML template by file - stderr quiet';
+};
+
+subtest 'Base URL with slash' => sub {
+    $app->config->{global}->{base_url} = "http://127.0.0.1:$port/";
+    my ($stdout, @result) = capture_stdout sub { $api->run(@auth, 'test/op/hello') };
+    is_deeply \@result, [0], 'zero exit code';
+    unlike $stdout, qr/200 OK.*Content-Type:/s, 'not verbose';
+    like $stdout, qr/Hello operator!/, 'operator response';
 };
 
 done_testing();

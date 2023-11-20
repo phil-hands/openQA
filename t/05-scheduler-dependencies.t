@@ -495,7 +495,7 @@ subtest 'simple chained dependency cloning' => sub {
     my $jobX2 = $jobX->auto_duplicate;
     $jobY->discard_changes;
     is($jobY->state, CANCELLED, 'jobY was cancelled');
-    is($jobY->result, PARALLEL_RESTARTED, 'jobY was skipped');
+    is($jobY->result, SKIPPED, 'jobY was skipped');
     my $jobY2 = $jobY->clone;
     ok(defined $jobY2, "jobY was cloned too");
     is($jobY2->blocked_by_id, $jobX2->id, "JobY2 is blocked");
@@ -581,11 +581,15 @@ subtest 'duplicate parallel siblings' => sub {
     # K2             L2
 
     my $jobL2 = $jobL->auto_duplicate;
-    ok($jobL2, 'jobL duplicated');
-    # reload data from DB
-    $_->discard_changes for ($jobH, $jobK, $jobJ, $jobL);
-    # check other clones
-    ok($_->clone, 'job ' . $_->TEST . ' cloned') for ($jobJ, $jobH, $jobK);
+    ok $jobL2, 'jobL duplicated';
+    $_->discard_changes for $jobH, $jobK, $jobJ, $jobL;    # reload data from DB
+                                                           # check other clones
+    for ($jobJ, $jobH, $jobK) {
+        ok $_->clone, 'job ' . $_->TEST . ' cloned';
+        is $_->result, PARALLEL_RESTARTED, 'job ' . $_->TEST . ' in parallel cluster marked as PARALLEL_RESTARTED';
+    }
+    is $jobL->state, RUNNING, 'the duplicated job itself is still running (cancelled would work as well)';
+    is $jobL->result, NONE, 'the duplicated job itself has no result yet';
 
     my $jobJ2 = $jobL2->to_hash(deps => 1)->{parents}->{Parallel}->[0];
     is($jobJ2, $jobJ->clone->id, 'J2 cloned with parallel parent dep');
@@ -839,7 +843,7 @@ subtest 'clone chained child with siblings; then clone chained parent' =>
     #   |- C
     #   \- D
 
-    # B failed, auto clone it
+    # auto duplicate the incomplete job B
     my $jobBc = $jobB->auto_duplicate({dup_type_auto => 1});
     ok($jobBc, 'jobB duplicated');
 
@@ -1117,22 +1121,16 @@ subtest 'skip "ok" children' => sub {
 
     my $new_job_cluster = $clone->cluster_jobs;
     subtest 'dependencies of cloned jobs' => sub {
-        my @expected_job_ids = ((map { $_->clone_id } ($parent, $child_2, $child_2_child_1, $child_3)), $child_1->id);
-        is(ref $new_job_cluster->{$_}, 'HASH', "new cluster contains job $_") for @expected_job_ids;
-        is_deeply(
-            [sort @{$new_job_cluster->{$clone->id}{directly_chained_children}}],
-            [$child_1->id, $child_2->clone_id, $child_3->clone_id],
-            'parent contains all children, including the not restarted one'
-        );
-        is_deeply(
-            [sort @{$new_job_cluster->{$child_1->id}{directly_chained_parents}}],
-            [$parent->id, $clone->id],
-            'skipped job has nevertheless new parent (besides old one) to appear in the new dependency tree as well'
-        );
-        is_deeply([sort @{$new_job_cluster->{$child_2_child_1->clone_id}{directly_chained_parents}}],
-            [$child_2->clone_id], 'parent for child of child assigned');
-        # note: It is not exactly clear whether creating a dependency between the skipped job and the new
-        #       parent is the best behavior but let's assert it for now.
+        my @expected_job_ids = map { $_->clone_id } ($parent, $child_2, $child_2_child_1, $child_3);
+        is ref $new_job_cluster->{$_}, 'HASH', "new cluster contains job $_" for @expected_job_ids;
+        is_deeply [sort @{$new_job_cluster->{$clone->id}{directly_chained_children}}],
+          [$child_2->clone_id, $child_3->clone_id],
+          'parent contains all children, except the skipped one (as per poo#150917)';
+        my @child_1_parents = map { $_->parent_job_id } $child_1->parents->all;
+        is_deeply \@child_1_parents, [$parent->id],
+          'skipped job has only the old parent and not also the new parent (as per poo#150917)';
+        is_deeply [sort @{$new_job_cluster->{$child_2_child_1->clone_id}{directly_chained_parents}}],
+          [$child_2->clone_id], 'parent for child of child assigned';
     } or $log_jobs->() or diag explain $new_job_cluster;
 };
 
@@ -1206,18 +1204,18 @@ subtest 'starvation of parallel jobs prevented' => sub {
     my $second_child_job = $jobs->create({id => 3, state => SCHEDULED, TEST => $mocked_jobs{3}->{test}});
 
     # run the scheduler; parallel parent supposed to be prioritized
-    my ($allocated, $allocated_workers) = (undef, {});
-    combined_like { $allocated = OpenQA::Scheduler::Model::Jobs->singleton->schedule($allocated_workers) }
+    my $free_workers = OpenQA::Scheduler::Model::Jobs::determine_free_workers();
+    my $allocated_workers;
+    combined_like { $allocated_workers = OpenQA::Scheduler::Model::Jobs->singleton->_allocate_jobs($free_workers) }
     qr/Need to schedule 3 parallel jobs for job 1.*Discarding job (1|2|3).*Discarding job (1|2|3)/s,
       'discarding jobs due to incomplete parallel cluster';
-    is_deeply $allocated, [], 'no jobs allocated (1)' or diag explain $allocated;
     is $mocked_jobs{1}->{priority_offset}, 10, 'priority of parallel parent increased (once per child)';
     is_deeply $allocated_workers, {}, 'no workers "held" so far while still increased prio'
       or diag explain $allocated_workers;
 
     # run the scheduler again assuming highest prio for parallel parent; worker supposed to be "held"
     $mocked_jobs{1}->{priority} = 0;
-    combined_like { $allocated = OpenQA::Scheduler::Model::Jobs->singleton->schedule($allocated_workers) }
+    combined_like { ($allocated_workers) = OpenQA::Scheduler::Model::Jobs->singleton->_allocate_jobs($free_workers) }
     qr/Holding worker .* for job (1|2|3) to avoid starvation.*Holding worker .* for job (1|2|3) to avoid starvation/s,
       'holding 2 workers (for 2 of our parallel jobs while 3rd worker is unavailable)';
     is_deeply [sort keys %$allocated_workers], [map { $_->id } @mocked_free_workers], 'both free workers "held"';

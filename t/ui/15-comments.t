@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Mojo::Base -base, -signatures;
 use utf8;
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
@@ -60,6 +61,30 @@ my $edited_test_message = $test_message . $another_test_message;
 my $description_test_message = "pinned-description ... The description";
 my $user_name = 'Demo';
 
+# fills out the comment form and submits
+my $max_write_attempts = $ENV{OPENQA_COMMENTS_TEST_MAX_WRITE_ATTEMPTS} // 10;
+sub write_comment ($text, $desc) {
+    for (my $attempts = 1;; ++$attempts) {
+        eval {
+            wait_for_element(
+                selector => '#commentForm textarea[name="text"]',
+                is_displayed => 1,
+                description => 'comment form is displayed'
+            )->send_keys($text);
+            $driver->find_element_by_id('submitComment')->click;
+            wait_for_ajax msg => $desc;
+        };
+        return undef unless my $error = $@;
+        die $error if ($error !~ qr/unexpected alert/i) || ($attempts >= $max_write_attempts);   # uncoverable statement
+
+        # try to dismiss the alert "The comment text mustn't be empty." that is for some reason possibly shown
+        # note: Even waiting until document.forms.commentForm.text.value is not empty anymore before submitting
+        #       the form does not help so the retry is the best we can do (see poo#129946 for details).
+        $driver->dismiss_alert;    # uncoverable statement
+        $driver->execute_script('document.forms.commentForm.text.value = ""');    # uncoverable statement
+    }
+}
+
 # switches to comments tab (required when editing comments in test results)
 # expects the current number of comments as argument (currently the easiest way to find the tab button)
 sub switch_to_comments_tab {
@@ -108,15 +133,9 @@ sub test_comment_editing {
     is(scalar @comments, 0, 'no comments present so far');
 
     subtest 'add' => sub {
-        $driver->find_element_by_id('text')->send_keys($test_message);
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment added to ' . $context);
-
-        if ($in_test_results) {
-            switch_to_comments_tab(1);
-        }
-
-        check_comment($test_message, 0);
+        write_comment $test_message, "comment added to $context";
+        switch_to_comments_tab 1 if $in_test_results;
+        check_comment $test_message, 0;
     };
 
     subtest 'edit' => sub {
@@ -165,14 +184,10 @@ sub test_comment_editing {
 
         ok(javascript_console_has_no_warnings_or_errors(), 'no unexpected js warnings');
 
-        # re-add a comment with the original message
-        $driver->find_element_by_id('text')->send_keys($test_message);
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment added to ' . $context);
-
-        # check whether the new comment is displayed correctly
-        switch_to_comments_tab(1) if ($in_test_results);
-        check_comment($test_message, 0);
+        # re-add a comment with the original message and check whether it is displayed correctly
+        write_comment $test_message, "comment added to $context";
+        switch_to_comments_tab 1 if $in_test_results;
+        check_comment $test_message, 0;
     };
 }
 
@@ -184,7 +199,7 @@ subtest 'URL auto-replace' => sub {
     my $build_url = $driver->get_current_url();
     $build_url =~ s/\?.*//;
     log_debug('build_url: ' . $build_url);
-    $driver->find_element_by_id('text')->send_keys(<<'EOF');
+    my $text = <<'EOF';
 foo@bar foo#bar should not be detected as bugref
 bsc#2436346bla should not be detected, too
 bsc#2436347bla2
@@ -204,8 +219,7 @@ https://bugzilla.gnome.org/show_bug.cgi?id=690345
 https://bugzilla.redhat.com/show_bug.cgi?id=343098
 [bsc#1043970](https://bugzilla.suse.com/show_bug.cgi?id=1043970 "Bugref at end of title: bsc#1043760")
 EOF
-    $driver->find_element_by_id('submitComment')->click();
-    wait_for_ajax(msg => 'comment with URL-replacing added');
+    write_comment $text, 'comment with URL-replacing added';
 
     # the first made comment needs to be 2nd now
     my @comments = $driver->find_elements('div.media-comment p', 'css');
@@ -213,28 +227,28 @@ EOF
 
     # uses ( delimiter for qr as there are / in the text
     like($comments[0]->get_text(),
-qr(bsc#1234 boo#2345,poo#3456 t#4567 .*poo#6789 bsc#7890 bsc#1000629 bsc#1000630 bnc#1246 gh#os-autoinst/openQA#1234 gh#os-autoinst/os-autoinst#960 bgo#768954 brc#1401123)
+qr(bsc#1234  boo#2345, poo#3456 t#4567 .*poo#6789  bsc#7890 bsc#1000629 bsc#1000630  bnc#1246  gh#os-autoinst/openQA#1234  gh#os-autoinst/os-autoinst#960  bgo#768954  brc#1401123)
     );
     my @urls = $driver->find_elements('div.media-comment a', 'css');
     is(scalar @urls, 19);
     is((shift @urls)->get_text(), 'http://localhost:9562', "url2");
     is((shift @urls)->get_text(), 'https://openqa.example.com/tests/181148', "url3");
     is((shift @urls)->get_text(), 'http://localhost/foo/bar', "url4");
-    is((shift @urls)->get_text(), 'bsc#1234', "url5");
-    is((shift @urls)->get_text(), 'boo#2345', "url6");
-    is((shift @urls)->get_text(), 'poo#3456', "url7");
+    is((shift @urls)->get_text(), ' bsc#1234', "url5");
+    is((shift @urls)->get_text(), ' boo#2345', "url6");
+    is((shift @urls)->get_text(), ' poo#3456', "url7");
     is((shift @urls)->get_text(), 't#4567', "url8");
     is((shift @urls)->get_text(), 't#5678/modules/welcome/steps/1', "url9");
-    is((shift @urls)->get_text(), 'poo#6789', "url10");
-    is((shift @urls)->get_text(), 'bsc#7890', "url11");
+    is((shift @urls)->get_text(), ' poo#6789', "url10");
+    is((shift @urls)->get_text(), ' bsc#7890', "url11");
     is((shift @urls)->get_text(), 'bsc#1000629', "url12");
-    is((shift @urls)->get_text(), 'bnc#1246', "url14");
-    is((shift @urls)->get_text(), 'gh#os-autoinst/openQA#1234', "url15");
-    is((shift @urls)->get_text(), 'gh#os-autoinst/os-autoinst#960', "url16");
-    is((shift @urls)->get_text(), 'bgo#768954', "url17");
-    is((shift @urls)->get_text(), 'brc#1401123', "url18");
-    is((shift @urls)->get_text(), 'bgo#690345', "url19");
-    is((shift @urls)->get_text(), 'brc#343098', "url20");
+    is((shift @urls)->get_text(), ' bnc#1246', "url14");
+    is((shift @urls)->get_text(), ' gh#os-autoinst/openQA#1234', "url15");
+    is((shift @urls)->get_text(), ' gh#os-autoinst/os-autoinst#960', "url16");
+    is((shift @urls)->get_text(), ' bgo#768954', "url17");
+    is((shift @urls)->get_text(), ' brc#1401123', "url18");
+    is((shift @urls)->get_text(), ' bgo#690345', "url19");
+    is((shift @urls)->get_text(), ' brc#343098', "url20");
     is((shift @urls)->get_text(), 'bsc#1043970', "url21");
 
     my @urls2 = $driver->find_elements('div.media-comment a', 'css');
@@ -285,15 +299,18 @@ subtest 'commenting in test results including labels' => sub {
         $driver->find_element('#commentForm .help_popover.fa-ticket')->click;
         my $textarea = $driver->find_element_by_id('text');
         like $textarea->get_value, qr/label:force_result:new_result/, 'label template added';
+        $driver->find_element_by_id('submitComment')->click;
+        eval { wait_for_ajax(msg => 'alert when trying to submit comment') };
+        like $@, qr/unexpected alert/, 'alert already shown shown when trying to wait for it' if $@;
+        like $driver->get_alert_text, qr/Invalid result 'new_result' for force_result/, 'error from server shown';
+        $driver->dismiss_alert;
         $textarea->clear;
     };
 
     # do the same tests for comments as in the group overview
     test_comment_editing(1);
 
-    $driver->find_element_by_id('text')->send_keys($test_message);
-    $driver->find_element_by_id('submitComment')->click();
-    wait_for_ajax;
+    write_comment $test_message, 'comment added';
 
     subtest 'add job status icons' => sub {
         my $urls = <<"EOM";
@@ -302,10 +319,9 @@ Can you see status circles after the URLs?
 - I'm green! $url/t80000
 - I'm red! $url/t99938
 EOM
-        $driver->find_element_by_id('text')->send_keys($urls);
-        $driver->find_element_by_id('submitComment')->click();
+        write_comment $urls, 'comment with job status icons';
         $driver->refresh;
-        wait_for_ajax;
+        wait_for_ajax msg => 'comment with status icons loaded';
         my @i = $driver->find_elements('div.comment-body a i.status');
         is $i[0]->get_attribute('class'), 'status fa fa-circle result_passed', "Icon for success is shown";
         is $i[1]->get_attribute('class'), 'status fa fa-circle result_failed', "Icon for failure is shown";
@@ -330,10 +346,7 @@ EOM
 
     subtest 'add label and bug and check availability sign' => sub {
         $driver->get('/tests/99938#comments');
-        wait_for_ajax(msg => 'comments tab of job 99938 loaded');
-        $driver->find_element_by_id('text')->send_keys('label:true_positive');
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment added to job 99938');
+        write_comment 'label:true_positive', 'comment added to job 99938';
         $driver->find_element_by_link_text('Job Groups')->click();
         $driver->find_element('#current-build-overview a')->click();
         is(
@@ -342,10 +355,7 @@ EOM
             'label icon shown'
         );
         $driver->get('/tests/99939#comments');
-        wait_for_ajax(msg => 'comments tab of job 99939 loaded');
-        $driver->find_element_by_id('text')->send_keys('label:force_result:passed:forceresult_for_testing_purposes');
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment added to job 99939');
+        write_comment 'label:force_result:passed:forceresult_for_testing_purposes', 'comment added to job 99939';
         $driver->find_element_by_link_text('Job Groups')->click();
         $driver->find_element('#current-build-overview a')->click();
         is(
@@ -354,10 +364,7 @@ EOM
             'force_result label icon shown'
         );
         $driver->get('/tests/99938#comments');
-        wait_for_ajax(msg => 'comments tab of job 99938 loaded');
-        $driver->find_element_by_id('text')->send_keys('bsc#1234 poo#4321');
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment added to job 99938 (2)');
+        write_comment 'bsc#1234 poo#4321', 'comment added to job 99938 (2)';
         $driver->find_element_by_link_text('Job Groups')->click();
         $driver->find_element('#current-build-overview a')->click();
         is(
@@ -381,10 +388,7 @@ EOM
 
         subtest 'progress items work, too' => sub {
             $driver->get('/tests/99926#comments');
-            wait_for_ajax(msg => 'comments tab of job 99926 loaded');
-            $driver->find_element_by_id('text')->send_keys('poo#9876');
-            $driver->find_element_by_id('submitComment')->click();
-            wait_for_ajax(msg => 'comment added to job 99926');
+            write_comment 'poo#9876', 'comment added to job 99926';
             $driver->find_element_by_link_text('Job Groups')->click();
             like(
                 $driver->find_element_by_id('current-build-overview')->get_text(),
@@ -401,10 +405,7 @@ EOM
 
         subtest 'latest bugref first' => sub {
             $driver->get('/tests/99926#comments');
-            wait_for_ajax(msg => 'comments tab of job 99926 loaded (2)');
-            $driver->find_element_by_id('text')->send_keys('poo#9875 poo#9874');
-            $driver->find_element_by_id('submitComment')->click();
-            wait_for_ajax(msg => 'comment added to job 99926 (2)');
+            write_comment 'poo#9875 poo#9874', 'comment added to job 99926 (2)';
             $driver->find_element_by_link_text('Job Groups')->click();
             like(
                 $driver->find_element_by_id('current-build-overview')->get_text(),
@@ -433,9 +434,7 @@ subtest 'commenting on parent group overview' => sub {
     # add another comment to have an equal amount of comments in the parent group and in the job group
     # to unify further checks for pagination between the group overview pages
     # (the job group overview has one more so far because of subtest 'URL auto-replace')
-    $driver->find_element_by_id('text')->send_keys('yet another comment');
-    $driver->find_element_by_id('submitComment')->click();
-    wait_for_ajax(msg => 'comment added to parent group');
+    write_comment 'yet another comment', 'comment added to parent group';
 };
 
 subtest 'editing when logged in as regular user' => sub {
@@ -455,11 +454,7 @@ subtest 'editing when logged in as regular user' => sub {
     subtest 'test pinned comments: ' . $_ => sub {
         my $group_url = $_;
         $driver->get($group_url);
-        $driver->find_element_by_id('text')->send_keys($description_test_message);
-        $driver->find_element_by_id('submitComment')->click();
-        # need to reload the page for the pinning to take effect
-        # waiting for AJAX is required nevertheless to wait until the API query has been sent
-        wait_for_ajax(msg => 'pinned comment added to job group');
+        write_comment $description_test_message, 'pinned comment added to job group';
         $driver->get($group_url);
         is($driver->find_element('#group_descriptions .media-comment')->get_text(),
             $description_test_message, 'comment is pinned');
@@ -471,10 +466,7 @@ subtest 'editing when logged in as regular user' => sub {
         $driver->get('/tests/99938#comments');
         wait_for_ajax(msg => 'comments tab for job 99938 loaded');
         no_edit_no_remove_on_other_comments_expected;
-        wait_for_element(selector => '#text', description => 'comment form is displayed');
-        $driver->find_element_by_id('text')->send_keys('test by nobody');
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment for job 99938 added by regular user');
+        write_comment 'test by nobody', 'comment for job 99938 added by regular user';
         switch_to_comments_tab(6);
         only_edit_for_own_comments_expected;
     };
@@ -483,16 +475,11 @@ subtest 'editing when logged in as regular user' => sub {
         my $group_url = $_;
         $driver->get($group_url);
         no_edit_no_remove_on_other_comments_expected;
-        $driver->find_element_by_id('text')->send_keys('test by nobody');
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment for group added by regular user');
+        write_comment 'test by nobody', 'comment for group added by regular user';
         only_edit_for_own_comments_expected;
 
         # pinned comments are not shown (pinning is only possible when commentator is operator)
-        wait_for_element(selector => '#text', description => 'comment form is displayed');
-        $driver->find_element_by_id('text')->send_keys($description_test_message);
-        $driver->find_element_by_id('submitComment')->click();
-        wait_for_ajax(msg => 'comment with pinning for group added by regular user');
+        write_comment $description_test_message, 'comment with pinning for group added by regular user';
         $driver->get($group_url);
         is(scalar @{$driver->find_elements('.pinned-comment-row')}, 1, 'there shouldn\'t appear more pinned comments');
 

@@ -40,13 +40,13 @@ sub write {
     my ($self, $path) = @_;
     croak __PACKAGE__ . ' write() requires a path' unless $path;
     my $json_data = $self->to_json;
-    path($path)->spurt($json_data);
+    path($path)->spew($json_data);
     return length $json_data;
 }
 
 sub write_json { shift->write(@_) }
 
-sub serialize { Storable::freeze(shift->to_el) }
+sub serialize { Storable::nfreeze(shift->to_el) }
 sub deserialize { shift()->new(OpenQA::Parser::restore_el(Storable::thaw(shift))) }
 
 sub TO_JSON { shift->to_hash }

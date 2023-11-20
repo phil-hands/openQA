@@ -12,6 +12,7 @@ use OpenQA::Setup;
 use OpenQA::WebAPI::Description qw(get_pod_from_controllers set_api_desc);
 use Mojo::File 'path';
 use Try::Tiny;
+use YAML::PP qw(LoadFile);
 
 has secrets => sub ($self) { $self->schema->read_application_secrets };
 
@@ -70,9 +71,12 @@ sub startup ($self) {
     OpenQA::Setup::set_secure_flag_on_cookies_of_https_connection($self);
     OpenQA::Setup::prepare_settings_ui_keys($self);
 
-    # setup asset pack
-  # -> in case the following line is moved in another location, tools/generate-packed-assets needs to be adapted as well
-    $self->plugin(AssetPack => {pipes => [qw(Sass Css JavaScript Fetch Combine)]});
+    # setup asset pack, note that the config file is shared with tools/generate-packed-assets
+    $self->plugin(AssetPack => LoadFile($self->home->child('assets', 'assetpack.yml')));
+
+    # The feature was added in the 2.14 release, the version check can be removed once openQA depends on a newer version
+    $self->asset->store->retries(5) if $Mojolicious::Plugin::AssetPack::VERSION > 2.13;
+
     # -> read assets/assetpack.def
     $self->asset->process;
 
@@ -133,6 +137,7 @@ sub startup ($self) {
         die "Unsupported Mojolicious version $Mojolicious::VERSION!";
     }
     $r->get('/tests/latest')->name('latest')->to('test#latest');
+    $r->get('/tests/latest/badge')->name('latest_test_result_badge')->to('test#latest_badge');
 
     $r->get('/tests/list_ajax')->name('tests_ajax')->to('test#list_ajax');
     $r->get('/tests/list_running_ajax')->name('tests_ajax')->to('test#list_running_ajax');
@@ -161,6 +166,7 @@ sub startup ($self) {
     $test_r->get('/liveterminal')->name('liveterminal')->to('running#liveterminal');
     $test_r->get('/streaming')->name('streaming')->to('running#streaming');
     $test_r->get('/edit')->name('edit_test')->to('running#edit');
+    $test_r->get('/badge')->name('test_result_badge')->to('test#badge');
 
     $test_r->get('/images/#filename')->name('test_img')->to('file#test_file');
     $test_r->get('/images/thumb/#filename')->name('test_thumbnail')->to('file#test_thumbnail');
@@ -226,6 +232,7 @@ sub startup ($self) {
     # Default route
     $r->get('/' => sub ($c) { $c->render('main/index') })->name('index');
     $r->get('/changelog')->name('changelog')->to('main#changelog');
+    $r->get('/health')->name('health')->to('main#health');
 
     # shorter version of route to individual job results
     $r->get('/t<testid:num>' => sub ($c) { $c->redirect_to('test') });
@@ -403,6 +410,9 @@ sub startup ($self) {
     $api_ro->post('/isos')->name('apiv1_create_iso')->to('iso#create');
     $api_ra->delete('/isos/#name')->name('apiv1_destroy_iso')->to('iso#destroy');
     $api_ro->post('/isos/#name/cancel')->name('apiv1_cancel_iso')->to('iso#cancel');
+
+    # api/v1/webhooks
+    $api_ro->post('/webhooks/product')->name('apiv1_evaluate_webhook_product')->to('webhook#product');
 
     # api/v1/assets
     $api_ro->post('/assets')->name('apiv1_post_asset')->to('asset#register');

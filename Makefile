@@ -37,6 +37,7 @@ CRE ?= podman
 # avoid localized error messages (that are matched against in certain cases)
 LC_ALL = C.utf8
 LANGUAGE =
+LANG = C.utf8
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(patsubst %/,%,$(dir $(mkfile_path)))
 container_env_file := "$(current_dir)/container.env"
@@ -83,6 +84,11 @@ install-generic:
 		install -m 644 etc/apache2/vhosts.d/$$i "$(DESTDIR)"/etc/apache2/vhosts.d ;\
 	done
 
+	install -d -m 755 "$(DESTDIR)"/etc/nginx/vhosts.d
+	for i in openqa-locations.inc openqa-upstreams.inc openqa.conf.template; do \
+		install -m 644 etc/nginx/vhosts.d/$$i "$(DESTDIR)"/etc/nginx/vhosts.d ;\
+	done
+
 	install -D -m 640 etc/openqa/client.conf "$(DESTDIR)"/etc/openqa/client.conf
 	install -D -m 644 etc/openqa/workers.ini "$(DESTDIR)"/etc/openqa/workers.ini
 	install -D -m 644 etc/openqa/openqa.ini "$(DESTDIR)"/etc/openqa/openqa.ini
@@ -93,19 +99,19 @@ install-generic:
 	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system
 	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system-generators
 	install -d -m 755 "$(DESTDIR)"/usr/lib/tmpfiles.d
-	for i in systemd/*.{service,target,timer,path}; do \
+	for i in systemd/*.{service,slice,target,timer,path}; do \
 		install -m 644 $$i "$(DESTDIR)"/usr/lib/systemd/system ;\
 	done
 	ln -s openqa-worker-plain@.service "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker@.service
 	sed \
 		-e 's_^\(ExecStart=/usr/share/openqa/script/worker\) \(--instance %i\)$$_\1 --no-cleanup \2_' \
-		-e '/Wants/aConflicts=openqa-worker-plain@.service' \
+		-e '/^$$/N;/\[Service\]/iConflicts=openqa-worker-plain@.service' \
 		systemd/openqa-worker-plain@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-no-cleanup@.service
 	sed \
-		-e '/Type/aEnvironment=OPENQA_WORKER_TERMINATE_AFTER_JOBS_DONE=1' \
+		-e '/\[Service\]/aEnvironment=OPENQA_WORKER_TERMINATE_AFTER_JOBS_DONE=1' \
 		-e '/ExecStart=/aExecReload=\/bin\/kill -HUP $$MAINPID' \
-		-e 's/Restart=on-failure/Restart=always/' \
-		-e '/Wants/aConflicts=openqa-worker-plain@.service' \
+		-e 's/Restart=.*/Restart=always/' \
+		-e '/^$$/N;/\[Service\]/iConflicts=openqa-worker-plain@.service' \
 		systemd/openqa-worker-plain@.service > "$(DESTDIR)"/usr/lib/systemd/system/openqa-worker-auto-restart@.service
 	install -m 755 systemd/systemd-openqa-generator "$(DESTDIR)"/usr/lib/systemd/system-generators
 	install -m 644 systemd/tmpfiles-openqa.conf "$(DESTDIR)"/usr/lib/tmpfiles.d/openqa.conf
@@ -196,11 +202,11 @@ test-unstable:
 
 .PHONY: test-fullstack
 test-fullstack:
-	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=30 PROVE_ARGS="$$HARNESS t/full-stack.t"
+	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=30 PROVE_ARGS="$$HARNESS t/full-stack.t t/33-developer_mode.t"
 
 .PHONY: test-fullstack-unstable
 test-fullstack-unstable:
-	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=15 PROVE_ARGS="$$HARNESS t/05-scheduler-full.t t/33-developer_mode.t" RETRY=5
+	$(MAKE) test-with-database FULLSTACK=1 TIMEOUT_M=15 PROVE_ARGS="$$HARNESS t/05-scheduler-full.t" RETRY=5
 
 # we have apparently-redundant -I args in PERL5OPT here because Docker
 # only works with one and Fedora's build system only works with the other
@@ -242,6 +248,7 @@ COVER_REPORT_OPTS ?= -select_re '^(lib|script|t)/'
 
 .PHONY: coverage-report-codecov
 coverage-report-codecov:
+	export DEVEL_COVER_DB_FORMAT=JSON;\
 	cover $(COVER_REPORT_OPTS) -report codecovbash
 
 .PHONY: coverage-codecov

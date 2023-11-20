@@ -15,6 +15,7 @@ use OpenQA::Events;
 use OpenQA::Scheduler::Client;
 use OpenQA::Log qw(log_error log_info);
 use List::Util qw(min);
+use Scalar::Util qw(looks_like_number);
 use Try::Tiny;
 use DBIx::Class::Timestamps 'now';
 use Mojo::Asset::Memory;
@@ -83,6 +84,7 @@ sub list ($self) {
     $validation->optional('latest')->num(1);
     $validation->optional('limit')->num;
     $validation->optional('offset')->num;
+    $validation->optional('groupid')->num;
 
     my $limits = OpenQA::App->singleton->config->{misc_limits};
     my $limit = min($limits->{generic_max_limit}, $validation->param('limit') // $limits->{generic_default_limit});
@@ -109,9 +111,14 @@ sub list ($self) {
     # we could let query_jobs do the string splitting for us, but this is
     # clearer.
     for my $arg (qw(state ids result)) {
-        next unless defined $self->param($arg);
-        $args{$arg}
-          = index($self->param($arg), ',') != -1 ? [split(',', $self->param($arg))] : $self->every_param($arg);
+        next unless defined(my $value = $self->param($arg));
+        my $values = $args{$arg} = index($value, ',') != -1 ? [split(',', $value)] : $self->every_param($arg);
+        if ($arg eq 'ids') {
+            for my $id (@$values) {
+                return $self->render(json => {error => 'ids must be integers'}, status => 400)
+                  unless looks_like_number $id;
+            }
+        }
     }
 
     my $latest = $validation->param('latest');
@@ -120,10 +127,8 @@ sub list ($self) {
     my @jobarray = defined $latest ? $rs->latest_jobs : $rs->all;
 
     # Pagination
-    unless (defined $latest) {
-        pop @jobarray if my $has_more = @jobarray > $limit;
-        $self->pagination_links_header($limit, $offset, $has_more);
-    }
+    pop @jobarray if my $has_more = @jobarray > $limit;
+    $self->pagination_links_header($limit, $offset, $has_more) unless defined $latest;
     my %jobs = map { $_->id => $_ } @jobarray;
 
     # we can't prefetch too much at once as the resulting JOIN will kill our performance horribly
@@ -684,36 +689,17 @@ sub create_artefact ($self) {
         return $self->render(json => {error => 'Unable to parse extra test'}, status => 400);
     }
     elsif (my $scope = $self->param('asset')) {
-        $self->render_later;    # XXX: Not really needed, but in case of upstream changes
-
-        # See: https://mojolicious.org/perldoc/Mojolicious/Guides/FAQ#What-does-Connection-already-closed-mean
-        my $tx = $self->tx;    # NOTE: Keep tx around as long operations could make it disappear
-
-        return Mojo::IOLoop->subprocess(
-            sub {
-                die "Transaction empty\n" if $tx->is_empty;
-                OpenQA::Events->singleton->emit('chunk_upload.start' => $self);
-                my ($error, $fname, $type, $last)
-                  = $job->create_asset($validation->param('file'), $scope, $self->param('local'));
-                OpenQA::Events->singleton->emit('chunk_upload.end' => ($self, $error, $fname, $type, $last));
-                die $error if $error;
-                return $fname, $type, $last;
-            },
-            sub {
-                my ($subprocess, $error, @results) = @_;
-                if ($error) {
-                    # return 500 even if most probably it is an error on client side so the worker can keep
-                    # retrying if it was caused by network failures
-                    chomp $error;
-                    $self->app->log->debug($error);
-                    return $self->render(json => {error => "Failed receiving asset: $error"}, status => 500);
-                }
-
-                my ($fname, $type, $last) = @results;
-                my $assets = $schema->resultset('Assets');
-                $assets->register($type, $fname, {scope => $scope, created_by => $job, refresh_size => 1}) if $last;
-                return $self->render(json => {status => 'ok'});
-            });
+        my ($error, $fname, $type, $last)
+          = $job->create_asset($validation->param('file'), $scope, $self->param('local'));
+        if ($error) {
+            # return 500 even if most probably it is an error on client side so the worker can keep retrying if it was
+            # caused by network failures
+            $self->app->log->debug($error);
+            return $self->render(json => {error => "Failed receiving asset: $error"}, status => 500);
+        }
+        my $assets = $schema->resultset('Assets');
+        $assets->register($type, $fname, {scope => $scope, created_by => $job, refresh_size => 1}) if $last;
+        return $self->render(json => {status => 'ok'});
     }
     $job->create_artefact($validation->param('file'), $self->param('ulog'));
     $self->render(text => 'OK');
@@ -724,7 +710,7 @@ sub create_artefact ($self) {
 =item upload_state()
 
 It is used by the worker to inform the webui of a failed download. This is the case when
-all upload retrials from the worker have been exhausted and webui can remove the file
+all upload retries from the worker have been exhausted and webui can remove the file
 that has been partially uploaded.
 
 =back

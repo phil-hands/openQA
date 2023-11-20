@@ -6,22 +6,29 @@ package OpenQA::Schema::Result::ScheduledProducts;
 
 use Mojo::Base 'DBIx::Class::Core', -signatures;
 
+use Mojo::Base -base, -signatures;
 use DBIx::Class::Timestamps 'now';
+use Exporter 'import';
 use File::Basename;
 use Try::Tiny;
 use OpenQA::App;
-use OpenQA::Log qw(log_debug log_warning);
+use OpenQA::Log qw(log_debug log_warning log_error);
 use OpenQA::Utils;
 use OpenQA::JobSettings;
+use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
 use OpenQA::Scheduler::Client;
+use OpenQA::VcsProvider;
 use Mojo::JSON qw(encode_json decode_json);
+use OpenQA::YAML 'load_yaml';
 use Carp;
 
 use constant {
-    ADDED => 'added',
-    SCHEDULING => 'scheduling',
-    SCHEDULED => 'scheduled',
+    ADDED => 'added',    # no jobs have been created yet
+    SCHEDULING => 'scheduling',    # jobs are being created
+    SCHEDULED => 'scheduled',    # all jobs have been created
+    CANCELLING => 'cancelling',    # jobs are being cancelled (so far only possible as reaction to webhook event)
+    CANCELLED => 'cancelled',    # all jobs have been cancelled (so far only possible as reaction to webhook event)
 };
 
 __PACKAGE__->table('scheduled_products');
@@ -80,6 +87,10 @@ __PACKAGE__->add_columns(
         data_type => 'bigint',
         is_nullable => 1,
     },
+    webhook_id => {
+        data_type => 'text',
+        is_nullable => 1,
+    },
 );
 __PACKAGE__->add_timestamps;
 __PACKAGE__->set_primary_key('id');
@@ -100,6 +111,22 @@ __PACKAGE__->inflate_column(
         inflate => sub { decode_json(shift) },
         deflate => sub { encode_json(shift) },
     });
+
+our @EXPORT = qw(ADDED SCHEDULING SCHEDULED CANCELLING CANCELLED);
+
+sub sqlt_deploy_hook ($self, $sqlt_table, @) {
+    $sqlt_table->add_index(name => 'scheduled_products_idx_webhook_id', fields => ['webhook_id']);
+}
+
+sub get_setting ($self, $key) { ($self->{_settings} //= $self->settings)->{$key} }
+
+sub update_setting ($self, $key, $value) {
+    my $settings = $self->{_settings} //= $self->settings;
+    $settings->{$key} = $value;
+    $self->update({settings => $settings});
+}
+
+sub discard_changes ($self, @args) { undef $self->{_settings}; $self->SUPER::discard_changes(@args) }
 
 sub to_string {
     my ($self) = @_;
@@ -132,6 +159,31 @@ sub to_hash {
 
 =over 4
 
+=item _update_status_if()
+
+Updates the status of the scheduled product if the specified conditions match. This is done in an
+atomic way. Returns whether the status has been updated.
+
+This function is used to update the status. It ensures that the first status update "wins" and the
+"loser" can "back off". This is important to have well-defined behavior despite the race between
+setting SCHEDULING and CANCELLING. If CANCELLING wins the scheduled product is not scheduled at all
+and simply cancelled. If SCHEDULING wins the product is scheduled normally and `set_done` will
+trigger the cancellation after that. To do this, `set_done` needs to check whether the status is
+CANCELLING. This means there is another race between setting CANCELLING and the the invocation of
+`set_done`. If CANCELLING can be set before `set_done` sets the status `set_done` wins and performs
+the cancellation. If `set_done` wins then `cancel` will handle the cancellation directly after all.
+
+=back
+
+=cut
+
+sub _update_status_if ($self, $status, @conds) {
+    my $rs = ($self->{_rs} //= $self->result_source->schema->resultset('ScheduledProducts'));
+    return $rs->search({id => $self->id, @conds})->update({status => $status}) != 0;
+}
+
+=over 4
+
 =item schedule_iso()
 
 Schedule jobs for a given ISO. Starts by downloading needed assets and cancelling obsolete jobs
@@ -144,41 +196,35 @@ exported - but called by B<create()>.
 
 =cut
 
-sub schedule_iso {
-    my ($self, $args) = @_;
+sub schedule_iso ($self, $args) {
 
-    # load columns with default_value
-    $self->discard_changes;
-
-    # update status
-    my $current_status = $self->status;
-    if ($current_status ne ADDED) {
-        die "refuse calling schedule_iso on product with status $current_status";
-    }
-    $self->update({status => SCHEDULING});
+    # update status to SCHEDULING or just return if the job was updated otherwise
+    return undef unless $self->_update_status_if(SCHEDULING, status => ADDED);
+    $self->{_settings} = $args;
 
     # schedule the ISO
-    my $result;
-    try {
-        $result = $self->_schedule_iso($args);
-    }
-    catch {
-        $result = {error => $_};
-    };
-
-    # update status
-    $self->update(
-        {
-            status => SCHEDULED,
-            results => $result,
-        });
+    $self->discard_changes;
+    my $result = try { $self->_schedule_iso($args) } catch { {error => $_} };
+    $self->set_done($result);
 
     # return result here as it is consumed by the old synchronous ISO post route and added as Minion job result
     return $result;
 }
 
+sub set_done ($self, $result) {
+    # set the status to be either …
+    if ($self->_update_status_if(CANCELLED, status => CANCELLING)) {
+        $self->update({results => $result});
+        $self->cancel;    # … CANCELLED if meanwhile CANCELLING and invoke cancel again (as it backed off)
+    }
+    else {
+        $self->update({status => SCHEDULED, results => $result});    # … SCHEDULED if remained SCHEDULING
+        $self->report_status_to_github;
+    }
+}
+
 # make sure that the DISTRI is lowercase
-sub _distri_key { lc(shift->{DISTRI}) }
+sub _distri_key ($settings) { lc($settings->{DISTRI}) }
 
 sub _delete_prefixed_args_storing_info_about_product_itself ($args) {
     for my $arg (keys %$args) {
@@ -218,6 +264,7 @@ sub _schedule_iso {
     my $obsolete = delete $args->{_OBSOLETE} // 0;
     my $onlysame = delete $args->{_ONLY_OBSOLETE_SAME_BUILD} // 0;
     my $skip_chained_deps = delete $args->{_SKIP_CHAINED_DEPS} // 0;
+    my $include_children = delete $args->{_INCLUDE_CHILDREN} // 0;
     my $force = delete $args->{_FORCE_DEPRIORITIZEBUILD};
     $force = delete $args->{_FORCE_OBSOLETE} || $force;
     if (($deprioritize || $obsolete) && $args->{TEST} && !$force) {
@@ -228,11 +275,21 @@ sub _schedule_iso {
 
     _delete_prefixed_args_storing_info_about_product_itself $args;
 
-    my $result = $self->_generate_jobs($args, \@notes, $skip_chained_deps);
+    my $result;
+    my $yaml = delete $args->{SCENARIO_DEFINITIONS_YAML};
+    my $yaml_file = delete $args->{SCENARIO_DEFINITIONS_YAML_FILE};
+    if (defined $yaml) {
+        $result = $self->_schedule_from_yaml($args, $skip_chained_deps, $include_children, string => $yaml);
+    }
+    elsif (defined $yaml_file) {
+        $result = $self->_schedule_from_yaml($args, $skip_chained_deps, $include_children, file => $yaml_file);
+    }
+    else {
+        $result = $self->_generate_jobs($args, \@notes, $skip_chained_deps, $include_children);
+    }
     return {error => $result->{error_message}, error_code => $result->{error_code} // 400}
       if defined $result->{error_message};
     my $jobs = $result->{settings_result};
-
     # take some attributes from the first job to guess what old jobs to cancel
     # note: We should have distri object that decides which attributes are relevant here.
     if (($obsolete || $deprioritize) && $jobs && $jobs->[0] && $jobs->[0]->{BUILD}) {
@@ -286,8 +343,8 @@ sub _schedule_iso {
                 my $job = $jobs_resultset->create_from_settings($settings, $self->id);
                 push @created_jobs, $job;
                 my $j_id = $job->id;
-                $job_ids_by_test_machine{_settings_key($settings)} //= [];
-                push @{$job_ids_by_test_machine{_settings_key($settings)}}, $j_id;
+                $job_ids_by_test_machine{_job_ref($settings)} //= [];
+                push @{$job_ids_by_test_machine{_job_ref($settings)}}, $j_id;
 
                 # set prio if defined explicitly (otherwise default prio is used)
                 $job->update({priority => $prio}) if (defined($prio));
@@ -373,17 +430,18 @@ sub _schedule_iso {
 
 =over 4
 
-=item _settings_key()
+=item _job_ref()
 
-Return settings key for given job settings. Internal method.
+Return the "job reference" for the specified job settings. It is used internally as a key for the job in various
+hash maps. It is also used to refer to a job in dependency specifications.
 
 =back
 
 =cut
 
-sub _settings_key {
-    my ($settings) = @_;
-    return "$settings->{TEST}\@$settings->{MACHINE}";
+sub _job_ref ($job_settings) {
+    my ($test, $machine) = ($job_settings->{TEST}, $job_settings->{MACHINE});
+    return $machine ? "$test\@$machine" : $test;
 }
 
 =over 4
@@ -399,21 +457,21 @@ is used.
 
 =cut
 
-sub _parse_dep_variable {
-    my ($value, $settings) = @_;
-
+sub _parse_dep_variable ($value, $job_settings) {
     return unless defined $value;
     return map {
-        if ($_ =~ /^(.+)\@([^@]+)$/) {
-            [$1, $2];
-        }
-        elsif ($_ =~ /^(.+):([^:]+)$/) {
-            [$1, $2];    # for backwards compatibility
-        }
-        else {
-            [$_, $settings->{MACHINE}];
-        }
+        if ($_ =~ /^(.+)\@([^@]+)$/) { [$1, $2] }
+        elsif ($_ =~ /^(.+):([^:]+)$/) { [$1, $2] }    # for backwards compatibility
+        else { [$_, $job_settings->{MACHINE}] }
     } split(/\s*,\s*/, $value);
+}
+
+sub _chained_parents ($job) {
+    [_parse_dep_variable($job->{START_AFTER_TEST}, $job), _parse_dep_variable($job->{START_DIRECTLY_AFTER_TEST}, $job)];
+}
+
+sub _parallel_parents ($job) {
+    [_parse_dep_variable($job->{PARALLEL_WITH}, $job)];
 }
 
 =over 4
@@ -421,55 +479,38 @@ sub _parse_dep_variable {
 =item _sort_dep()
 
 Sort the job list so that children are put after parents. Internal method
-used in B<_generate_jobs>.
+used in B<_populate_wanted_jobs_for_parent_dependencies>.
 
 =back
 
 =cut
 
-sub _sort_dep {
-    my ($list, $skip_chained_deps) = @_;
+sub _sort_dep ($list) {
+    my (%done, %count, @out);
+    ++$count{_job_ref($_)} for @$list;
 
-    my %done;
-    my %count;
-    my @out;
-
-    for my $job (@$list) {
-        $count{_settings_key($job)} //= 0;
-        $count{_settings_key($job)}++;
-    }
-
-    my $added;
-    do {
-        $added = 0;
+    for (my $added;; $added = 0) {
         for my $job (@$list) {
             next if $done{$job};
-            my @parents;
-            push @parents, _parse_dep_variable($job->{START_AFTER_TEST}, $job),
-              _parse_dep_variable($job->{START_DIRECTLY_AFTER_TEST}, $job),
-              _parse_dep_variable($job->{PARALLEL_WITH}, $job);
-
-            my $c = 0;    # number of parents that must go to @out before this job
-            foreach my $parent (@parents) {
-                my $parent_test_machine = join('@', @$parent);
-                $c += $count{$parent_test_machine} if defined $count{$parent_test_machine};
+            my $has_parents_to_go_before;
+            for my $parent (@{_chained_parents($job)}, @{_parallel_parents($job)}) {
+                if ($count{join('@', @$parent)}) {
+                    $has_parents_to_go_before = 1;
+                    last;
+                }
             }
-
-            if ($c == 0) {    # no parents, we can do this job
-                push @out, $job;
-                $done{$job} = 1;
-                $count{_settings_key($job)}--;
-                $added = 1;
-            }
+            next if $has_parents_to_go_before;
+            push @out, $job;    # no parents go before, we can do this job
+            $done{$job} = $added = 1;
+            $count{_job_ref($job)}--;
         }
-    } while ($added);
-
-    #cycles, broken dep, put at the end of the list
-    for my $job (@$list) {
-        next if $done{$job};
-        push @out, $job;
+        last unless $added;
     }
 
+    # put cycles and broken dependencies at the end of the list
+    for my $job (@$list) {
+        push @out, $job unless $done{$job};
+    }
     return \@out;
 }
 
@@ -486,7 +527,7 @@ method used in the B<schedule_iso()> method.
 =cut
 
 sub _generate_jobs {
-    my ($self, $args, $notes, $skip_chained_deps) = @_;
+    my ($self, $args, $notes, $skip_chained_deps, $include_children) = @_;
 
     my $ret = [];
     my $schema = $self->result_source->schema;
@@ -516,9 +557,6 @@ sub _generate_jobs {
     }
 
     my %wanted;    # jobs specified by $args->{TEST} or $args->{MACHINE} or their parents
-
-    # Allow a comma separated list of tests here; whitespaces allowed
-    my @tests = $args->{TEST} ? split(/\s*,\s*/, $args->{TEST}) : ();
 
     # allow filtering by group
     my $group_id = delete $args->{_GROUP_ID};
@@ -565,46 +603,11 @@ sub _generate_jobs {
             $settings{PRIO} = defined($priority) ? $priority : $job_template->prio;
             $settings{GROUP_ID} = $job_template->group_id;
 
-            if (!$args->{MACHINE} || $args->{MACHINE} eq $settings{MACHINE}) {
-                if (!@tests) {
-                    $wanted{_settings_key(\%settings)} = 1;
-                }
-                else {
-                    foreach my $test (@tests) {
-                        if ($test eq $settings{TEST}) {
-                            $wanted{_settings_key(\%settings)} = 1;
-                            last;
-                        }
-                    }
-                }
-            }
+            _populate_wanted_jobs_for_test_arg($args, \%settings, \%wanted);
             push @$ret, \%settings;
         }
     }
-
-    $ret = _sort_dep($ret);
-    # the array is sorted parents first - iterate it backward
-    for (my $i = $#{$ret}; $i >= 0; $i--) {
-        if ($wanted{_settings_key($ret->[$i])}) {
-            # add parents to wanted list
-            my @parents;
-            push @parents, _parse_dep_variable($ret->[$i]->{START_AFTER_TEST}, $ret->[$i]),
-              _parse_dep_variable($ret->[$i]->{START_DIRECTLY_AFTER_TEST}, $ret->[$i])
-              unless $skip_chained_deps;
-            push @parents, _parse_dep_variable($ret->[$i]->{PARALLEL_WITH}, $ret->[$i]);
-            for my $parent (@parents) {
-                my $parent_test_machine = join('@', @$parent);
-                my @parents_job_template
-                  = grep { join('@', $_->{TEST}, $_->{MACHINE}) eq $parent_test_machine } @$ret;
-                for my $parent_job_template (@parents_job_template) {
-                    $wanted{join('@', $parent_job_template->{TEST}, $parent_job_template->{MACHINE})} = 1;
-                }
-            }
-        }
-        else {
-            splice @$ret, $i, 1;    # not wanted - delete
-        }
-    }
+    $ret = _populate_wanted_jobs_for_parent_dependencies($ret, \%wanted, $skip_chained_deps, $include_children);
     return {error_message => $error_message, settings_result => $ret};
 }
 
@@ -751,6 +754,216 @@ sub _create_download_lists {
         $download_info->{destination}->{$destination_path} = 1
           unless ($download_info->{destination}->{$destination_path});
     }
+}
+
+sub _schedule_from_yaml ($self, $args, $skip_chained_deps, $include_children, @load_yaml_args) {
+    my $data = eval { load_yaml(@load_yaml_args) };
+    if (my $error = $@) { return {error_message => "Unable to load YAML: $error"} }
+    my $app = OpenQA::App->singleton;
+    my $validation_errors = $app->validate_yaml($data, 'JobScenarios-01.yaml', $app->log->level eq 'debug');
+    return {error_message => "YAML validation failed:\n" . join("\n", @$validation_errors)} if @$validation_errors;
+
+    my $products = $data->{products};
+    my $machines = $data->{machines} // {};
+    my $job_templates = $data->{job_templates};
+    my ($error_msg, %wanted, @job_templates);
+    for my $key (sort keys %$job_templates) {
+        my $job_template = $job_templates->{$key};
+        my $settings = $job_template->{settings} // {};
+        $settings->{TEST} = $key;
+        my @worker_class;
+        push @worker_class, $settings->{WORKER_CLASS} if $settings->{WORKER_CLASS};
+
+        # add settings from product (or skip if there is no such product) if a product is specified
+        if (my $product_name = $job_template->{product}) {
+            next unless defined $products;
+            next unless my $product = $products->{$product_name};
+            next
+              if ( $product->{distri} ne _distri_key($args)
+                || $product->{flavor} ne $args->{FLAVOR}
+                || ($product->{version} ne '*' && $product->{version} ne $args->{VERSION})
+                || $product->{arch} ne $args->{ARCH});
+            my $product_settings = $product->{settings} // {};
+            _merge_settings_uppercase($product, $settings, 'settings');
+            _merge_settings_and_worker_classes($product_settings, $settings, \@worker_class);
+        }
+
+        # add settings from machine if specified
+        if (my $machine = $job_template->{machine}) {
+            $settings->{MACHINE} = $machine;
+            if (my $mach = $machines->{$machine}) {
+                my $machine_settings = $mach->{settings} // {};
+                _merge_settings_and_worker_classes($machine_settings, $settings, \@worker_class);
+                $settings->{BACKEND} = $mach->{backend} if $mach->{backend};
+                $settings->{PRIO} = $mach->{priority} // DEFAULT_JOB_PRIORITY;
+            }
+        }
+
+        # set priority of job if specified
+        if (my $priority = $job_template->{priority}) {
+            $settings->{PRIO} = $priority;
+        }
+
+        # handle further settings
+        $settings->{WORKER_CLASS} = join ',', sort @worker_class if @worker_class > 0;
+        _merge_settings_uppercase($args, $settings, 'TEST');
+        $settings->{DISTRI} = _distri_key($settings) if $settings->{DISTRI};
+        OpenQA::JobSettings::parse_url_settings($settings);
+        OpenQA::JobSettings::handle_plus_in_settings($settings);
+        my $error = OpenQA::JobSettings::expand_placeholders($settings);
+        $error_msg .= $error if defined $error;
+        _populate_wanted_jobs_for_test_arg($args, $settings, \%wanted);
+        push @job_templates, $settings;
+    }
+
+    return {
+        settings_result => _populate_wanted_jobs_for_parent_dependencies(
+            \@job_templates, \%wanted, $skip_chained_deps, $include_children
+        ),
+        error_message => $error_msg,
+    };
+}
+
+sub _merge_settings_and_worker_classes ($source_settings, $destination_settings, $worker_classes) {
+    for my $s_key (keys %$source_settings) {
+        if ($s_key eq 'WORKER_CLASS') {    # merge WORKER_CLASS from different $source_settings later
+            push @$worker_classes, $source_settings->{WORKER_CLASS};
+            next;
+        }
+        $destination_settings->{$s_key} = $source_settings->{$s_key};
+    }
+}
+
+sub _merge_settings_uppercase ($source_settings, $destination_settings, $exception) {
+    for (keys %$source_settings) {
+        $destination_settings->{uc $_} = $source_settings->{$_} if $_ ne $exception;
+    }
+}
+
+sub _populate_wanted_jobs_for_test_arg ($args, $settings, $wanted) {
+    return undef if $args->{MACHINE} && $args->{MACHINE} ne $settings->{MACHINE};    # skip if machine does not match
+    my @tests = $args->{TEST} ? split(/\s*,\s*/, $args->{TEST}) : ();    # allow multiple, comma-separated TEST values
+    return $wanted->{_job_ref($settings)} = 1 unless @tests;
+    my $settings_test = $settings->{TEST};
+    for my $test (@tests) {
+        if ($test eq $settings_test) {
+            $wanted->{_job_ref($settings)} = 1;
+            last;
+        }
+    }
+}
+
+sub _is_any_parent_wanted ($jobs, $parents, $wanted_list, $visited = {}) {
+    for my $parent (@$parents) {
+        my $parent_job_ref = join('@', @$parent);
+        next if $visited->{$parent_job_ref}++;    # prevent deep recursion if there are dependency cycles
+        for my $job (@$jobs) {
+            my $job_ref = _job_ref($job);
+            next unless $job_ref eq $parent_job_ref;
+            return 1 if $wanted_list->{$job_ref};
+            return 1 if _is_any_parent_wanted($jobs, _chained_parents($job), $wanted_list, $visited);
+        }
+    }
+    return 0;
+}
+
+sub _populate_wanted_jobs_for_parent_dependencies ($jobs, $wanted, $skip_chained_deps, $include_children) {
+    # sort $jobs so parents are first
+    $jobs = _sort_dep($jobs);
+
+    # iterate in reverse order to go though children first and being able to easily delete from $jobs
+    for (my $i = $#{$jobs}; $i >= 0; --$i) {
+        my $job = $jobs->[$i];
+
+        # parse relevant parents from job settings
+        my $chained_parents = !$skip_chained_deps || $include_children ? _chained_parents($job) : [];
+        my $parents = _parallel_parents($job);
+        push @$parents, @$chained_parents unless $skip_chained_deps;
+
+        # delete unwanted jobs unless the parent is wanted and we include children
+        my $unwanted = !$wanted->{_job_ref($job)};
+        splice @$jobs, $i, 1 and next
+          if $unwanted && (!$include_children || !_is_any_parent_wanted($jobs, $chained_parents, $wanted));
+
+        # add parents to wanted list
+        for my $parent (@$parents) {
+            my $parent_job_ref = join('@', @$parent);
+            for my $job (@$jobs) {
+                my $job_ref = _job_ref($job);
+                $wanted->{$job_ref} = 1 if $job_ref eq $parent_job_ref;
+            }
+        }
+    }
+    return $jobs;
+}
+
+sub enqueue_minion_job ($self, $params) {
+    my $id = $self->id;
+    my %minion_job_args = (scheduled_product_id => $id, scheduling_params => $params);
+    my $gru = OpenQA::App->singleton->gru;
+    my $ids = $gru->enqueue(schedule_iso => \%minion_job_args, {priority => 10});
+    my %res = (gru_task_id => $ids->{gru_id}, minion_job_id => $ids->{minion_id});
+    $self->update(\%res);
+    $res{scheduled_product_id} = $id;
+    return \%res;
+}
+
+# returns the "state" to be passed to GitHub's "statuses"-API considering the state/result of associated jobs
+sub state_for_ci_status ($self) {
+    return 'pending' if $self->status eq ADDED;
+    my @jobs = $self->jobs;
+    # consider no jobs being scheduled a failure
+    return ('failure', 'No openQA jobs have been scheduled') unless my $total = @jobs;
+    my ($pending, $failed);
+    for my $job (@jobs) {
+        my $latest_job = $job->latest_job;    # only consider the latest job in a chain of clones
+        $pending += 1 and next unless $latest_job->is_final;
+        $failed += 1 unless $latest_job->is_ok;
+    }
+    return ('pending', $pending == 1 ? 'is pending' : 'are pending', $pending, $total) if $pending;
+    return ('failure', $failed == 1 ? 'has failed' : 'have failed', $failed, $total) if $failed;
+    return ('success', $total == 1 ? 'has passed' : 'have passed', $total, $total);
+}
+
+sub _format_check_description ($verb, $count, $total) {
+    return undef unless defined $verb;    # use default description
+    return $verb unless $total;    # just use $verb as-is without $total; then $verb is then the whole phrase
+    return "$count of $total openQA jobs $verb" if $total != $count;
+    return "The openQA job $verb" if $total == 1;
+    return "All $total openQA jobs $verb";
+}
+
+sub report_status_to_github ($self, $callback = undef) {
+    my $id = $self->id;
+    my $settings = $self->{_settings} // $self->settings;
+    return undef unless my $github_statuses_url = $settings->{GITHUB_STATUSES_URL};
+    my ($state, $verb, $count, $total) = $self->state_for_ci_status;
+    return undef unless $state;
+    my $vcs = OpenQA::VcsProvider->new(app => OpenQA::App->singleton);
+    my $base_url = $settings->{CI_TARGET_URL};
+    my %params = (state => $state, description => _format_check_description($verb, $count, $total));
+    $vcs->report_status_to_github($github_statuses_url, \%params, $id, $base_url, $callback);
+}
+
+sub cancel ($self, $reason = undef) {
+    # store the cancellation reason (if there is one) as setting
+    $self->update_setting(_CANCELLATION_REASON => $reason) if $reason;
+
+    # update status to CANCELLING
+    if (!$self->_update_status_if(CANCELLING, -not => {status => SCHEDULING})) {
+       # the scheduled product is SCHEDULING; set it nevertheless to CANCELLING but back off from cancelling immediately
+        # unless it is not SCHEDULING anymore after all
+        return 0 if $self->_update_status_if(CANCELLING, status => SCHEDULING);
+    }
+
+    # do the actual cancellation
+    my $job_reason = 'scheduled product cancelled';
+    $reason = $self->get_setting('_CANCELLATION_REASON') unless $reason;
+    $job_reason .= ": $reason" if $reason;
+    my $count = 0;
+    $count += $_->cancel_whole_clone_chain(USER_CANCELLED, $job_reason) for $self->jobs;
+    $self->update({status => CANCELLED});
+    return $count;
 }
 
 1;

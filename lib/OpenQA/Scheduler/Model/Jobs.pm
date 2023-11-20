@@ -14,10 +14,11 @@ use OpenQA::Utils 'random_string';
 use OpenQA::Constants qw(WEBSOCKET_API_VERSION);
 use OpenQA::Schema;
 use Time::HiRes 'time';
-use List::Util qw(all shuffle);
+use List::Util qw(all shuffle min sum);
 
 # How many jobs to allocate in one tick. Defaults to 80 ( set it to 0 for as much as possible)
 use constant MAX_JOB_ALLOCATION => $ENV{OPENQA_SCHEDULER_MAX_JOB_ALLOCATION} // 80;
+use constant MAX_REPORT_MISSING_WORKER_CLASSES => $ENV{OPENQA_SCHEDULER_MAX_REPORT_MISSING_WORKER_CLASSES} // 30;
 
 # How much the priority should be increased (the priority value decreased) to protect a parallel cluster from starvation
 use constant STARVATION_PROTECTION_PRIORITY_OFFSET => $ENV{OPENQA_SCHEDULER_STARVATION_PROTECTION_PRIORITY_OFFSET} // 1;
@@ -36,24 +37,33 @@ sub determine_scheduled_jobs ($self) {
     return $self->scheduled_jobs;
 }
 
-sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
-    my $start_time = time;
+sub _allocate_jobs ($self, $free_workers) {
+    my ($allocated_workers, $allocated_jobs) = ({}, {});
+    my $scheduled_jobs = $self->scheduled_jobs;
     my $schema = OpenQA::Schema->singleton;
-    my $free_workers = determine_free_workers($self->shuffle_workers);
-    my $worker_count = $schema->resultset('Workers')->count;
-    my $free_worker_count = @$free_workers;
-    unless ($free_worker_count) {
+    my $running = $schema->resultset('Jobs')->count({state => [OpenQA::Jobs::Constants::EXECUTION_STATES]});
+    my $limit = OpenQA::App->singleton->config->{scheduler}->{max_running_jobs};
+    if ($limit >= 0 && $running >= $limit) {
+        log_debug("max_running_jobs ($limit) exceeded, scheduling no additional jobs");
         $self->emit('conclude');
-        return ();
+        return ({}, {});
     }
-
-    my $scheduled_jobs = $self->determine_scheduled_jobs;
-    log_debug(
-        "Scheduling: Free workers: $free_worker_count/$worker_count; Scheduled jobs: " . scalar(keys %$scheduled_jobs));
+    my $max_allocate = $limit >= 0 ? min(MAX_JOB_ALLOCATION, $limit - $running) : MAX_JOB_ALLOCATION;
 
     # update the matching workers to the current free
-    for my $jobinfo (values %$scheduled_jobs) {
-        $jobinfo->{matching_workers} = _matching_workers($jobinfo, $free_workers);
+    my %rejected;
+    for my $id (keys %$scheduled_jobs) {
+        my $jobinfo = $scheduled_jobs->{$id};
+        $jobinfo->{matching_workers} = _matching_workers($jobinfo, $free_workers, \%rejected);
+        delete $scheduled_jobs->{$id} unless @{$jobinfo->{matching_workers}};
+    }
+    if (keys %rejected) {
+        my @rejected = sort { $rejected{$b} <=> $rejected{$a} || $a cmp $b } keys %rejected;
+        splice @rejected, MAX_REPORT_MISSING_WORKER_CLASSES;
+        my $stats = join ',', map { "$_:$rejected{$_}" } @rejected;
+        my $info = sprintf "Skipping %d jobs because of no free workers for requested worker classes (%s)",
+          sum(values %rejected), $stats;
+        log_debug($info);
     }
 
     # before we start looking at sorted jobs, we try to repair half scheduled clusters
@@ -120,9 +130,35 @@ sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
         }
         # we make sure we schedule clusters no matter what,
         # but we stop if we're over the limit
-        my $busy = scalar(keys %$allocated_workers);
-        last if $busy >= MAX_JOB_ALLOCATION || $busy >= $free_worker_count;
+        my $busy = keys %$allocated_workers;
+        if ($busy >= $max_allocate || $busy >= @$free_workers) {
+            my $free_worker_count = @$free_workers;
+            log_debug("limit reached, scheduling no additional jobs"
+                  . " (max_running_jobs=$limit, free workers=$free_worker_count, running=$running, allocated=$busy)");
+            last;
+        }
     }
+    return ($allocated_workers, $allocated_jobs);
+}
+
+
+sub schedule ($self) {
+    my $start_time = time;
+    my $schema = OpenQA::Schema->singleton;
+    my $free_workers = determine_free_workers($self->shuffle_workers);
+    my $worker_count = $schema->resultset('Workers')->count;
+    my $free_worker_count = @$free_workers;
+    unless ($free_worker_count) {
+        $self->emit('conclude');
+        return [];
+    }
+
+    my $scheduled_jobs = $self->determine_scheduled_jobs;
+    log_debug(
+        "Scheduling: Free workers: $free_worker_count/$worker_count; Scheduled jobs: " . scalar(keys %$scheduled_jobs));
+
+    my ($allocated_workers, $allocated_jobs) = $self->_allocate_jobs($free_workers);
+    return [] unless keys %$allocated_workers;
 
     my @successfully_allocated;
 
@@ -280,12 +316,14 @@ sub schedule ($self, $allocated_workers = {}, $allocated_jobs = {}) {
 
 sub singleton { state $jobs ||= __PACKAGE__->new }
 
-sub _matching_workers ($jobinfo, $free_workers) {
+sub _matching_workers ($jobinfo, $free_workers, $rejected = {}) {
     my @filtered;
+    my @needed = sort @{$jobinfo->{worker_classes}};
     for my $worker (@$free_workers) {
-        my $matched_all = all { $worker->check_class($_) } @{$jobinfo->{worker_classes}};
+        my $matched_all = all { $worker->check_class($_) } @needed;
         push(@filtered, $worker) if $matched_all;
     }
+    $rejected->{join ',', @needed}++ unless @filtered;
     return \@filtered;
 }
 
@@ -354,8 +392,7 @@ sub _to_be_scheduled ($j, $scheduled) {
 
 sub _update_scheduled_jobs ($self) {
     my $cur_time = DateTime->now(time_zone => 'UTC');
-    my $max_job_scheduled_time = $self->{config}->{scheduler}->{max_job_scheduled_time}
-      // 7;    # default value reused for testsuite
+    my $max_job_scheduled_time = OpenQA::App->singleton->config->{scheduler}->{max_job_scheduled_time};
 
     # consider all scheduled jobs not being blocked by a parent job or Gru task
     my $schema = OpenQA::Schema->singleton;
@@ -458,7 +495,9 @@ sub _assign_multiple_jobs_to_worker ($self, $jobs, $worker, $directly_chained_jo
     if (my $tmpdir = $worker->get_property('WORKER_TMPDIR')) {
         File::Path::rmtree($tmpdir);
     }
-    my %worker_properties = (JOBTOKEN => random_string(), WORKER_TMPDIR => tempdir());
+    my %worker_properties = (
+        JOBTOKEN => random_string(),
+        WORKER_TMPDIR => tempdir(sprintf('scheduler.worker-%d.XXXXXXXX', $worker_id), TMPDIR => 1));
     $worker->set_property(WORKER_TMPDIR => $worker_properties{WORKER_TMPDIR});
     $job_data{$_->id} = $_->prepare_for_work($worker, \%worker_properties) for @$jobs;
     return OpenQA::WebSockets::Client->singleton->send_jobs(\%job_info);

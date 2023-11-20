@@ -177,11 +177,42 @@ subtest 'web socket message handling' => sub {
     $schema->txn_rollback;
     $t->websocket_ok('/ws/1', 'establish ws connection');
 
+    subtest 'worker status: updates sent too frequently (less than minimal interval)' => sub {
+        my $expected_message = qr/Received worker 1 status too close to the last update/s;
+
+        combined_unlike {
+            $t->send_ok({json => {type => 'worker_status', status => 'idle'}})->message_ok('message received');
+        }
+        $expected_message, 'status update not yet too frequent';
+
+        combined_unlike {
+            $t->finish_ok->websocket_ok('/ws/1', 're-establish ws connection')
+              ->send_ok({json => {type => 'worker_status', status => 'idle'}})->message_ok('message received');
+        }
+        $expected_message, 'status update not yet too frequent due to reconnect';
+
+        combined_like {
+            $t->send_ok({json => {type => 'worker_status', status => 'idle'}})->message_ok('message received');
+        }
+        $expected_message, 'status update too frequent';
+
+        combined_unlike {
+            $t->finish_ok->websocket_ok('/ws/1', 're-establish ws connection')
+              ->send_ok({json => {type => 'worker_status', status => 'idle'}})->message_ok('message received');
+        }
+        $expected_message, 'status update not yet too frequent due to another reconnect';
+
+        combined_unlike {
+            $t->send_ok({json => {type => 'worker_status', status => 'working'}})->message_ok('message received');
+        }
+        $expected_message, 'status update not too frequent for status "working"';
+    };
+
     subtest 'worker status: broken' => sub {
         combined_like {
             $t->send_ok({json => {type => 'worker_status', status => 'broken', reason => 'test'}});
             $t->message_ok('message received');
-            $t->json_message_is({type => 'info', population => $workers->count});
+            $t->json_message_is({type => 'info', seen => 1});
         }
         qr/Received.*worker_status message.*Updating seen of worker 1 from worker_status/s, 'update logged';
         is($workers->find($worker_id)->error, 'test', 'broken message set');
@@ -231,7 +262,6 @@ subtest 'web socket message handling' => sub {
         combined_like {
             $t->send_ok({json => {type => 'worker_status', status => 'idle'}});
             $t->message_ok('message received');
-            $t->json_message_is({type => 'info', population => $workers->count});
         }
         qr/Received.*worker_status message.*Updating seen of worker 1 from worker_status/s, 'update logged';
         is($workers->find($worker_id)->error, undef, 'broken status unset');

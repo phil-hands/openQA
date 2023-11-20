@@ -21,6 +21,7 @@ use OpenQA::File;
 use OpenQA::Parser 'parser';
 use OpenQA::Test::Case;
 use OpenQA::Test::Client 'client';
+use OpenQA::Test::Utils 'perform_minion_jobs';
 use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
 use OpenQA::Log 'log_debug';
@@ -43,7 +44,7 @@ symlink "$FindBin::Bin/../data/openqa/share/factory", "$share_dir/factory";
 # ensure job events are logged
 $ENV{OPENQA_CONFIG} = $tempdir;
 my @data = ("[audit]\n", "blocklist = job_grab\n");
-$tempdir->child("openqa.ini")->spurt(@data);
+$tempdir->child("openqa.ini")->spew(join '', @data);
 
 my $chunk_size = 10000000;
 
@@ -164,33 +165,42 @@ subtest 'server-side limit with pagination' => sub {
 
         $t->get_ok('/api/v1/jobs?limit=18')->status_is(200);
 
-        $t->get_ok('/api/v1/jobs?limit=5')->status_is(200)->json_is('/jobs/0/id' => 99947)
-          ->json_is('/jobs/3/id' => 99963)->json_is('/jobs/4/id' => 99981)->json_hasnt('/jobs/5');
-        my $links = $t->tx->res->headers->links;
-        ok $links->{first}, 'first page has first page link';
-        ok $links->{next}, 'first page has next page link';
-        ok !$links->{prev}, 'first page has no previous page link';
+        my $links;
+        subtest 'first page' => sub {
+            $t->get_ok('/api/v1/jobs?limit=5')->status_is(200)->json_is('/jobs/0/id' => 99947)
+              ->json_is('/jobs/3/id' => 99963)->json_is('/jobs/4/id' => 99981)->json_hasnt('/jobs/5');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page';
+            ok !$links->{prev}, 'no previous page';
+        };
 
-        $t->get_ok($links->{next}{link})->status_is(200)->json_is('/jobs/0/id' => 99939)
-          ->json_is('/jobs/3/id' => 99945)->json_is('/jobs/4/id' => 99946)->json_hasnt('/jobs/5');
-        $links = $t->tx->res->headers->links;
-        ok $links->{first}, 'second page has first page link';
-        ok $links->{next}, 'second page has next page link';
-        ok $links->{prev}, 'second page has previous page link';
+        subtest 'second page' => sub {
+            $t->get_ok($links->{next}{link})->status_is(200)->json_is('/jobs/0/id' => 99939)
+              ->json_is('/jobs/3/id' => 99945)->json_is('/jobs/4/id' => 99946)->json_hasnt('/jobs/5');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page';
+            ok $links->{prev}, 'has previous page';
+        };
 
-        $t->get_ok($links->{next}{link})->status_is(200)->json_is('/jobs/0/id' => 99927)
-          ->json_is('/jobs/3/id' => 99937)->json_is('/jobs/4/id' => 99938)->json_hasnt('/jobs/5');
-        $links = $t->tx->res->headers->links;
-        ok $links->{first}, 'third page has first page link';
-        ok $links->{next}, 'third page has next page link';
-        ok $links->{prev}, 'third page has previous page link';
+        subtest 'third page' => sub {
+            $t->get_ok($links->{next}{link})->status_is(200)->json_is('/jobs/0/id' => 99927)
+              ->json_is('/jobs/3/id' => 99937)->json_is('/jobs/4/id' => 99938)->json_hasnt('/jobs/5');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page';
+            ok $links->{prev}, 'has previous page';
+        };
 
-        $t->get_ok($links->{first}{link})->status_is(200)->json_is('/jobs/0/id' => 99947)
-          ->json_is('/jobs/3/id' => 99963)->json_is('/jobs/4/id' => 99981)->json_hasnt('/jobs/5');
-        $links = $t->tx->res->headers->links;
-        ok $links->{first}, 'first page has first page link (again)';
-        ok $links->{next}, 'first page has next page link (again)';
-        ok !$links->{prev}, 'first page has no previous page (again)';
+        subtest 'first page (first link)' => sub {
+            $t->get_ok($links->{first}{link})->status_is(200)->json_is('/jobs/0/id' => 99947)
+              ->json_is('/jobs/3/id' => 99963)->json_is('/jobs/4/id' => 99981)->json_hasnt('/jobs/5');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page link';
+            ok !$links->{prev}, 'no previous page';
+        };
 
         # The "latest=1" case is excluded from pagination since we have not found a good solution yet
         $t->get_ok('/api/v1/jobs?limit=18&latest=1')->status_is(200)->json_has('/jobs/2');
@@ -202,6 +212,13 @@ subtest 'multiple ids' => sub {
     is(scalar(@{$t->tx->res->json->{jobs}}), 3);
     $t->get_ok('/api/v1/jobs?ids=99981&ids=99963&ids=99926');
     is(scalar(@{$t->tx->res->json->{jobs}}), 3);
+};
+
+subtest 'validation of IDs' => sub {
+    $t->get_ok('/api/v1/jobs?ids=99981&ids=99963&ids=99926foo')->status_is(400);
+    $t->json_is('/error', 'ids must be integers', 'validation error for IDs');
+    $t->get_ok('/api/v1/jobs?groupid=foo')->status_is(400);
+    $t->json_is('/error', 'Erroneous parameters (groupid invalid)', 'validation error for invalid group ID');
 };
 
 subtest 'job overview' => sub {
@@ -253,7 +270,6 @@ subtest 'job overview' => sub {
         is(scalar(@{$t->tx->res->json}), 1, 'Expect only one job entry');
         $t->json_is('/0/id' => 99939, 'Check correct order');
     };
-
 };
 
 subtest 'jobs for job settings' => sub {
@@ -696,9 +712,9 @@ subtest 'update job status' => sub {
             my ($image_path, $thumbnail_path) = OpenQA::Utils::image_md5_filename($md5sum);
             my $file = path($image_path);
             $file->dirname->make_path;
-            $file->spurt('fake screenshot');
+            $file->spew('fake screenshot');
         }
-        path($result_dir, $_)->spurt('fake result') for @known_files;
+        path($result_dir, $_)->spew('fake result') for @known_files;
 
         my @details = (
             {screenshot => {name => 'known-screenshot.png', md5 => '098f6bcd4621d373cade4e832627b4f6'}},
@@ -1431,6 +1447,7 @@ subtest 'marking job as done' => sub {
         $t->post_ok('/api/v1/jobs/99961/set_done?result=failed&reason=test&worker_id=1');
         $t->status_is(200, 'set_done accepted with correct worker_id');
         $t->json_is('/result' => FAILED, 'post yields failed result (explicitely specified)');
+        perform_minion_jobs($t->app->minion);
         my $job = $jobs->find(99961);
         is $job->clone_id, undef, 'job not cloned when reason does not match configured regex';
         is $job->result, FAILED, 'result is failure (as passed via param)';
@@ -1447,6 +1464,7 @@ subtest 'marking job as done' => sub {
 
         $t->post_ok(Mojo::URL->new('/api/v1/jobs/99961/set_done')->query(\%cache_failure_params));
         $t->status_is(200, 'set_done accepted without worker_id');
+        perform_minion_jobs($t->app->minion);
         $t->get_ok('/api/v1/jobs/99961')->status_is(200);
         $t->json_is('/job/result' => INCOMPLETE, 'result set');
         $t->json_is('/job/reason' => $cache_failure_reason, 'reason set');
@@ -1484,6 +1502,7 @@ subtest 'marking job as done' => sub {
         $t->get_ok('/api/v1/jobs/99961')->status_is(200);
         $t->post_ok(
             Mojo::URL->new('/api/v1/jobs/99961/set_done')->query({result => INCOMPLETE, reason => $incomplete_reason}));
+        perform_minion_jobs($t->app->minion);
         $t->get_ok('/api/v1/jobs/99961')->status_is(200);
         $t->json_is('/job/result' => INCOMPLETE, 'the job status is correct');
         $t->json_is('/job/reason' => $incomplete_reason, 'the incomplete reason is correct');
@@ -1548,13 +1567,17 @@ subtest 'server-side limit has precedence over user-specified limit' => sub {
     my $jobs = $t->tx->res->json->{jobs};
     is ref $jobs, 'ARRAY', 'data returned (1)' and is scalar @$jobs, 5, 'maximum limit for jobs is effective';
 
-    $t->get_ok('/api/v1/jobs?limit=3', 'query with exceeding user-specified limit for jobs')->status_is(200);
+    $t->get_ok('/api/v1/jobs?limit=3', 'query with user-specified limit for jobs')->status_is(200);
     $jobs = $t->tx->res->json->{jobs};
     is ref $jobs, 'ARRAY', 'data returned (2)' and is scalar @$jobs, 3, 'user limit for jobs is effective';
 
+    $t->get_ok('/api/v1/jobs?latest=1&limit=2', 'query with user-specified limit for latest jobs')->status_is(200);
+    $jobs = $t->tx->res->json->{jobs};
+    is ref $jobs, 'ARRAY', 'data returned (3)' and is scalar @$jobs, 2, 'user limit for jobs is effective (latest)';
+
     $t->get_ok('/api/v1/jobs', 'query with (low) default limit for jobs')->status_is(200);
     $jobs = $t->tx->res->json->{jobs};
-    is ref $jobs, 'ARRAY', 'data returned (3)' and is scalar @$jobs, 2, 'default limit for jobs is effective';
+    is ref $jobs, 'ARRAY', 'data returned (4)' and is scalar @$jobs, 2, 'default limit for jobs is effective';
 };
 
 # delete the job with a registered job module

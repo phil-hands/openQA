@@ -3,9 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Schema::Result::Workers;
-
-
-use Mojo::Base 'DBIx::Class::Core';
+use Mojo::Base 'DBIx::Class::Core', -signatures;
 
 use DBIx::Class::Timestamps 'now';
 use Try::Tiny;
@@ -15,6 +13,7 @@ use OpenQA::WebSockets::Client;
 use OpenQA::Constants qw(WORKER_API_COMMANDS DB_TIMESTAMP_ACCURACY);
 use OpenQA::Jobs::Constants;
 use Mojo::JSON qw(encode_json decode_json);
+use DBI qw(:sql_types);
 
 __PACKAGE__->table('workers');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime Timestamps));
@@ -70,10 +69,10 @@ sub name {
     return $self->host . ":" . $self->instance;
 }
 
-sub seen {
-    my ($self, $workercaps, $error) = @_;
-    $self->update({t_seen => now()});
-    $self->update_caps($workercaps) if $workercaps;
+sub seen ($self, $options = {}) {
+    my $data = {t_seen => now()};
+    $data->{error} = $options->{error} if exists $options->{error};
+    $self->update($data);
 }
 
 # update worker's capabilities
@@ -89,8 +88,15 @@ sub update_caps {
 sub get_property {
     my ($self, $key) = @_;
 
-    my $r = $self->properties->find({key => $key});
-    return $r ? $r->value : undef;
+    # Optimized because this is a performance hot spot for the websocket server
+    my $sth = $self->result_source->schema->storage->dbh->prepare(
+        'SELECT value FROM worker_properties WHERE key = ? AND worker_id = ? LIMIT 1');
+    $sth->bind_param(1, $key, SQL_CHAR);
+    $sth->bind_param(2, $self->id, SQL_BIGINT);
+    $sth->execute;
+    my $r = $sth->fetchrow_arrayref;
+
+    return $r ? $r->[0] : undef;
 }
 
 sub delete_properties {
@@ -242,7 +248,7 @@ sub send_command {
 sub unfinished_jobs {
     my ($self) = @_;
 
-    return $self->previous_jobs->search({t_finished => undef});
+    return $self->previous_jobs->search({state => {-in => [OpenQA::Jobs::Constants::PENDING_STATES]}});
 }
 
 sub set_current_job {

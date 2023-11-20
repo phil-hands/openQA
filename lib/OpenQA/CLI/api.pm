@@ -26,13 +26,9 @@ sub command ($self, @args) {
       'd|data=s' => \$data,
       'f|form' => \my $form,
       'j|json' => \my $json,
-      'L|links' => \my $links,
       'param-file=s' => \my @param_file,
-      'p|pretty' => \my $pretty,
-      'q|quiet' => \my $quiet,
       'r|retries=i' => \my $retries,
-      'X|method=s' => \(my $method = 'GET'),
-      'v|verbose' => \my $verbose;
+      'X|method=s' => \(my $method = 'GET');
 
     @args = $self->decode_args(@args);
     die $self->usage unless my $path = shift @args;
@@ -49,18 +45,7 @@ sub command ($self, @args) {
     my $url = $self->url_for($path);
     my $client = $self->client($url);
     my $tx = $client->build_tx($method, $url, $headers, @data);
-    my $ret;
-    $retries //= $ENV{OPENQA_CLI_RETRIES} // 0;
-    do {
-        $tx = $client->start($tx);
-        my $res_code = $tx->res->code // 0;
-        return $self->handle_result($tx, {pretty => $pretty, quiet => $quiet, links => $links, verbose => $verbose})
-          unless $res_code =~ /50[23]/ && $retries > 0;
-        print "Request failed, hit error $res_code, retrying up to $retries more times after waiting ...\n";
-        sleep($ENV{OPENQA_CLI_RETRY_SLEEP_TIME_S} // 3);
-        $retries--;
-    } while ($retries > 0);
-    return 1;
+    $self->retry_tx($client, $tx, $retries);
 }
 
 1;
@@ -150,6 +135,9 @@ sub command ($self, @args) {
                                   may be specified by adding the option
                                   multiple times
     -L, --links                   Print pagination links to STDERR
+        --name <name>             Name of this client, used by openQA to
+                                  identify different clients via User-Agent
+                                  header, defaults to "openqa-cli"
     -p, --pretty                  Pretty print JSON content
     -q, --quiet                   Do not print error messages to STDERR
     -r, --retries <retries>       Retry up to the specified value on some

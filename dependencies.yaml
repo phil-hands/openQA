@@ -9,7 +9,7 @@
 ---
 targets:
   cpanfile: [ assetpack,        client, common, cover, devel, devel_no_selenium, main, test, worker ]
-  spec:     [ assetpack, build, client, common,        devel, devel_no_selenium, main, test, worker ]
+  spec:     [ assetpack, build, client, common, cover, devel, devel_no_selenium, main, test, worker ]
   cpanfile-targets:
     # target: cpanfile target type (default main)
     devel: devel
@@ -28,7 +28,6 @@ build_requires:
 
 common_requires:
   perl: '>= 5.20.0'
-  perl(Archive::Extract): '> 0.7'
   perl(Carp::Always): '>= 0.14.02'
   perl(Config::IniFiles):
   perl(Cpanel::JSON::XS): '>= 4.09'
@@ -39,12 +38,15 @@ common_requires:
   perl(Filesys::Df):
   perl(Getopt::Long):
   perl(Minion): '>= 10.25'
-  perl(Mojolicious): '>= 9.30'
+  perl(Mojolicious):
+    perl: '>= 9.34'
+    rpm: '>= 9.340.0'
   perl(Regexp::Common):
   perl(Storable):
   perl(Time::Moment):
   perl(Try::Tiny):
   perl(Config::Tiny):
+  ntp-daemon:
 
 cover_requires:
   perl(Devel::Cover):
@@ -68,15 +70,14 @@ devel_no_selenium_requires:
   '%build_requires':
   '%test_requires':
   '%qemu':
+  '%cover_requires':
   curl:
   rsync:
   postgresql-devel:
   sudo:
   tar:
   xorg-x11-fonts:
-  perl(Devel::Cover):
-  perl(Devel::Cover::Report::Codecovbash):
-  perl(Perl::Tidy): '== 20221112'
+  perl(Perl::Tidy): '== 20230912.0.0'
 
 devel_requires:
   '%devel_no_selenium_requires':
@@ -86,6 +87,7 @@ main_requires:
   '%assetpack_requires':
   git-core:
   hostname:  # for script/configure-web-proxy
+  bsdtar:  # for extraction feature of OpenQA::Downloader
   perl(aliased):
   perl(base):
   perl(constant):
@@ -135,6 +137,7 @@ main_requires:
   perl(Mojo::Util):
   perl(Mojolicious::Commands):
   perl(Mojolicious::Plugin):
+  perl(Mojolicious::Plugin::OAuth2):
   perl(Mojolicious::Static):
   perl(Mojo::RabbitMQ::Client):
     perl: '>= v0.2'
@@ -159,6 +162,7 @@ worker_requires:
   openQA-client:
   optipng:
   sqlite3: '>= 3.24.0'   # for INSERT INTO … ON CONFLICT … DO UPDATE SET … required by cache service
+  bsdtar:  # for extraction feature of OpenQA::Downloader
   perl(Capture::Tiny):
   perl(Mojo::IOLoop::ReadWriteProcess): '>= 0.26'
   perl(Minion::Backend::SQLite): '>= 5.0.7'
@@ -171,6 +175,7 @@ test_requires:
   '%main_requires':
   '%python_scripts_requires':
   '%worker_requires':
+  openssh-common:
   curl:
   jq:
   ShellCheck:
@@ -179,7 +184,6 @@ test_requires:
   python3-setuptools:
   python3-yamllint:
   perl(App::cpanminus):
-  perl(Mojolicious::Plugin::OAuth2):
   perl(Perl::Critic):
   perl(Perl::Critic::Freenode):
   perl(Selenium::Remote::Driver): '>= 1.23'

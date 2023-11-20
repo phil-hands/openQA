@@ -188,6 +188,63 @@ subtest 'server-side limit has precedence over user-specified limit' => sub {
     is ref $workers, 'ARRAY', 'data returned (3)' and is scalar @$workers, 2, 'default limit for workers is effective';
 };
 
+subtest 'server-side limit with pagination' => sub {
+    subtest 'input validation' => sub {
+        $t->get_ok('/api/v1/workers?limit=a')->status_is(400)
+          ->json_is({error_status => 400, error => 'Erroneous parameters (limit invalid)'});
+        $t->get_ok('/api/v1/workers?offset=a')->status_is(400)
+          ->json_is({error_status => 400, error => 'Erroneous parameters (offset invalid)'});
+    };
+
+    subtest 'navigation with limit' => sub {
+        my $links;
+
+        subtest 'first page' => sub {
+            $t->get_ok('/api/v1/workers?limit=3')->status_is(200)->json_has('/workers/0')->json_has('/workers/2')
+              ->json_hasnt('/workers/3');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page';
+            ok !$links->{prev}, 'no previous page';
+        };
+
+        subtest 'second page' => sub {
+            $t->get_ok($links->{next}{link})->status_is(200)->json_has('/workers/0')->json_has('/workers/2')
+              ->json_hasnt('/workers/3');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page';
+            ok $links->{prev}, 'has previous page';
+        };
+
+        subtest 'third page' => sub {
+            $t->get_ok($links->{next}{link})->status_is(200)->json_has('/workers/0')->json_hasnt('/workers/1');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok !$links->{next}, 'no next page';
+            ok $links->{prev}, 'has previous page';
+        };
+
+        subtest 'second page (prev link)' => sub {
+            $t->get_ok($links->{prev}{link})->status_is(200)->status_is(200)->json_has('/workers/0')
+              ->json_has('/workers/2')->json_hasnt('/workers/3');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page';
+            ok $links->{prev}, 'has previous page';
+        };
+
+        subtest 'first page (first link)' => sub {
+            $t->get_ok($links->{first}{link})->status_is(200)->status_is(200)->json_has('/workers/0')
+              ->json_has('/workers/2')->json_hasnt('/workers/3');
+            $links = $t->tx->res->headers->links;
+            ok $links->{first}, 'has first page';
+            ok $links->{next}, 'has next page';
+            ok !$links->{prev}, 'no previous page';
+        };
+    };
+};
+
 subtest 'delete offline worker' => sub {
     my $offline_worker_id = 9;
     $workers->create(

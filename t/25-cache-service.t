@@ -22,7 +22,7 @@ BEGIN {
     $ENV{OPENQA_CACHE_DIR} = path($basedir, 'cache');
     $ENV{OPENQA_BASEDIR} = $basedir;
     $ENV{OPENQA_CONFIG} = path($basedir, 'config')->make_path;
-    path($ENV{OPENQA_CONFIG})->child("workers.ini")->spurt('
+    path($ENV{OPENQA_CONFIG})->child("workers.ini")->spew('
 [global]
 CACHEDIRECTORY = ' . $ENV{OPENQA_CACHE_DIR} . '
 CACHEWORKERS = 10
@@ -99,7 +99,7 @@ sub test_sync ($run) {
 
     my $t_dir = int(rand(13432432));
     my $data = int(rand(348394280934820842093));
-    $dir->child($t_dir)->spurt($data);
+    $dir->child($t_dir)->spew($data);
     my $expected = $dir2->child('tests')->child($t_dir);
 
     ok !$cache_client->enqueue($rsync_request);
@@ -195,7 +195,7 @@ subtest 'Configurable minion workers' => sub {
     is_deeply([OpenQA::CacheService::setup_workers(qw(minion daemon))],
         [qw(minion daemon)], 'minion worker setup with daemon');
 
-    path($ENV{OPENQA_CONFIG})->child("workers.ini")->spurt("
+    path($ENV{OPENQA_CONFIG})->child("workers.ini")->spew("
 [global]
 CACHEDIRECTORY = $cachedir
 CACHELIMIT = 100");
@@ -252,7 +252,7 @@ subtest 'Invalid requests' => sub {
 
 subtest 'Asset exists' => sub {
     ok(!$cache_client->asset_exists('localhost', 'foobar'), 'Asset absent');
-    path($cachedir, 'localhost')->make_path->child('foobar')->spurt('test');
+    path($cachedir, 'localhost')->make_path->child('foobar')->spew('test');
 
     ok($cache_client->asset_exists('localhost', 'foobar'), 'Asset exists');
     unlink path($cachedir, 'localhost')->child('foobar')->to_string;
@@ -460,7 +460,7 @@ subtest 'Test Minion task registration and execution' => sub {
 subtest 'Test Minion Sync task' => sub {
     my $dir = tempdir;
     my $dir2 = tempdir;
-    $dir->child('test')->spurt('foobar');
+    $dir->child('test')->spew('foobar');
     my $expected = $dir2->child('tests')->child('test');
 
     my $req = $cache_client->rsync_request(from => $dir, to => $dir2);
@@ -481,8 +481,22 @@ subtest 'Test Minion Sync task' => sub {
 
 subtest 'Minion monitoring with InfluxDB' => sub {
     my $app = $t->app;
-    my $rate = $app->cache->metrics->{download_rate};
+    my $cache = $app->cache;
+    my $metrics = $cache->metrics;
+    my $rate = $metrics->{download_rate};
+    my $count = $metrics->{download_count};
     ok $rate > 0, 'download rate is higher than 0 bytes per second';
+
+    subtest 'helpers for tracking download count' => sub {
+        my $check_count = sub { $count = ($metrics = $cache->metrics)->{download_count} };
+        is $count, 0, 'count is initially 0';
+        $cache->_increase_metric(download_count => 1);
+        is $check_count->(), 1, 'count increased to 1';
+        $cache->_increase_metric(download_count => 5);
+        is $check_count->(), 6, 'count increased to 6';
+        $cache->_increase_metric(download_count => -6);
+        is $check_count->(), 0, 'count back at 0';
+    };
 
     my $url = $cache_client->url('/influxdb/minion');
     my $ua = $cache_client->ua;
@@ -490,6 +504,7 @@ subtest 'Minion monitoring with InfluxDB' => sub {
     is $res->body, <<"EOF", 'three workers still running';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=0i,failed=0i,inactive=0i
 openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=2i,registered=2i
+openqa_download_count,url=http://127.0.0.1:9530 count=${count}i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -499,6 +514,7 @@ EOF
     is $res->body, <<"EOF", 'four workers running now';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=0i,failed=0i,inactive=0i
 openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i,registered=3i
+openqa_download_count,url=http://127.0.0.1:9530 count=${count}i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -510,6 +526,7 @@ EOF
     is $res->body, <<"EOF", 'two jobs';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=1i,delayed=0i,failed=0i,inactive=1i
 openqa_minion_workers,url=http://127.0.0.1:9530 active=1i,inactive=2i,registered=3i
+openqa_download_count,url=http://127.0.0.1:9530 count=${count}i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -518,6 +535,7 @@ EOF
     is $res->body, <<"EOF", 'one job failed';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=0i,failed=1i,inactive=1i
 openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i,registered=3i
+openqa_download_count,url=http://127.0.0.1:9530 count=${count}i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 
@@ -526,6 +544,7 @@ EOF
     is $res->body, <<"EOF", 'job is being retried';
 openqa_minion_jobs,url=http://127.0.0.1:9530 active=0i,delayed=1i,failed=0i,inactive=2i
 openqa_minion_workers,url=http://127.0.0.1:9530 active=0i,inactive=3i,registered=3i
+openqa_download_count,url=http://127.0.0.1:9530 count=${count}i
 openqa_download_rate,url=http://127.0.0.1:9530 bytes=${rate}i
 EOF
 };
@@ -583,7 +602,7 @@ subtest 'Concurrent downloads of the same file' => sub {
 subtest 'Concurrent rsync' => sub {
     my $dir = tempdir;
     my $dir2 = tempdir;
-    $dir->child('test')->spurt('foobar');
+    $dir->child('test')->spew('foobar');
     my $expected = $dir2->child('tests')->child('test');
     my $app = $t->app;
     my $req = $cache_client->rsync_request(from => $dir, to => $dir2);

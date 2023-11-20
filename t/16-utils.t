@@ -20,7 +20,7 @@ sub exit_code(&) {
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Utils (qw(:DEFAULT prjdir sharedir resultdir assetdir imagesdir base_host random_string random_hex),
-    qw(download_rate download_speed));
+    qw(download_rate download_speed usleep_backoff));
 use OpenQA::Task::SignalGuard;
 use OpenQA::Test::Utils 'redirect_output';
 use OpenQA::Test::TimeLimit '10';
@@ -131,6 +131,9 @@ is href_to_bugref('https://pagure.io/foo/issue/1234'), 'pio#foo#1234', 'pagure.i
 is href_to_bugref('https://pagure.io/foo/bar/issue/1234'), 'pio#foo/bar#1234', 'pagure.io (with group) url to bugref';
 is href_to_bugref('https://gitlab.gnome.org/GNOME/foo/-/issues/1234'), 'ggo#GNOME/foo#1234',
   'GNOME gitlab url to bugref';
+is href_to_bugref('https://gitlab.com/fedora/sigs/flatpak/fedora-flatpaks/-/issues/26'),
+  'gfs#flatpak/fedora-flatpaks#26',
+  'Fedora SIGs gitlab url to bugref';
 is find_bug_number('yast_roleconf-ntp-servers-empty-bsc1114818-20181115.png'), 'bsc1114818',
   'find the bug number from the needle name';
 
@@ -252,28 +255,28 @@ ac6dd8d4475f8b7e0d683e64ff49d6d96151fb76 refs/tags/4.3
 EOT
 
     # Create a valid Changelog and check if result is the expected one
-    $changelog_file->spurt($changelog_content);
+    $changelog_file->spew($changelog_content);
     is detect_current_version($changelog_dir), '4.4.1494239160.9869466', 'Detect current version from Changelog format';
     like detect_current_version($changelog_dir), qr/(\d+\.\d+\.\d+\.$sha_regex)/, "Version scheme matches";
-    $changelog_file->spurt("- Update to version 4.4.1494239160.9869466:\n- Update to version 4.4.1489864450.251306a:");
+    $changelog_file->spew("- Update to version 4.4.1494239160.9869466:\n- Update to version 4.4.1489864450.251306a:");
     is detect_current_version($changelog_dir), '4.4.1494239160.9869466', 'Pick latest version detected in Changelog';
 
     # Failure detection case for Changelog file
-    $changelog_file->spurt("* Do job cleanup even in case of api failure");
+    $changelog_file->spew("* Do job cleanup even in case of api failure");
     is detect_current_version($changelog_dir), undef, 'Invalid Changelog return no version';
-    $changelog_file->spurt("Update to version 3a2.d2d.2ad.9869466:");
+    $changelog_file->spew("Update to version 3a2.d2d.2ad.9869466:");
     is detect_current_version($changelog_dir), undef, 'Invalid versions in Changelog returns undef';
 
     # Create a valid Git repository where we can fetch the exact version.
-    $head_file->spurt("7223a2408120127ad2d82d71ef1893bbe02ad8aa");
-    $refs_file->spurt($refs_content);
+    $head_file->spew("7223a2408120127ad2d82d71ef1893bbe02ad8aa");
+    $refs_file->spew($refs_content);
     is detect_current_version($git_dir), 'git-4.3-7223a240', 'detect current version from Git repository';
     like detect_current_version($git_dir), qr/(git\-\d+\.\d+\-$sha_regex)/, 'Git version scheme matches';
 
     # If refs file can't be found or there is no tag present, version should be undef
     unlink($refs_file);
     is detect_current_version($git_dir), undef, "Git ref file missing, version is undef";
-    $refs_file->spurt("ac6dd8d4475f8b7e0d683e64ff49d6d96151fb76");
+    $refs_file->spew("ac6dd8d4475f8b7e0d683e64ff49d6d96151fb76");
     is detect_current_version($git_dir), undef, "Git ref file shows no tag, version is undef";
 };
 
@@ -399,10 +402,10 @@ subtest 'project directory functions' => sub {
         is gitrepodir(distri => $distri), '', 'empty when .git is missing';
         $mocked_git->make_path;
         $mocked_git->child('config')
-          ->spurt(qq{[remote "origin"]\n        url = git\@github.com:fakerepo/os-autoinst-distri-opensuse.git});
+          ->spew(qq{[remote "origin"]\n        url = git\@github.com:fakerepo/os-autoinst-distri-opensuse.git});
         is gitrepodir(distri => $distri) =~ /github\.com.+os-autoinst-distri-opensuse\/commit/, 1, 'correct git url';
         $mocked_git->child('config')
-          ->spurt(qq{[remote "origin"]\n        url = https://github.com/fakerepo/os-autoinst-distri-opensuse.git});
+          ->spew(qq{[remote "origin"]\n        url = https://github.com/fakerepo/os-autoinst-distri-opensuse.git});
         is gitrepodir(distri => $distri) =~ /github\.com.+os-autoinst-distri-opensuse\/commit/, 1, 'correct git url';
     };
     subtest 'custom OPENQA_BASEDIR and OPENQA_SHAREDIR' => sub {
@@ -429,6 +432,35 @@ subtest 'change_sec_to_word' => sub {
     is change_sec_to_word(7201), '2h 1s', 'correctly converted (hours + seconds)';
     is change_sec_to_word(64890), '18h 1m 30s', 'correctly converted (hours + minutes + seconds)';
     is change_sec_to_word(648906), '7d 12h 15m 6s', 'correctly converted (all units)';
+};
+
+subtest 'usleep_backoff' => sub {
+    subtest 'with fixed padding to test exact behavior' => sub {
+        is usleep_backoff(1, 5, 30, 1_000_001), 6_000_001, 'delay one';
+        is usleep_backoff(2, 5, 30, 1_000_001), 7_000_001, 'delay two';
+        is usleep_backoff(3, 5, 30, 1_000_001), 8_000_001, 'delay three';
+        is usleep_backoff(4, 5, 30, 1_000_001), 9_000_001, 'delay four';
+        is usleep_backoff(5, 5, 30, 1_000_001), 10_000_001, 'delay five';
+        is usleep_backoff(6, 5, 30, 1_000_001), 11_000_001, 'delay six';
+        is usleep_backoff(7, 5, 30, 1_000_001), 12_000_001, 'delay seven';
+        is usleep_backoff(8, 5, 30, 1_000_001), 13_000_001, 'delay eight';
+        is usleep_backoff(9, 5, 30, 1_000_001), 14_000_001, 'delay nine';
+        is usleep_backoff(10, 5, 30, 1_000_001), 15_000_001, 'delay ten';
+    };
+
+    subtest 'with random 1 second default padding' => sub {
+        my $real_usleep_value = usleep_backoff(3, 5, 30);
+        ok $real_usleep_value <= 8_000_000, 'less than 8 seconds';
+        ok $real_usleep_value > 7_000_000, 'more than 7 seconds';
+    };
+
+    subtest 'disabled with 0 second minimum value' => sub {
+        is usleep_backoff(5, 0, 30), 0, 'default to 0 if allowed';
+    };
+
+    subtest 'special cases' => sub {
+        is usleep_backoff(5, 40, 30), 30_000_000, 'maximum is not exceeded even if the minimum is higher';
+    };
 };
 
 my ($current_term_handler, $current_int_handler) = ($SIG{TERM}, $SIG{INT});

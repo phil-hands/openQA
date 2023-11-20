@@ -1,6 +1,6 @@
 
 [[writingtests]]
-= openQA tests developer guide
+= openQA test developer guide
 :toc: left
 :toclevels: 6
 :author: openQA Team
@@ -22,50 +22,237 @@ https://github.com/os-autoinst/openQA[official repository].
 == Basic
 [id="basic"]
 
-This section explains the basic layout of openQA tests and the API available in tests.
-openQA tests are written in the *Perl* programming language. Some basic but no
-in-depth knowledge of Perl is needed. This document assumes that the reader
-is already familiar with Perl.
+This section explains the basic layout of an openQA test and the API available.
+Tests are written in the *Perl* programming language. However there is support
+for the *Python* programming language (through the Perl module
+`Inline::Python`).
 
-== API
+Some basic but no in-depth knowledge of Perl or Python is needed. This document
+assumes that the reader is already familiar with Perl or Python.
+
+== Test API
 [id="api"]
 :testapi: https://github.com/os-autoinst/os-autoinst/blob/master/testapi.pm[os-autoinst]
 
-{testapi} provides the API for the tests using the os-autoinst backend, you can
-take a look to the published documentation at http://open.qa/api/testapi/.
+{testapi} provides the API for the test using the os-autoinst backend. Take a
+look at the http://open.qa/api/testapi[test API documentation] for further
+information. Note that this test API is sometimes also referred to as an openQA
+DSL, because in some contexts it can look like a domain specific language.
 
 == How to write tests
 
-openQA tests need to implement at least the *run* subroutine to
-contain the actual test code and the test needs to be loaded in the distribution's
-main.pm.
+=== Test module interface
 
-The *test_flags* subroutine specifies what should happen when test execution of the
-current test module is finished depending on the result.
-If we should skip execution of the following test modules if current one failed, or it
-should be used to create a snapshot of the SUT to rollback to. The following flags
-are supported:
+An openQA test needs to implement at least the `run` subroutine containing the
+actual test code and the test needs to be loaded in the distribution's
+`main.pm`.
 
-* *fatal*: The whole test suite is aborted if the test module fails. The overall state
-  is set to `failed`.
-* *ignore_failure*: If this module fails, it will not affect the overall result at all.
-* *milestone*: After this test succeeds, update the 'lastgood' snapshot.
-* *no_rollback*: Don't roll back to the 'lastgood' snapshot if the test module fails.
-* *always_rollback*: Roll back to the 'lastgood' snapshot even if test was successful.
+Here is an example in Perl:
 
-See the example below for how to enable a test flag.
-Note that snapshots are only supported by the QEMU backend. When using other backends
-`fatal` is therefore enabled by default. One can explicitly set it to `0` to disable
-the behavior for all backends even though it is not possible to roll back.
+[source,perl]
+-------------------------------------------------------------------
+use Mojo::Base "basetest";
+use testapi;
 
-There are several callbacks defined:
+sub run () {
+    # write in this block the code for your test.
+}
+-------------------------------------------------------------------
 
-* *post_fail_hook* is called to upload log files or determine the state of
-  the machine
-* *pre_run_hook* is called before the run function - mainly useful for a whole
-  group of tests
-* *post_run_hook* is run after successful run function - mainly useful for a whole
-  group of tests
+And here is an example in Python:
+
+[source,python]
+-------------------------------------------------------------------
+from testapi import *
+
+def run(self):
+    # write in this block the code for your test.
+-------------------------------------------------------------------
+
+There are more optional subroutines that can be defined to extend the behavior
+of a test. A test must comply with the interface defined below.
+_Please note that the subroutine marked with `*1` are optional._
+
+[source,python]
+-------------------------------------------------------------------
+# Written in type-hinted python to indicate explicitly return types
+def run(self): -> None
+def test_flags(): -> dict # *1
+def post_fail_hook(): -> None # *1
+def pre_run_hook(): -> None # *1
+def post_run_hook(): -> None # *1
+-------------------------------------------------------------------
+
+==== `run`
+Defines the actual steps to be performed during the module execution.
+
+An example usage:
+
+[source,perl]
+-------------------------------------------------------------------
+sub run () {
+    # wait for bootloader to appear
+    # with a timeout explicitly lower than the default because
+    # the bootloader screen will timeout itself
+    assert_screen "bootloader", 15;
+
+    # press enter to boot right away
+    send_key "ret";
+
+    # wait for the desktop to appear
+    assert_screen "desktop", 300;
+}
+-------------------------------------------------------------------
+
+`assert_screen` & `send_key` are provided by {testapi}.
+
+==== `test_flags`
+
+Specifies what should happen when test execution of the current test module is
+finished depending on the result.
+
+Each flag is defined with a hash key, the possible hash keys are:
+
+* *fatal*: When set to `1` the whole test suite is aborted if the test module
+   fails. The overall state is set to `failed`.
+* *ignore_failure*: When set to `1` and the test module fails, it will not
+   affect the overall result at all.
+* *milestone*: After this test succeeds, update the 'lastgood' snapshot of the
+   SUT.
+* *no_rollback*: Don't roll back to the 'lastgood' snapshot of the SUT if the
+   test module fails.
+* *always_rollback*: Roll back to the 'lastgood' snapshot of the SUT even if
+   test was successful.
+
+See the example below for how to enable a test flag. Note that snapshots are
+only supported by the QEMU backend. When using other backends `fatal` is
+therefore enabled by default. One can explicitly set it to `0` to disable the
+behavior for all backends even though it is not possible to roll back.
+
+An example usage:
+
+[source,perl]
+-------------------------------------------------------------------
+sub test_flags () {
+    return {fatal => 1};
+}
+-------------------------------------------------------------------
+
+==== `pre_run_hook`
+
+It is called before the run function - mainly useful for a whole group of tests.
+It is useful to setup the start point of the test.
+
+An example usage:
+
+[source,perl]
+-------------------------------------------------------------------
+sub pre_run_hook () {
+    # Make sure to begin the test in the root console.
+    select_console 'root-console';
+}
+-------------------------------------------------------------------
+
+==== `post_fail_hook`
+
+It is called after `run()` failed. It is useful to upload log files
+or to determine the state of the machine.
+
+An example usage:
+
+[source,perl]
+-------------------------------------------------------------------
+sub post_fail_hook () {
+    # Take an screenshot when the test failed
+    save_screenshot;
+}
+-------------------------------------------------------------------
+
+==== `post_run_hook`
+
+It is called after `run()` regardless of the result of the test run.
+
+An example usage:
+
+[source,perl]
+-------------------------------------------------------------------
+sub post_fail_hook () {
+    send_key 'ctrl-alt-f3';
+
+    assert_script_run 'openqa-cli api experimental/search q=shutdown.pm' ;    
+}
+-------------------------------------------------------------------
+
+=== Notes on the Python API
+[id="notes-python-api"]
+
+The Python integration that OpenQA offers through `Inline::Python` also allows
+the test modules to import other Perl modules with the usage of the `perl`
+virtual package provided by `Inline::Python`.
+
+Because of the way `Inline::Python` binds Perl functions to Python it is not
+possible to use keywords arguments from Python to Perl functions. They must be
+passed as positional arguments, for example `"key", "value"`.
+
+See the following snippet of Perl code
+
+[source,perl]
+-------------------------------------------------------------------
+use x11utils;
+
+# [...] omitted for brevity
+
+sub run () {
+    # [...] omitted for brevity
+
+    # Start vncviewer - notice the named arguments
+    x11_start_program('vncviewer :0',
+        target_match => 'virtman-gnome_virt-install',
+        match_timeout => 100
+    );
+    # [...] omitted for brevity
+}
+-------------------------------------------------------------------
+
+versus the equivalent python code:
+
+[source,python]
+-------------------------------------------------------------------
+from testapi import *
+
+# [...] omitted for brevity
+
+def run(self):
+    perl.require('x11utils')
+
+    # Start vncviewer - notice the named arguments passed as positional arguments
+    # Formatted in pairs for better visibility.
+
+    perl.x11utils.x11_start_program('vncviewer :0',
+        'target_match', 'virtman-gnome_virt-install',
+        'match_timeout', 100
+    )
+    # [...] omitted for brevity
+-------------------------------------------------------------------
+
+Additionally, Python tests do not support `run_args`. An error will be present
+when a Python test detects the presence of `run_args` on schedule.
+
+This is because of the way `Inline::Python` handles argument passing between
+Perl <-> Python, references to complex Perl objects do not reach Python
+properly and they can't be used.
+
+=== Example Perl test modules
+[id="testmodule_perl_examples"]
+
+The following examples are short complete test modules written in Perl
+implementing the interface described above.
+
+==== Boot to desktop
+[id="testmodule_perl_boot"]
+
+[caption="Example: "]
+.Boots into desktop when pressing enter at the boot loader screen.
 
 The following example is a basic test that assumes some live image
 that boots into the desktop when pressing enter at the boot loader:
@@ -75,7 +262,7 @@ that boots into the desktop when pressing enter at the boot loader:
 use Mojo::Base "basetest";
 use testapi;
 
-sub run {
+sub run () {
     # wait for bootloader to appear
     # with a timeout explicitly lower than the default because
     # the bootloader screen will timeout itself
@@ -88,21 +275,20 @@ sub run {
     assert_screen "desktop", 300;
 }
 
-sub test_flags {
+sub test_flags () {
     return {fatal => 1};
 }
-
-1;
 -------------------------------------------------------------------
 
-=== Test Case Examples
-[id="testcase_examples"]
+==== Install software via `zypper`
+[id="testmodule_perl_zypper"]
 
 [caption="Example: "]
 .Console test that installs software from remote repository via zypper command
+
 [source,perl]
 ----------------------------------------------------------------------------------------------------------
-sub run() {
+sub run () {
     # change to root
     become_root;
 
@@ -123,11 +309,14 @@ sub run() {
 }
 ----------------------------------------------------------------------------------------------------------
 
+==== Sample X11 Test
+
 [caption="Example: "]
 .Typical X11 test testing kate
+
 [source,perl]
 --------------------------------------------------------------
-sub run() {
+sub run () {
     # make sure kate was installed
     # if not ensure_installed will try to install it
     ensure_installed 'kate';
@@ -156,15 +345,21 @@ sub run() {
 }
 --------------------------------------------------------------
 
-In addition to Perl, it is possible to write tests in Python. Although the
-boilerplate is slightly different the function names are the same.
+=== Example Python test modules
+[id="testmodule_python_examples"]
+
+The following examples are short complete test modules written in Python
+implementing the interface described above.
+
+==== openQA web UI sample test
+[id="testmodule_python_webui"]
 
 [caption="Example: "]
 .Test for the openQA web UI written in Python
+
 [source,python]
 --------------------------------------------------------------
 from testapi import *
-
 
 def run(self):
     assert_screen('openqa-logged-in')
@@ -173,15 +368,21 @@ def run(self):
     send_key('ret')
     assert_screen('openqa-search-results')
 
+    # import further Perl-based libraries (besides `testapi`)
+    perl.require('x11utils')
+
+    # use imported Perl-based libraries; call Perl function that would be called via "named arguments" in Perl
+    # note: In Perl the call would have been: x11_start_program('flatpak run com.obsproject.Studio', target_match => 'obsproject-wizard')
+    #
+    # See the explanation in the "Notes on the Python API" section.
+    perl.x11utils.x11_start_program('flatpak run com.obsproject.Studio', 'target_match', 'obsproject-wizard')
 
 def switch_to_root_console():
     send_key('ctrl-alt-f3')
 
-
 def post_fail_hook(self):
     switch_to_root_console()
     assert_script_run('openqa-cli api experimental/search q=shutdown.pm')
-
 
 def test_flags(self):
     return {'fatal': 1}
@@ -253,7 +454,7 @@ $testapi::distri->set_expected_serial_failures([
 .Defining serial exception capture in the test
 [source,perl]
 --------------------------------------------------------------
-sub run {
+sub run () {
     my ($self) = @_;
     $self->{serial_failures} = [
         {type => 'soft', message  => 'known issue',  pattern => quotemeta 'Error'},
@@ -267,7 +468,7 @@ sub run {
 .Adding serial exception capture in the test
 [source,perl]
 --------------------------------------------------------------
-sub run {
+sub run () {
     my ($self) = @_;
     push @$self->{serial_failures}, {type => 'soft', message => 'known issue',  pattern => quotemeta 'Error'};
     ...
@@ -467,7 +668,7 @@ openQA tries to handle things sensibly when jobs with dependencies either fail, 
 * When a chained or parallel parent fails or is cancelled, all children will be cancelled.
 * When a parent is restarted, all children are also restarted recursively.
 * When a parallel child is restarted, the parent and siblings will also be restarted.
-* When a *regularly* chained child is restarted, the parent is not restarted if it passed or softfailed. This will usually be fine, but be aware that if an asset uploaded by the chained parent has been cleaned up, the child may fail immediately. To deal with this case, just restart the parent to recreate the asset.
+* When a *regularly* chained child is restarted, the parent is only restarted if it failed. This will usually be fine, but be aware that if an asset uploaded by the chained parent has been cleaned up, the child may fail immediately. To deal with this case, just restart the parent to recreate the asset.
 * When a *directly* chained child is restarted, all directly chained parents are recursively restarted (but not directly chained siblings). Otherwise it would not be possible to guarantee that the jobs run directly after each other on the same worker.
 * When a parallel *child* fails or is cancelled, the parent and all other children are also cancelled. This behaviour is intended for closely-related clusters of jobs, e.g. high availability tests, where it's sensible to assume the entire test is invalid if any of its components fails. A special variable can be used to change this behaviour. Setting a parallel parent job's PARALLEL_CANCEL_WHOLE_CLUSTER to a false value, i.e. 0, changes this so that, if one of its children fails or is cancelled but the parent has other pending or active children, the parent and the other children will not be cancelled. This behaviour makes more sense if the parent is providing services to the various children but the children themselves are not closely related and a failure of one does not imply that the tests run by the other children and the parent are invalid.
 
@@ -644,7 +845,7 @@ use lockapi;
 use mmapi;
 
 # On parent job
-sub run {
+sub run () {
     # ftp service started automatically on boot
     assert_screen 'login', 300;
 
@@ -656,7 +857,7 @@ sub run {
 }
 
 # On child we wait for ftp server to be ready
-sub run {
+sub run () {
     # wait until ftp service is ready
     # performs mutex lock & unlock internally
     mutex_wait 'ftp_service_ready';
@@ -668,7 +869,7 @@ sub run {
 
 # Mutexes can be used also for garanting exclusive access to resource
 # Example on child when only one job should access ftp at time
-sub run {
+sub run () {
     # wait until ftp service is ready
     mutex_lock 'ftp_service_ready';
 
@@ -702,7 +903,7 @@ The job ID is also required when unlocking such a mutex.
 use lockapi;
 use mmapi;
 
-sub run {
+sub run () {
     my $children = get_children();
 
     # let's suppose there is only one child
@@ -745,7 +946,7 @@ use lockapi;
 barrier_create('NODES_CONFIGURED', 4);
 
 # On master job
-sub run {
+sub run () {
     assert_screen 'login', 300;
 
     # Master is ready, waiting while workers are configured (check_dead_job is optional)
@@ -761,7 +962,7 @@ sub run {
 }
 
 # On 3 worker jobs
-sub run {
+sub run () {
     assert_screen 'login', 300;
 
     # do initial worker setup
@@ -790,7 +991,7 @@ use Mojo::Base "basetest";
 use testapi;
 use mmapi;
 
-sub run {
+sub run () {
     # returns a hash ref containing (id => state) for all children
     my $children = get_children();
 
@@ -905,7 +1106,7 @@ The actual test 'child' job, will then have to set `PARALLEL_WITH=supportserver-
 use Mojo::Base 'basetest';
 use testapi;
 
-sub run {
+sub run () {
   my $script="set -e -x\n";
   $script.="echo test >test.txt\n";
   $script.="time tftp ".$server_ip." -c put test.txt test2.txt\n";
@@ -1002,12 +1203,10 @@ use Mojo::Base 'opensusebasetest';
 use testapi;
 use utils;
 
-sub run {
+sub run () {
     wait_boot;  # Utility function defined by the SUSE distribution
     select_console 'root-console';
 }
-
-1;
 --------------------------------------------------------------------------------
 
 This will select a text TTY and login as the root user (if necessary). Now
@@ -1584,17 +1783,17 @@ The test modules foo.pm and bar.pm will be downloaded into the root of the pool 
 
 A valid test module format looks like this:
 
+[source,perl]
 ----
 use Mojo::Base 'consoletest';
 use testapi;
 
-sub run {
+sub run () {
     select_console 'root-console';
     assert_script_run 'foo';
 }
 
-sub post_run_hook {}
-1;
+sub post_run_hook () {}
 ----
 
 For example this can be used in bug investigations or trying out new test
@@ -1633,10 +1832,12 @@ way:
 * A relative `NEEDLES_DIR` is treated to be relative to the default `CASEDIR`
   (even if `CASEDIR` is customized). To have it treated to be relative to the
   custom `CASEDIR`, prefix the relative path with `%CASEDIR%/`. So specifying
-  e.g. `CASEDIR=https://github.com/…` and `NEEDLES_DIR=%CASEDIR%/the-needles`
+  e.g. `CASEDIR=https://github.com/…` and `NEEDLES_DIR=%%CASEDIR%%/the-needles`
   will lead to `%CASEDIR%` being substituted with the path of the Git checkout
   created for the custom `CASEDIR`. That results in needles found in
-  https://github.com/…/tree/…/the-needles to be used.
+  https://github.com/…/tree/…/the-needles to be used. Note that double
+  `%`-signs are to avoid variable substitution. When using `curl`, you need to
+  escape the `%`-sign as `%25` *in addition*.
 ====
 
 A helper script `openqa-clone-custom-git-refspec` is available for
@@ -1665,3 +1866,102 @@ parameter to `openqa-clone-custom-git-refspec` or via the `PRODUCTDIR` variable
 to `openqa-clone-job`. Both can still be used when overwriting `PRODUCTDIR`, but
 special care must be taken if the schedule is modified (then it is safer to
 manually specify the schedule via the `SCHEDULE` variable).
+
+== Running openQA jobs as CI checks
+It is possible to run openQA jobs as CI checks of a repository, e.g. a test
+distribution or an arbitrary repository containing software with openQA tests
+as part of the test suite.
+
+=== Create and monitor openQA jobs from within the CI runner
+The easiest approach is to create and monitor openQA jobs from within the CI
+runner. To make this easier, `openqa-cli` provides the `schedule` sub-command
+with the `--monitor` flag. This way you still need an openQA instance to run
+tests (as they are not executed within the CI runner itself) but you can also
+still conveniently view the test results on the openQA web UI.
+
+An example using GitHub actions and the official container image we provide for
+`openqa-cli` can be found in the example distributions'
+https://github.com/os-autoinst/os-autoinst-distri-example/blob/master/.github/workflows/openqa.yml[workflow].
+
+NOTE: This example makes use of the `SCENARIO_DEFINITIONS_YAML` variable which
+allows specifying
+https://github.com/os-autoinst/os-autoinst-distri-example/blob/master/scenario-definitions.yaml[scenario definitions]
+in a way that is independent from openQA's normal scheduling tables. This
+feature is explained in further detail in the corresponding
+<<UsersGuide.asciidoc#scenarios_yaml,users guide section>>.
+
+NOTE: This example shows how API credentials are supplied. It is important to
+note that using `on:pull_request` would only work for PRs created on the main
+repository but not for PRs created from forks. Therefore `on:pull_request_target`
+is used instead. To still run the tests on the PR version the variables under
+`github.event.pull_request.head.*` are utilized (instead of e.g. just
+`$GITHUB_REF`).
+
+NOTE: Due to the use of `on:pull_request_target` the scenario definitions are
+read from the main repository in this example. This is the conservative approach.
+To allow scheduling jobs based on the PR version of the scenario definitions file
+one could use e.g.
+`SCENARIO_DEFINITIONS_YAML_FILE=https://raw.githubusercontent.com/$GH_REPO/$GH_REF/.github/workflows/openqa.yml`
+instead of `- uses: actions/checkout@v3` and
+`--param-file SCENARIO_DEFINITIONS_YAML=scenario-definitions.yaml`.
+
+=== Use webhooks and status reporting APIs of GitHub
+This approach is so far specific to GitHub and is a bit more effort to setup
+than the approach mentioned in the previous section. For this to work, GitHub
+needs to be able to inform openQA that a PR has been created or updated and
+openQA needs to be able to inform GitHub about the result of the jobs it ran.
+So authentication needs to be configured on both sides. On the upside, there
+is no additional CI runner required and the authentication also works when a
+PR is created from a fork repository branch which extra configuration.
+
+The test scenarios for your repository need to be defined in the file
+`scenario-definitions.yaml` at the root of your repository. Checkout the
+https://github.com/os-autoinst/os-autoinst-distri-example/blob/master/scenario-definitions.yaml[scenario definitions]
+from the example distribution for an example. You may append a parameter like
+`SCENARIO_DEFINITIONS_YAML=path/of/yaml` to the query parameters of the
+webhook to change the lookup path of this file.
+
+==== Setup a GitHub access token for openQA
+This setup is required for openQA to be able to report the status back to
+GitHub.
+
+1. Open https://github.com/settings/tokens/new and create a new token. It
+   needs at least the scope "repo".
+2. Open the openQA web UI's config file (usually `/etc/openqa/openqa.ini`)
+   and add the token created in the previous step:
++
+ [secrets]
+ github_token = $token
+
+3. Restart the web UI services.
+
+IMPORTANT: The user the token has been created with needs at least "Write"
+permissions to access the repository the CI checks should appear on (for
+instance by being member of a team with that permissions). Otherwise, GitHub
+might respond with a 404 response (weirdly not necessarily 403) when submitting
+the CI check status.
+
+==== Setup webhook on GitHub
+This setup is required for GitHub to be able to inform openQA that a PR has
+been created or updated.
+
+1. Open https://github.com/$orga/$project/settings/hooks/new. You need to
+   substitute the placeholders `$orga`  and `$project` with the corresponding
+   value of the repository you want to add CI checks to.
+2. Add https://$user:$apikey:$apisecret@$openqa_host/api/v1/webhooks/product?DISTRI=example&VERSION=0&FLAVOR=DVD&ARCH=x86_64&TEST=simple_boot
+   as "Payload URL". You need to substitute the placeholders with valid API
+   credentials and hostname for your openQA instance. If you don't have
+   an API key/secret then you can create one on https://$openqa_host/api_keys.
+   Make sure the casing of the user name is correct. The scheduling
+   parameters need to be adjusted to produce the wanted set of jobs from
+   your scenario definitions YAML file.
+3. Select "application/json" as "Content type".
+4. Add `$user:$apikey:$apisecret` as secret replacing placeholders again.
+   You need to use the same credentials as in step 2.
+5. Keep SSL enabled. (Be sure your openQA instance is reachable via HTTPS.)
+6. Select "Let me select individual events." and then "Pull requests".
+7. Ensure "Active" is checked and confirm.
+8. GitHub should now have been delivering a "ping" event. Checkout whether
+   it could be delivered. If you have gotten a 200 response then everything
+   is setup correctly. Otherwise, checkout the response of the delivery to
+   investigate what is wrong.

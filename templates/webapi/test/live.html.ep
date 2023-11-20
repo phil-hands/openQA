@@ -125,7 +125,7 @@
                 </div>
                 <div class="col-sm-5">
                     <label for="developer-pause-on-failure" class="col-form-label">
-                        Pause on failure
+                        Pause on failure (<strong>except</strong> screen mismatch assertions)
                     </label>
                     <%= help_popover('Help for <i>pause on failue</i>' => '
                         <p>
@@ -193,7 +193,7 @@
     </div>
 </div>
 
-<div id="canholder" data-url="<%= url_for('apiv1_create_command', workerid => 'WORKERID')%>">
+<div id="canholder">
   <canvas id="livestream" width="1024" height="768" data-url='<%= url_for("streaming", testid => $testid) %>'>
   </canvas>
 </div>

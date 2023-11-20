@@ -22,10 +22,11 @@ use OpenQA::Scheduler::Client;
 use Mojo::Home;
 use Mojo::File qw(path tempfile tempdir);
 use Mojo::Util 'dumper';
+use Mojo::URL;
 use Cwd qw(abs_path getcwd);
 use IPC::Run qw(start);
 use Mojolicious;
-use Mojo::Util 'gzip';
+use Mojo::Util qw(b64_decode gzip);
 use Test::Output 'combined_like';
 use Mojo::IOLoop;
 use Mojo::IOLoop::ReadWriteProcess 'process';
@@ -54,7 +55,7 @@ our (@EXPORT, @EXPORT_OK);
     qw(stop_service start_worker unstable_worker fake_asset_server),
     qw(cache_minion_worker cache_worker_service shared_hash embed_server_for_testing),
     qw(run_cmd test_cmd wait_for wait_for_or_bail_out perform_minion_jobs),
-    qw(prepare_clean_needles_dir prepare_default_needle mock_io_loop assume_all_assets_exist)
+    qw(prepare_clean_needles_dir prepare_default_needle mock_io_loop assume_all_assets_exist schedule_iso)
 );
 
 # The function OpenQA::Utils::service_port method hardcodes ports in a
@@ -126,6 +127,16 @@ sub fake_asset_server {
             my $archive = gzip 'This file was compressed!';
             $c->render(data => $archive);
         });
+    $r->get(
+        '/test.tar.xz' => sub ($c) {
+            # an xz compressed tar file containing the single file "test-file" with the contents "Archived file!\n"
+            my $data = '/Td6WFoAAATm1rRGAgAhARYAAAB0L+Wj4Af/AHFdADoZSs4dfe+Arz18uNRLppL12Hz5MDHYcLt5
+                        /PvM5kdTuJD3iSCXTYLW9zb9MXA9LqgK7raUtSCXM7VLT8xqwGE4kxz2xTNfbS/DRFiYMsutZ7Xq
+                        iWj1mj0AgYJejwqLTPCcO1J/4gLpWvPaWPIhX58AAAAAAJpvxi0MvTYnAAGNAYAQAAAg72StscRn
+                        +wIAAAAABFla';
+            $c->render(data => b64_decode $data);
+        });
+    $r->get('/fake-archive.tar.xz' => sub ($c) { $c->render(data => 'This is not an actual archive!') });
     $r->get(
         '/test' => sub {
             my $c = shift;
@@ -396,7 +407,8 @@ sub setup_share_dir {
 
     my $tests_dir_path = abs_path('../os-autoinst/t/data/tests/') or die 'tests dir not found';
     my $tests_link_path = path($sharedir, 'tests')->child('tinycore');
-    symlink($tests_dir_path, $tests_link_path) || die "can't symlink $tests_link_path -> $tests_dir_path: $!";
+    symlink $tests_dir_path, $tests_link_path or die "can't symlink '$tests_link_path' -> '$tests_dir_path': $!";
+    note "using tests and needles from $tests_dir_path";
 
     return $sharedir;
 }
@@ -410,7 +422,7 @@ sub setup_fullstack_temp_dir {
     my $datadir = path($FindBin::Bin, 'data');
 
     $datadir->child($_)->copy_to($configdir->child($_)) for qw(openqa.ini database.ini workers.ini);
-    path($basedir, 'openqa', 'db')->make_path->child('db.lock')->spurt;
+    path($basedir, 'openqa', 'db')->make_path->child('db.lock')->spew('');
 
     note("OPENQA_BASEDIR: $basedir\nOPENQA_CONFIG: $configdir");
     $ENV{OPENQA_BASEDIR} = $basedir;
@@ -650,5 +662,9 @@ sub mock_io_loop (%args) {
 }
 
 sub assume_all_assets_exist { OpenQA::Schema->singleton->resultset('Assets')->search({})->update({size => 0}) }
+
+sub schedule_iso ($t, $args, $status = 200, $query_params = {}, $msg = undef) {
+    $t->post_ok(Mojo::URL->new('/api/v1/isos')->query($query_params), form => $args)->status_is($status, $msg)->tx->res;
+}
 
 1;

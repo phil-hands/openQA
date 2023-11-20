@@ -20,15 +20,113 @@ has already read the <<GettingStarted.asciidoc#gettingstarted,Getting Started
 Guide>>, also available at the https://github.com/os-autoinst/openQA[official
 repository].
 
-Continue with the next section to get a simple, ready-to-use installation,
-useful for a single user setup. To setup using containers follow the
-<<#container_setup,Container based setup>>. Else, continue with the more
+Continue with the next section <<#container_setup,Container based setup>> to
+setup a simple, ready-to-use container based openQA instance which is useful
+for a single user setup. For a quick boostrapping under openSUSE go to
+<<#bootstrapping,Quick bootstrapping>>. Else, continue with the more
 advanced section about <<#custom_installation,Custom installation>>. For a
 setup suitable to develop openQA itself, have a look at the
 <<Contributing.asciidoc#development-setup,Development setup>> section.
 
-[[bootstrapping]]
+[id="container_setup"]
+== Container based setup
+
+openQA is provided in containers. Multiple variants exist.
+
+=== Single-instance container
+
+The easiest and quickest way to spawn a single instance of openQA with a
+single command line using the `podman` container engine is the following:
+
+[source,sh]
+----
+podman run -p 1080:80 -p 1443:443 --rm -it registry.opensuse.org/devel/openqa/containers/openqa-single-instance
+----
+
+Once the startup has finished, the web UI is accessible via http://localhost:1080
+or https://localhost:1443.
+
+=== Separate web UI and worker containers
+As an alternative also separate containers are provided for both the web UI
+and worker.
+
+For example the web UI container can be pulled and started using the `podman`
+container engine:
+
+[source,sh]
+----
+podman run -p 1080:80 -p 1443:443 --rm -it registry.opensuse.org/devel/openqa/containers15.5/openqa_webui:latest
+----
+
+The worker container can be pulled and started with:
+
+[source,sh]
+----
+podman run --rm -it registry.opensuse.org/devel/openqa/containers15.5/openqa_worker:latest
+----
+
+=== Custom configuration for containers
+
+To supply a custom openQA config file, use the `-v` parameter. This also works
+for the database config file. Note that if a custom database config file is
+specified, no database is launched within the container.
+By default, the web UI container uses the self-signed certificate that comes
+with Mojolicious. To supply a different certificate, use the `-v` parameter.
+Example for running openQA with a custom config and certificate:
+
+[source,sh]
+----
+podman run -p 1080:80 -p 1443:443 \
+  -v ./container/webui/test-cert.pem:/etc/apache2/ssl.crt/server.crt:z \
+  -v ./container/webui/test-key.pem:/etc/apache2/ssl.key/server.key:z \
+  -v ./container/webui/test-cert.pem:/etc/apache2/ssl.crt/ca.crt:z \
+  -v ./container/webui/conf/openqa.ini:/data/conf/openqa.ini:z \
+  --rm -it registry.opensuse.org/devel/openqa/containers15.5/openqa_webui:latest
+----
+
+
+The same works for the workers container where you most likely want to to
+supply `workers.ini` and `client.conf`:
+
+[source,sh]
+----
+podman run \
+  -v ./container/worker/conf/workers.ini:/data/conf/workers.ini:z \
+  -v ./container/worker/conf/client.conf:/data/conf/client.conf:z \
+  --rm -it registry.opensuse.org/devel/openqa/containers15.5/openqa_worker:latest
+----
+
+This examples assume the working directory is an openQA checkout. To avoid doing
+a checkout, you can also grab the config files from the
+https://github.com/os-autoinst/openQA/tree/master/container/webui/conf[webui/conf]
+and
+https://github.com/os-autoinst/openQA/tree/master/container/worker/conf[worker/conf]
+directory listings on GitHub.
+
+To learn more about how to run workers checkout the
+<<Installing.asciidoc#_run_openqa_workers,Run openQA workers section>>.
+
+For creating a first test job, checkout the
+<<UsersGuide.asciidoc#_triggering_tests,Triggering tests section>>. Note that the
+commands mentioned there can also be invoked within a container, e.g.:
+
+[source,sh]
+----
+podman run \
+   --rm -it registry.opensuse.org/devel/openqa/containers15.5/openqa_webui:latest \
+   openqa-cli --help
+----
+
+Checkout the
+<<ContainerizedSetup.asciidoc#containerizedsetup,containerized setup section>>
+for more details.
+
+Take a look at
+https://registry.opensuse.org/cgi-bin/cooverview?srch_term=project%3Ddevel%3AopenQA[openSUSE's registry]
+for all available container images.
+
 == Quick bootstrapping under openSUSE
+[id="bootstrapping"]
 
 To quickly get a working openQA installation, you can use the openqa-bootstrap
 script. It essentially automates the steps mentioned in the
@@ -69,8 +167,6 @@ with optional, overridden parameters. More information about
 
 === openQA in a container
 
-*NOTE* This method is not available on openSUSE Leap older than version 15.1.
-
 You can also setup a systemd-nspawn container with openQA with the following
 commands.
 and you need to have no application listening on port 80 yet because the container
@@ -84,33 +180,6 @@ zypper in openQA-bootstrap
 systemd-run -tM openqa1 /bin/bash # start a shell in the container
 -------------------------------------------------------------------------------
 
-== Container based setup
-[id="container_setup"]
-
-Containers are provided for both the web UI and worker.
-
-For example the web UI container can be pulled and started using the `podman`
-container engine:
-
-[source,sh]
-----
-podman run --rm -it registry.opensuse.org/devel/openqa/containers15.4/openqa_webui:latest
-----
-
-The worker container can be pulled and started with:
-
-[source,sh]
-----
-podman run --rm -it registry.opensuse.org/devel/openqa/containers15.4/openqa_worker:latest
-----
-
-Some parameters are necessary to run them properly. See the
-<<ContainerizedSetup.asciidoc#containerizedsetup,containerized setup section>>
-for more details and how to configure and run these containers.
-
-Take a look at
-https://registry.opensuse.org/cgi-bin/cooverview?srch_term=project%3Ddevel%3AopenQA[openSUSE's registry]
-for all available container images.
 
 == Custom installation - repositories and procedure
 [id="custom_installation"]
@@ -128,9 +197,10 @@ package.
 
 The easiest way to install openQA is from distribution packages.
 
-- For openSUSE, packages are available for Leap and Tumbleweed
-- For Fedora, packages are available in the official repositories for Fedora 23
-and later.
+- For SUSE Linux Enterprise (SLE), openSUSE Leap and Tumbleweed packages are
+  available.
+- For Fedora, packages are available in the official repositories for Fedora
+  23 and later.
 
 === Development version repository
 
@@ -144,7 +214,7 @@ To add the development repository to your system, you can use these commands.
 # openSUSE Tumbleweed
 zypper ar -p 95 -f 'http://download.opensuse.org/repositories/devel:openQA/openSUSE_Tumbleweed' devel_openQA
 
-# openSUSE Leap
+# openSUSE Leap/SLE
 zypper ar -p 95 -f 'http://download.opensuse.org/repositories/devel:openQA/$releasever' devel_openQA
 zypper ar -p 90 -f 'http://download.opensuse.org/repositories/devel:openQA:Leap:$releasever/$releasever' devel_openQA_Leap
 -------------------------------------------------------------------------------
@@ -170,6 +240,14 @@ You can install the main openQA server package using these commands.
 # openSUSE
 zypper in openQA
 
+# SLE
+. /etc/os-release
+SUSEConnect -p sle-module-desktop-applications/$VERSION_ID/$CPU
+SUSEConnect -p sle-module-development-tools/$VERSION_ID/$CPU
+SUSEConnect -p sle-we/$VERSION_ID/$CPU -r $sled_key
+SUSEConnect -p PackageHub/$VERSION_ID/$CPU
+zypper in openQA
+
 # Fedora
 dnf install openqa openqa-httpd
 -------------------------------------------------------------------------------
@@ -178,7 +256,7 @@ To install the openQA worker package use the following.
 
 [source,sh]
 -------------------------------------------------------------------------------
-# openSUSE
+# SLE/openSUSE
 zypper in openQA-worker
 -------------------------------------------------------------------------------
 
@@ -227,15 +305,17 @@ For a local instance setup you can simply execute the script:
 /usr/share/openqa/script/configure-web-proxy
 ----
 
-This will automatically setup a local apache http proxy. Read on for more
+This will automatically setup a local Apache http proxy. Read on for more
 detailed setup instructions with all the details.
 
+If you wish to run openQA behind an http proxy (Apache, NGINX, …) then see the
+*openqa.conf.template* config file in */etc/apache2/vhosts.d* (openSUSE) or
+`/etc/httpd/conf.d` (Fedora) when using apache2 or the config files in
+`/etc/nginx/vhosts.d` for NGINX.
 
 === Apache proxy
 
-It is required to run openQA behind an http proxy (apache, nginx, etc..). See the
-*openqa.conf.template* config file in */etc/apache2/vhosts.d* (openSUSE) or
-`/etc/httpd/conf.d` (Fedora). To make everything work correctly on openSUSE, you
+To make everything work correctly on openSUSE when using Apache, you
 need to enable the 'headers', 'proxy', 'proxy_http', 'proxy_wstunnel' and 'rewrite'
 modules using the command 'a2enmod'. This is not necessary on Fedora.
 
@@ -250,13 +330,34 @@ a2enmod proxy_wstunnel
 a2enmod rewrite
 --------------------------------------------------------------------------------
 
-For a basic setup, you can copy *openqa.conf.template* to *openqa.conf* and modify the `ServerName` if required
-setting. This will direct all HTTP traffic to openQA.
+For a basic setup, you can copy *openqa.conf.template* to *openqa.conf*
+and modify the `ServerName` setting if required.
+This will direct all HTTP traffic to openQA.
 
 [source,sh]
 --------------------------------------------------------------------------------
 cp /etc/apache2/vhosts.d/openqa.conf.template /etc/apache2/vhosts.d/openqa.conf
 --------------------------------------------------------------------------------
+
+=== NGINX proxy
+
+For a basic setup, you can copy *openqa.conf.template* to *openqa.conf*
+and modify the `server_name` setting if required.
+This will direct all HTTP traffic to openQA.
+
+[source,sh]
+--------------------------------------------------------------------------------
+cp /etc/nginx/vhosts.d/openqa.conf.template /etc/nginx/vhosts.d/openqa.conf
+--------------------------------------------------------------------------------
+
+Note that the default config in *openqa.conf.template* is using the keyword
+`default_server` in the `listen` statement. This will only change the behaviour
+when accessing the server via its IP address. This means that the default vhost
+for `localhost` in *nginx.conf* will take precedence when accessing the server
+via `localhost`. You might want to disable it.
+
+For openQA you need to set `httpsonly = 0` as described in the TLS/SSL section
+below, if you do not setup NGINX for SSL.
 
 === TLS/SSL
 
@@ -286,15 +387,12 @@ httpsonly = 0
 [[database]]
 === Database
 
-Since version _4.5.1512500474.437cc1c7_ of openQA, PostgreSQL is used as the
-database.
-
-To configure access to the database in openQA, edit `/etc/openqa/database.ini`
-and change the settings in the `[production]` section.
-
-The `dsn` value format technically depends on the database type and is
-documented for PostgreSQL at
-https://metacpan.org/pod/DBD::Pg#DBI-Class-Methods[DBD::Pg]
+openQA uses PostgreSQL as database. By default, a database with name `openqa`
+and `geekotest` user as owner is used. An automatic setup of a freshly 
+installed PostgreSQL instance can be done using https://github.com/os-autoinst/openQA/blob/master/script/setup-db[this script].
+The database connection can be configured in `/etc/openqa/database.ini`
+(normally the `[production]` section is relevant). More info about the `dsn`
+value format can be found in the https://metacpan.org/pod/DBD::Pg#DBI-Class-Methods[DBD::Pg documentation].
 
 ==== Example for connecting to local PostgreSQL database
 
@@ -339,6 +437,11 @@ users/permissions are lost. However, a new and distinct user (with default
 permissions) will be created when logging in via a different method/provider
 because there is no automatic mapping of identities across different
 methods/providers.
+
+For authentication to work correctly the clocks on workers and the web UI
+need to be in sync. The best way to achieve that is to install a service that
+implements the time-sync target. Otherwise a "timestamp mismatch" may be
+reported when clocks are too far apart.
 
 ==== OpenID
 
@@ -423,11 +526,13 @@ To start openQA and enable it to run on each boot call
 systemctl enable --now postgresql
 systemctl enable --now openqa-webui
 systemctl enable --now openqa-scheduler
-# openSUSE
+# to use Apache as reverse proxy under openSUSE
+systemctl enable apache2
 systemctl restart apache2
-# Fedora
+# to use Apache as reverse proxy under Fedora
 # for now this is necessary to allow Apache to connect to openQA
 setsebool -P httpd_can_network_connect 1
+systemctl enable httpd
 systemctl restart httpd
 --------------------------------------------------------------------------------
 
@@ -460,8 +565,8 @@ dnf install openqa-worker
 
 To allow workers to access your instance, you need to log into openQA as
 operator and create a pair of API key and secret. Once you are logged in, in the
-top right corner, is the user menu, follow the link 'manage API keys'.  Click
-the 'create' button to generate `key` and `secret`. There is also a script
+top right corner, is the user menu, follow the link 'Manage API keys'.  Click
+the 'Create' button to generate `key` and `secret`. There is also a script
 available for creating an admin user and an API key+secret pair
 non-interactively, `/usr/share/openqa/script/create_admin`, which can be useful
 for scripted deployments of openQA. Copy and paste the key and secret into
@@ -514,23 +619,11 @@ fetch the tests cases and possibly take a look at <<WritingTests.asciidoc#writin
 
 [id="advanced_cleanup"]
 === Cleanup
-Cleanup jobs run within the Minion job queue provided by `openqa-gru.service`.
-The dashboard for Minion jobs is accessible via the administrator menu in the
-web UI. Only one cleanup job can run at the same time unless `concurrent` is set
-to `1` in the `[cleanup]` settings of `openqa.ini`.
-
-Many other cleanup-related settings can be found within `openqa.ini` as well,
-e.g. the `[…_limits]` sections contain various tweaks and allow to change
-certain defaults.
-
-Checkout further sections of the documentation for more details about:
-
-* <<UsersGuide.asciidoc#asset_cleanup,Asset cleanup>>
-* <<Installing.asciidoc#auditing,Audit log cleanup>>
-* <<GettingStarted.asciidoc#basic_cleanup,Basic cleanup settings>>
-* <<UsersGuide.asciidoc#build_tagging,Build tagging>> to keep jobs longer by
-marking them as important
-* <<UsersGuide.asciidoc#_timers_and_triggers,Timers and triggers>> for when cleanup happens
+The automated cleanup is enabled and configured by default. Cleanup tasks are
+scheduled via systemd timer units and run via `openqa-gru.service`. The configuration
+is done in `/etc/openqa/openqa.ini` and various places within the web UI. If you want to
+tweak the cleanup to your needs, have a look at the
+<<UsersGuide.asciidoc#cleanup,Cleanup of assets, results and other data>> section.
 
 === Setting up git support
 
@@ -763,7 +856,7 @@ SHARE_DIRECTORY = /var/lib/openqa/opensuse
 SHARE_DIRECTORY = /var/lib/openqa/fedora
 --------------------------------------------------------------------------------
 
-Configuring `SHARE_DIRECTORY` is not a hard requirement. Worker will try following
+Configuring `SHARE_DIRECTORY` is not a hard requirement. Workers will try following
 directories prior registering with openQA instance:
 
 1. `SHARE_DIRECTORY`
@@ -772,9 +865,9 @@ directories prior registering with openQA instance:
 4. `/var/lib/openqa`
 5. fail if none of above is available
 
-Once worker registers to openQA instance it checks for available job and starts
-accepting websockets commands. Worker accepts jobs as they will come in, there
-is no priority, or other ordering, support at the moment.
+Once a worker registers to an openQA instance, scheduled jobs (of matching
+worker class) can be assigned to it. Dependencies between jobs will be
+considered for ordering the job assignment.
 It is possible to mix local openQA instance with remote instances or use only
 remote instances.
 
@@ -804,8 +897,9 @@ service (which usually runs as `_openqa-worker` user). If you install
 openQA through the repositories, said directory will be created for you.
 
 The shown configuration causes workers to download the assets from the web UI
-and use them locally. The `TESTPOOLSERVER` setting causes also tests and needles
-to be downloaded via `rsync` from the specified location.
+and use them locally. The `TESTPOOLSERVER` setting causes also tests and
+needles to be downloaded via `rsync` from the specified location. You can find
+further examples in the comments in `/etc/openqa/workers.ini`.
 
 It is suggested to have the cache and pool directories on the same filesystem
 to ensure assets used by tests are available as long as needed. This is
@@ -1097,7 +1191,7 @@ drwx------ 20 postgres postgres 4096  8. Sep 2019  data.96
 +
 The next steps assume such a layout.
 
-3. Install same set of posgresql* packages as are installed for the old
+3. Install same set of postgresql* packages as are installed for the old
 version:
 +
 [source,sh]

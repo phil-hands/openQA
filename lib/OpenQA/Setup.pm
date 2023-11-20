@@ -66,6 +66,7 @@ sub read_config ($app) {
         },
         'scheduler' => {
             max_job_scheduled_time => 7,
+            max_running_jobs => -1,
         },
         logging => {
             level => undef,
@@ -131,12 +132,20 @@ sub read_config ($app) {
             queue_limit => 200,
             concurrency => 2,
             project_status_url => '',
+            username => '',
+            ssh_key_file => ''
         },
         cleanup => {
             concurrent => 0,
         },
         default_group_limits => {
             asset_size_limit => OpenQA::JobGroupDefaults::SIZE_LIMIT_GB,
+            log_storage_duration => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
+            important_log_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
+            result_storage_duration => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
+            important_result_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_RESULTS_IN_DAYS,
+        },
+        no_group_limits => {
             log_storage_duration => OpenQA::JobGroupDefaults::KEEP_LOGS_IN_DAYS,
             important_log_storage_duration => OpenQA::JobGroupDefaults::KEEP_IMPORTANT_LOGS_IN_DAYS,
             result_storage_duration => OpenQA::JobGroupDefaults::KEEP_RESULTS_IN_DAYS,
@@ -178,6 +187,7 @@ sub read_config ($app) {
         'assets/storage_duration' => {
             # intentionally left blank for overview
         },
+        secrets => {github_token => ''},
         # allow dynamic config keys based on job results
         hooks => {},
         influxdb => {
@@ -341,7 +351,7 @@ sub setup_mojo_tmpdir () {
     }
 }
 
-sub load_plugins ($server, $monitoring_root_route, %options) {
+sub load_plugins ($server, $monitoring_root_route = undef, %options) {
     push @{$server->plugins->namespaces}, 'OpenQA::WebAPI::Plugin';
     $server->plugin($_) for qw(Helpers MIMETypes CSRF REST HashedParams Gru YAML);
     $server->plugin('AuditLog') if $server->config->{global}{audit_enabled};
