@@ -1,3 +1,9 @@
+openqa (4.6.1700240294.34068e38e-1) UNRELEASED; urgency=medium
+
+  * Update to new upstream version 4.6.1700240294.34068e38e.
+
+ -- Philip Hands <phil@hands.com>  Mon, 20 Nov 2023 21:30:39 +0100
+
 openqa (4.6.1674490999.b00c12673-2) unstable; urgency=medium
 
   [ Michael Biebl ]
