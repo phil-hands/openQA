@@ -6,6 +6,9 @@ debian/tmp/etc/logrotate.d/openqa
 etc/apache2/vhosts.d/openqa.conf.template => etc/apache2/sites-available/openqa.conf.template
 etc/apache2/vhosts.d/openqa-common.inc => etc/apache2/sites-available/openqa-common.inc
 etc/apache2/vhosts.d/openqa-ssl.conf.template => etc/apache2/sites-available/openqa-ssl.conf.template
+etc/nginx/vhosts.d/openqa-locations.inc => etc/nginx/sites-available/openqa-locations.inc
+etc/nginx/vhosts.d/openqa-upstreams.inc => etc/nginx/sites-available/openqa-upstreams.inc
+etc/nginx/vhosts.d/openqa.conf.template => etc/nginx/sites-available/openqa.conf.template
 etc/apparmor.d/usr.share.openqa.script.openqa
 etc/apparmor.d/local/usr.share.openqa.script.openqa
 usr/lib/systemd/system/openqa-webui.service /lib/systemd/system/
