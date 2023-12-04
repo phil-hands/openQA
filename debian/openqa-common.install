@@ -28,6 +28,7 @@ usr/share/openqa/lib/OpenQA/Setup.pm
 usr/share/openqa/lib/OpenQA/Shared
 usr/share/openqa/lib/OpenQA/Task
 usr/share/openqa/lib/OpenQA/Utils.pm
+usr/share/openqa/lib/OpenQA/VcsProvider.pm
 usr/share/openqa/lib/OpenQA/WebAPI.pm
 usr/share/openqa/lib/OpenQA/WebSockets.pm
 usr/share/openqa/lib/OpenQA/Worker.pm
