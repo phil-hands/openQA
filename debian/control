@@ -106,7 +106,6 @@ Build-Depends: debhelper-compat (= 13),
                libtest-most-perl,
                libyaml-pp-perl,
                python3,
-               python3-future,
                python3-requests,
                yamllint,
                libfilesys-df-perl,
@@ -243,7 +242,6 @@ Depends: ${misc:Depends},
          libmojolicious-perl (>= 9.34),
          openqa-common (= ${source:Version}),
 Suggests: python3,
-          python3-future,
 Description: automatic Operating System testing framework (utilities)
  This package includes scripts such as 'openqa-cli' and 'openqa-clone-job' to
  provide easy control of openQA servers, via the REST API, as well as commands
