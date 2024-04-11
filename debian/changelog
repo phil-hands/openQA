@@ -1,3 +1,11 @@
+openqa (4.6.1700240294.34068e38e-2) unstable; urgency=medium
+
+  * Build-Depends on systemd-dev (closes: 1060501)
+  * limit build-deps for testing to <!nocheck>
+  * avoid deprecation warnings regarding `spurt`
+
+ -- Philip Hands <phil@hands.com>  Thu, 11 Apr 2024 08:33:02 +0200
+
 openqa (4.6.1700240294.34068e38e-1.1) unstable; urgency=medium
 
   * Non maintainer upload
