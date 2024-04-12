@@ -104,8 +104,8 @@ sub cache_assets ($cache_client, $job, $vars, $assets_to_cache, $assetkeys, $web
     my $asset_uri = trim($asset_value);
     return cache_assets($cache_client, $job, $vars, $assets_to_cache, $assetkeys, $webui_host, $pooldir, $callback)
       if ($this_asset eq 'UEFI_PFLASH_VARS' && !$vars->{UEFI});
-    # check cache availability
-    my $error = $cache_client->info->availability_error;
+    # check cache availability but only fail if the hard limit is exceeded
+    my $error = $cache_client->info->availability_error({hard_limit => 1});
     return $callback->({error => $error}) if $error;
     log_debug("Found $this_asset, caching $vars->{$this_asset}", channels => 'autoinst');
 
@@ -212,7 +212,6 @@ sub sync_tests ($cache_client, $job, $vars, $shared_cache, $rsync_source, $remai
     );
     my $rsync_request = $cache_client->rsync_request(from => $rsync_source, to => $shared_cache);
     my $rsync_request_description = "from '$rsync_source' to '$shared_cache'";
-    $job->worker->settings->global_settings->{PRJDIR} = $shared_cache;
 
     # enqueue rsync task; retry in some error cases
     if (my $err = $cache_client->enqueue($rsync_request)) {
@@ -254,6 +253,11 @@ sub sync_tests ($cache_client, $job, $vars, $shared_cache, $rsync_source, $remai
         });
 }
 
+sub _is_job_only_relying_on_git ($vars) {
+    my ($cd, $nd) = ($vars->{CASEDIR}, $vars->{NEEDLES_DIR});
+    return defined($cd) && looks_like_url_with_scheme($cd) && defined($nd) && looks_like_url_with_scheme($nd);
+}
+
 sub do_asset_caching ($job, $vars, $cache_dir, $assetkeys, $webui_host, $pooldir, $callback) {
     my $cache_client = OpenQA::CacheService::Client->new;
     cache_assets(
@@ -266,7 +270,7 @@ sub do_asset_caching ($job, $vars, $cache_dir, $assetkeys, $webui_host, $pooldir
         sub ($error) {
             return $callback->($error) if $error;
             my $rsync_source = $job->client->testpool_server;
-            return $callback->(undef) unless $rsync_source;
+            return $callback->(undef) if !$rsync_source || _is_job_only_relying_on_git($vars);
             my $attempts = CACHE_SERVICE_TEST_SYNC_ATTEMPTS;
             my $shared_cache = catdir($cache_dir, base_host($webui_host));
             sync_tests($cache_client, $job, $vars, $shared_cache, $rsync_source, $attempts, $callback);
@@ -293,7 +297,7 @@ sub engine_workit ($job, $callback) {
     log_info(sprintf("Running on $hostname:%d ($sysname $release $version $machine)", $instance),
         channels => 'autoinst');
 
-    log_error("Failed enabling subreaper mode", channels => 'autoinst') unless session->subreaper;
+    log_error('Failed enabling subreaper mode', channels => 'autoinst') unless session->subreaper;
 
     # XXX: this should come from the worker table. Only included
     # here for convenience when looking at the pool of
@@ -315,13 +319,8 @@ sub engine_workit ($job, $callback) {
         OPENQA_URL => $openqa_url,
         WORKER_INSTANCE => $instance,
         WORKER_ID => $workerid,
-        PRJDIR => OpenQA::Utils::sharedir(),
         %$job_settings
     );
-    # note: PRJDIR is used as base for relative needle paths by os-autoinst. This is supposed to change
-    #       but for compatibility with current old os-autoinst we need to set PRJDIR for a consistent
-    #       behavior.
-
     log_debug "Job settings:\n" . format_settings(\%vars);
 
     # cache/locate assets, set ASSETDIR

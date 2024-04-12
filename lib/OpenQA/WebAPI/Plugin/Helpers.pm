@@ -10,13 +10,15 @@ use OpenQA::Schema;
 use OpenQA::Utils qw(bugurl human_readable_size render_escaped_refs href_to_bugref);
 use OpenQA::Events;
 use OpenQA::Jobs::Constants qw(EXECUTION_STATES PRE_EXECUTION_STATES ABORTED_RESULTS FAILED NOT_COMPLETE_RESULTS);
+use Text::Glob qw(glob_to_regex_string);
+use List::Util qw(any);
 
 sub register ($self, $app, $config) {
     $app->helper(
         format_time => sub {
             my ($c, $timedate, $format) = @_;
             return unless $timedate;
-            $format ||= "%Y-%m-%d %H:%M:%S %z";
+            $format ||= '%Y-%m-%d %H:%M:%S %z';
             return $timedate->strftime($format);
         });
 
@@ -25,13 +27,13 @@ sub register ($self, $app, $config) {
             my ($c, $timedate) = @_;
             return unless $timedate;
             if ($timedate->days() > 0) {
-                sprintf("%d days %02d:%02d hours", $timedate->days(), $timedate->hours(), $timedate->minutes());
+                sprintf('%d days %02d:%02d hours', $timedate->days(), $timedate->hours(), $timedate->minutes());
             }
             elsif ($timedate->hours() > 0) {
-                sprintf("%02d:%02d hours", $timedate->hours(), $timedate->minutes());
+                sprintf('%02d:%02d hours', $timedate->hours(), $timedate->minutes());
             }
             else {
-                sprintf("%02d:%02d minutes", $timedate->minutes(), $timedate->seconds());
+                sprintf('%02d:%02d minutes', $timedate->minutes(), $timedate->seconds());
             }
         });
 
@@ -46,7 +48,7 @@ sub register ($self, $app, $config) {
             my ($c, $text, $bug) = @_;
             my $css_class = ($text =~ /(poo|gh)#/) ? 'label_bug fa fa-bolt' : 'label_bug fa fa-bug';
             if ($bug && !$bug->open) {
-                $css_class .= " bug_closed";
+                $css_class .= ' bug_closed';
             }
             return $css_class;
         });
@@ -121,7 +123,7 @@ sub register ($self, $app, $config) {
                 $crumbs
                   .= $c->link_to($c->url_for('group_overview', groupid => $group_id) => (class => 'dropdown-item') =>
                       sub { return $job->group->name . ' (current)' });
-                $crumbs .= "</li>";
+                $crumbs .= '</li>';
                 $overview_text = 'Build ' . $job->BUILD;
             }
             else {
@@ -132,7 +134,7 @@ sub register ($self, $app, $config) {
             $crumbs .= "\n<li id='current-build-overview'>";
             $crumbs .= $c->link_to($overview_url => (class => 'dropdown-item') =>
                   sub { '<i class="fa fa-arrow-right"></i> ' . $overview_text });
-            $crumbs .= "</li>";
+            $crumbs .= '</li>';
             $crumbs .= "\n<li role='separator' class='dropdown-divider'></li>\n";
             return Mojo::ByteStream->new($crumbs);
         });
@@ -151,7 +153,7 @@ sub register ($self, $app, $config) {
         # allowing partial brands
         include_branding => sub {
             my ($c, $name, %args) = @_;
-            my $path = "branding/" . $c->app->config->{global}->{branding} . "/$name";
+            my $path = 'branding/' . $c->app->config->{global}->{branding} . "/$name";
             my $ret = $c->render_to_string($path, %args);
             if (defined($ret)) {
                 return $ret;
@@ -344,6 +346,7 @@ sub register ($self, $app, $config) {
     $app->helper('reply.validation_error' => \&_validation_error);
 
     $app->helper(compose_job_overview_search_args => \&_compose_job_overview_search_args);
+    $app->helper(groups_for_globs => \&_groups_for_globs);
     $app->helper(param_hash => \&_param_hash);
     $app->helper(
         link_key_exists => sub {
@@ -393,6 +396,7 @@ sub _compose_job_overview_search_args ($c) {
 
     my $v = $c->validation;
     $v->optional($_, 'not_empty') for JOBS_OVERVIEW_SEARCH_CRITERIA;
+    $v->optional('comment');
     $v->optional('groupid')->num(0, undef);
     $v->optional('modules', 'comma_separated');
     $v->optional('limit', 'not_empty')->num(0, undef);
@@ -435,6 +439,13 @@ sub _compose_job_overview_search_args ($c) {
         my @search_terms = (@group_id_search, @group_name_search);
         @groups = $schema->resultset('JobGroups')->search(\@search_terms)->all;
     }
+
+    else {
+        my $groups = $c->groups_for_globs;
+        if (defined $groups) { @groups = @$groups }
+        else { $search_args{groupids} = [0] }
+    }
+
     # add flash message if optional "groupid" parameter is invalid
     $c->stash(flash_error => 'Specified "groupid" is invalid and therefore ignored.')
       if $c->param('groupid') && !$v->is_valid('groupid');
@@ -478,7 +489,39 @@ sub _compose_job_overview_search_args ($c) {
     # allow filtering by group ID or group name
     $search_args{groupids} = [map { $_->id } @groups] if @groups;
 
+    # allow filtering by comment text
+    if (my $c = $v->param('comment')) { $search_args{comment_text} = $c }
+
     return (\%search_args, \@groups);
+}
+
+sub _groups_for_globs ($c) {
+    my $v = $c->validation;
+    $v->optional($_, 'not_empty') for qw(group_glob not_group_glob);
+
+    my $group_glob = [split(/\s*,\s*/, $v->param('group_glob') // '')];
+    my $not_group_glob = [split(/\s*,\s*/, $v->param('not_group_glob') // '')];
+
+    # use globs to filter job groups, first include all groups that match "group_glob" values, and then exclude those
+    # that also match "not_group_glob" values
+    my @groups;
+    if (@$group_glob || @$not_group_glob) {
+        my @inclusive = map { qr/^$_$/i } map { glob_to_regex_string($_) } @$group_glob;
+        my @exclusive = map { qr/^$_$/i } map { glob_to_regex_string($_) } @$not_group_glob;
+        @groups = $c->schema->resultset('JobGroups')->all;
+        @groups = grep { _match_group(\@inclusive, $_) } @groups if @inclusive;
+        @groups = grep { !_match_group(\@exclusive, $_) } @groups if @exclusive;
+
+        # No matches at all needs to be a special case to be handled gracefully by the caller
+        return undef unless @groups;
+    }
+
+    return \@groups;
+}
+
+sub _match_group ($regexes, $group) {
+    my $name = $group->name;
+    return any { $name =~ $_ } @$regexes;
 }
 
 sub _param_hash ($c, $name) {

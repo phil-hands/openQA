@@ -47,9 +47,9 @@
 %define python_scripts_requires %{nil}
 %endif
 # The following line is generated from dependencies.yaml
-%define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious::Plugin::AssetPack) >= 1.36
+%define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious::Plugin::AssetPack) >= 1.36 perl(YAML::PP) >= 0.026
 # The following line is generated from dependencies.yaml
-%define common_requires ntp-daemon perl >= 5.20.0 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.340.0 perl(Regexp::Common) perl(Storable) perl(Time::Moment) perl(Try::Tiny)
+%define common_requires ntp-daemon perl >= 5.20.0 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.340.0 perl(Regexp::Common) perl(Storable) perl(Text::Glob) perl(Time::Moment) perl(Try::Tiny)
 # runtime requirements for the main package that are not required by other sub-packages
 # The following line is generated from dependencies.yaml
 %define main_requires %assetpack_requires bsdtar git-core hostname perl(BSD::Resource) perl(Carp) perl(CommonMark) perl(Config::Tiny) perl(DBD::Pg) >= 3.7.4 perl(DBI) >= 1.632 perl(DBIx::Class) >= 0.082801 perl(DBIx::Class::DeploymentHandler) perl(DBIx::Class::DynamicDefault) perl(DBIx::Class::OptimisticLocking) perl(DBIx::Class::ResultClass::HashRefInflator) perl(DBIx::Class::Schema::Config) perl(DBIx::Class::Storage::Statistics) perl(Date::Format) perl(DateTime) perl(DateTime::Duration) perl(DateTime::Format::Pg) perl(Exporter) perl(Fcntl) perl(File::Basename) perl(File::Copy) perl(File::Copy::Recursive) perl(File::Path) perl(File::Spec) perl(FindBin) perl(Getopt::Long::Descriptive) perl(IO::Handle) perl(IPC::Run) perl(JSON::Validator) perl(LWP::UserAgent) perl(Module::Load::Conditional) perl(Module::Pluggable) perl(Mojo::Base) perl(Mojo::ByteStream) perl(Mojo::IOLoop) perl(Mojo::JSON) perl(Mojo::Pg) perl(Mojo::RabbitMQ::Client) >= 0.2 perl(Mojo::URL) perl(Mojo::Util) perl(Mojolicious::Commands) perl(Mojolicious::Plugin) perl(Mojolicious::Plugin::OAuth2) perl(Mojolicious::Static) perl(Net::OpenID::Consumer) perl(POSIX) perl(Pod::POM) perl(SQL::Translator) perl(Scalar::Util) perl(Sort::Versions) perl(Text::Diff) perl(Time::HiRes) perl(Time::ParseDate) perl(Time::Piece) perl(Time::Seconds) perl(URI::Escape) perl(YAML::PP) >= 0.026 perl(YAML::XS) perl(aliased) perl(base) perl(constant) perl(diagnostics) perl(strict) perl(warnings)
@@ -58,13 +58,13 @@
 # The following line is generated from dependencies.yaml
 %define worker_requires bsdtar openQA-client optipng os-autoinst < 5 perl(Capture::Tiny) perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.7 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
 # The following line is generated from dependencies.yaml
-%define build_requires %assetpack_requires rubygem(sass)
+%define build_requires %assetpack_requires npm rubygem(sass)
 
 # All requirements needed by the tests executed during build-time.
 # Do not require on this in individual sub-packages except for the devel
 # package.
 # The following line is generated from dependencies.yaml
-%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires ShellCheck curl jq openssh-common os-autoinst-devel perl(App::cpanminus) perl(Perl::Critic) perl(Perl::Critic::Freenode) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-setuptools python3-yamllint
+%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires ShellCheck curl jq openssh-common os-autoinst-devel perl(App::cpanminus) perl(Perl::Critic) perl(Perl::Critic::Freenode) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-setuptools python3-yamllint shfmt
 %ifarch x86_64
 %define qemu qemu qemu-kvm
 %else
@@ -82,14 +82,11 @@ Version:        4.6
 Release:        0
 Summary:        The openQA web-frontend, scheduler and tools
 License:        GPL-2.0-or-later
-Group:          Development/Tools/Other
 Url:            http://os-autoinst.github.io/openQA/
 Source0:        %{name}-%{version}.tar.xz
-# a workaround for set_version looking at random files (so we can't name it .tar.xz)
-# use update-cache to update it
-Source1:        cache.txz
-Source100:      openQA-rpmlintrc
-Source101:      update-cache.sh
+Source1:        openQA-rpmlintrc
+Source2:        node_modules.spec.inc
+%include        %{_sourcedir}/node_modules.spec.inc
 BuildRequires:  fdupes
 # for install-opensuse in Makefile
 %if 0%{?is_opensuse}
@@ -98,6 +95,7 @@ BuildRequires:  openSUSE-release
 BuildRequires:  sles-release
 %endif
 BuildRequires:  %{build_requires}
+BuildRequires:  local-npm-registry
 Requires:       perl(Minion) >= 10.0
 Requires:       %{main_requires}
 Requires:       openQA-client = %{version}
@@ -123,14 +121,12 @@ Recommends:     rsync
 # version of that module. Then when we install on Tumbleweed, it doesn't
 # have that older version anymore
 #BuildArch:      noarch
-ExcludeArch:    i586
+ExcludeArch:    %{ix86}
 %{?systemd_requires}
 %if %{with tests}
 BuildRequires:  %{test_requires}
 %endif
-%if 0%{?suse_version} >= 1330
 Requires(pre):  group(nogroup)
-%endif
 %if 0%{?suse_version} > 1500
 BuildRequires:  sysuser-tools
 %sysusers_requires
@@ -157,7 +153,6 @@ operating system.
 
 %package no-selenium-devel
 Summary:        Development package pulling in all build+test dependencies except chromedriver for Selenium based tests
-Group:          Development/Tools/Other
 Requires:       %{devel_no_selenium_requires}
 
 %description no-selenium-devel
@@ -165,7 +160,6 @@ Development package pulling in all build+test dependencies except chromedriver f
 
 %package devel
 Summary:        Development package pulling in all build+test dependencies
-Group:          Development/Tools/Other
 Requires:       %{devel_requires}
 %ifarch s390x
 # missing chromedriver dependency
@@ -177,7 +171,6 @@ Development package pulling in all build+test dependencies.
 
 %package common
 Summary:        The openQA common tools for web-frontend and workers
-Group:          Development/Tools/Other
 Requires:       %{common_requires}
 Requires:       perl(Mojolicious) >= 8.24
 
@@ -187,7 +180,6 @@ openQA workers.
 
 %package worker
 Summary:        The openQA worker
-Group:          Development/Tools/Other
 %define worker_requires_including_uncovered_in_tests %worker_requires perl(SQL::SplitStatement)
 Requires:       %{worker_requires_including_uncovered_in_tests}
 # FIXME: use proper Requires(pre/post/preun/...)
@@ -210,7 +202,6 @@ The openQA worker manages test engine (provided by os-autoinst package).
 
 %package client
 Summary:        Client tools for remote openQA management
-Group:          Development/Tools/Other
 Requires:       openQA-common = %{version}
 Requires:       %client_requires
 
@@ -221,7 +212,6 @@ a convenient helper for interacting with openQA webui REST API.
 %if %{with python_scripts}
 %package python-scripts
 Summary:        Additional scripts in python
-Group:          Development/Tools/Other
 Requires:       %python_scripts_requires
 
 %description python-scripts
@@ -230,7 +220,6 @@ Additional scripts for the use of openQA in the python programming language.
 
 %package local-db
 Summary:        Helper package to ease setup of postgresql DB
-Group:          Development/Tools/Other
 Requires:       %{name} = %{version}
 Requires:       postgresql-server
 BuildRequires:  postgresql-server
@@ -242,7 +231,6 @@ next to the webui.
 
 %package single-instance
 Summary:        Convenience package for a single-instance setup using apache proxy
-Group:          Development/Tools/Other
 Provides:       %{name}-single-instance-apache
 Provides:       %{name}-single-instance-apache2
 Requires:       %{name}-local-db
@@ -255,7 +243,6 @@ Use this package to setup a local instance with all services provided together.
 
 %package single-instance-nginx
 Summary:        Convenience package for a single-instance setup using nginx proxy
-Group:          Development/Tools/Other
 Requires:       %{name}-local-db
 Requires:       %{name} = %{version}
 Requires:       %{name}-worker = %{version}
@@ -266,7 +253,6 @@ Use this package to setup a local instance with all services provided together.
 
 %package bootstrap
 Summary:        Automated openQA setup
-Group:          Development/Tools/Other
 
 %description bootstrap
 This can automatically setup openQA - either directly on your system
@@ -274,7 +260,6 @@ or within a systemd-nspawn container.
 
 %package doc
 Summary:        The openQA documentation
-Group:          Development/Tools/Other
 
 %description doc
 Documentation material covering installation, configuration, basic test writing, etc.
@@ -282,7 +267,6 @@ Covering both openQA and also os-autoinst test engine.
 
 %package auto-update
 Summary:        Automatically upgrade and reboot the system when required
-Group:          Development/Tools/Other
 Requires:       %{name}-common
 Requires:       curl
 Requires:       rebootmgr
@@ -293,7 +277,6 @@ and rebooting the system if devel:openQA packages are stable.
 
 %package continuous-update
 Summary:        Continuously update packages from devel:openQA
-Group:          Development/Tools/Other
 Requires:       %{name}-common
 Requires:       curl
 
@@ -305,7 +288,6 @@ regardless of whether devel:openQA contains updates.
 
 %package munin
 Summary:        Munin scripts
-Group:          Development/Tools/Other
 Requires:       munin
 Requires:       munin-node
 Requires:       curl
@@ -317,8 +299,10 @@ statistics.
 
 
 %prep
-%setup -q -a1
+%setup -q
 sed -e 's,/bin/env python,/bin/python,' -i script/openqa-label-all
+rm package-lock.json
+local-npm-registry %{_sourcedir} install --also=dev --legacy-peer-deps
 
 %build
 %make_build
@@ -365,7 +349,7 @@ export CONTAINER_TEST=0
 export HELM_TEST=0
 # We don't want fatal warnings during package building
 export PERL_TEST_WARNINGS_ONLY_REPORT_WARNINGS=1
-make test PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=%{buildroot}/DB
+make test PROVE_ARGS='-r -v t' CHECKSTYLE=0 TEST_PG_PATH=%{buildroot}/DB
 rm -rf %{buildroot}/DB
 %endif
 
@@ -615,6 +599,7 @@ fi
 %{_datadir}/openqa/public
 %{_datadir}/openqa/assets
 %{_datadir}/openqa/dbicdh
+%{_datadir}/openqa/node_modules
 %{_datadir}/openqa/script/configure-web-proxy
 %{_datadir}/openqa/script/create_admin
 %{_datadir}/openqa/script/fetchneedles

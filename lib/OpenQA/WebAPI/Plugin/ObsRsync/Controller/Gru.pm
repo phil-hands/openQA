@@ -63,7 +63,7 @@ sub _extend_job_info {
 
     my $args = $job->{args};
     $args = $args->[0] if (ref $args eq 'ARRAY' && scalar(@$args) == 1);
-    if (ref $args eq 'HASH' && scalar(%$args) == 1 && $args->{project}) {
+    if (ref $args eq 'HASH' && $args->{project}) {
         $args = $args->{project};
     }
     else { $args = dump($args) }    # uncoverable statement
@@ -92,8 +92,8 @@ sub run {
 
     # uncoverable branch true
     if ($repo) {
-        $folder_repo = $project . "::" . $repo;    # uncoverable statement
-        $folder_repo = "" unless -d Mojo::File->new($home, $folder_repo);    # uncoverable statement
+        $folder_repo = $project . '::' . $repo;    # uncoverable statement
+        $folder_repo = '' unless -d Mojo::File->new($home, $folder_repo);    # uncoverable statement
         $project = $folder_repo if $folder_repo;    # uncoverable statement
     }
 
@@ -128,7 +128,8 @@ sub run {
     return $self->render(json => {message => 'queue full'}, status => QUEUE_FULL)
       if ($results->{total} >= $queue_limit);
 
-    $app->gru->enqueue('obs_rsync_run', {project => $project}, {priority => 100});
+    my $url = $helper->get_api_dirty_status_url($project);
+    $app->gru->enqueue('obs_rsync_run', {project => $project, url => $url}, {priority => 100});
 
     return $self->render(json => {message => 'queued'}, status => QUEUED) if $has_active_job;    # uncoverable statement
     return $self->render(json => {message => 'started'}, status => STARTED);

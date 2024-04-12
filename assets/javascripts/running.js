@@ -445,6 +445,7 @@ var developerMode = {
   // state of the page elements and the web socket connection to web UI
   develWsUrl: undefined, // URL for developer session web socket connection
   statusOnlyWsUrl: undefined, // URL for status-only web socket connection
+  servicePortDelta: undefined, // delta from web UI port on which to directly connect to livehandler
   wsConnection: undefined, // current WebSocket object
   hasWsError: false, // whether an web socket error occurred (cleared when we finally receive a message from os-autoinst)
   useDeveloperWsRoute: undefined, // whether the developer web socket route is used
@@ -506,10 +507,12 @@ var developerMode = {
     );
   },
 
-  // returns the specified property evaluating possibly assigned functions
-  prop: function (propertyName) {
-    var prop = this[propertyName];
-    return typeof prop === 'function' ? prop.apply(this) : prop;
+  // returns whether all specified properties/functions eveluate to true
+  allTrue: function (propertyNames) {
+    return propertyNames.split(',').every(propertyName => {
+      const prop = this[propertyName];
+      return typeof prop === 'function' ? prop.apply(this) : prop;
+    });
   }
 };
 
@@ -542,6 +545,7 @@ function setupDeveloperPanel() {
   // find URLs for web socket connections
   developerMode.develWsUrl = panel.data('developer-url');
   developerMode.statusOnlyWsUrl = panel.data('status-only-url');
+  developerMode.servicePortDelta = panel.data('service-port-delta');
 
   // setup toggle for body
   var panelHeader = panel.find('.card-header');
@@ -604,7 +608,7 @@ function updateDeveloperPanel() {
     var element = $(this);
     var visibleOn = element.data('visible-on');
     var hiddenOn = element.data('hidden-on');
-    var hide = (hiddenOn && developerMode.prop(hiddenOn)) || (visibleOn && !developerMode.prop(visibleOn));
+    var hide = (hiddenOn && developerMode.allTrue(hiddenOn)) || (visibleOn && !developerMode.allTrue(visibleOn));
     if (hide) {
       element.hide();
       element.tooltip('hide');
@@ -971,7 +975,7 @@ function setupWebsocketConnection() {
     developerMode.useDeveloperWsRoute = false;
     url = developerMode.statusOnlyWsUrl;
   }
-  url = makeWsUrlAbsolute(url);
+  url = makeWsUrlAbsolute(url, developerMode.servicePortDelta);
 
   // establish ws connection
   console.log('Establishing ws connection to ' + url);
@@ -1180,6 +1184,17 @@ function processWsCommand(obj) {
           }
           break;
       }
+
+      // handle update of the VNC argument
+      var vncArg = data?.vnc_arg;
+      if (typeof vncArg === 'string' && vncArg !== developerMode.vncArg) {
+        developerMode.vncArg = vncArg;
+        somethingChanged = true;
+        Array.from(document.getElementsByClassName('vnc-arg')).forEach(e => {
+          e.textContent = vncArg;
+        });
+      }
+
       break;
   }
 

@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Mojo::Base -signatures;
 
 use FindBin;
 use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
@@ -21,9 +22,9 @@ my $schema = $test_case->init_data(
     fixtures_glob => '01-jobs.pl 02-workers.pl 04-products.pl 05-job_modules.pl 06-job_dependencies.pl'
 );
 my $jobs = $schema->resultset('Jobs');
+my $comments = $schema->resultset('Comments');
 
 sub prepare_database {
-    my $comments = $schema->resultset('Comments');
     my $bugs = $schema->resultset('Bugs');
 
     $comments->create(
@@ -139,7 +140,7 @@ is(scalar @filtered_out, 0, 'result filter correctly applied');
 # Test whether all URL parameter are passed correctly
 my $url_with_escaped_parameters
   = $baseurl
-  . 'tests/overview?arch=&flavor=&machine=&test=&modules=&module_re=&distri=opensuse&build=0091&version=Staging%3AI&groupid=1001';
+  . 'tests/overview?arch=&flavor=&machine=&test=&modules=&module_re=&group_glob=&not_group_glob=&comment=&distri=opensuse&build=0091&version=Staging%3AI&groupid=1001';
 $driver->get($url_with_escaped_parameters);
 $driver->find_element('#filter-panel .card-header')->click();
 $driver->find_element('#filter-form button')->click();
@@ -332,6 +333,9 @@ subtest 'filtering by distri' => sub {
             'foo/opensuse/bar 13.1',
             'filter also visible in summary'
         );
+        my $form_inputs = $driver->find_elements('#filter-form input');
+        my @distris = grep { $_->get_attribute('name') eq 'distri' && $_->get_attribute('hidden') } @$form_inputs;
+        is scalar(@distris), 3, 'Got expected number of distri form fields';
     };
 
     subtest 'everything filtered out' => sub {
@@ -468,6 +472,110 @@ subtest "filtering by machine" => sub {
         element_not_present('#flavor_DVD_arch_i586');
 
     };
+};
+
+subtest 'filtering by job group' => sub {
+    $schema->resultset('JobGroups')->create($_)
+      for (
+        {
+            id => 1003,
+            sort_order => 0,
+            name => 'opensuse development'
+        },
+        {
+            id => 1004,
+            sort_order => 0,
+            name => 'Tumbleweed'
+        },
+        {
+            id => 1005,
+            sort_order => 0,
+            name => 'SLE 15 SP5'
+        },
+        {
+            id => 1006,
+            sort_order => 0,
+            name => 'SLE 15 SP5 development'
+        });
+
+    my $get_text = sub ($url) {
+        $driver->get($url);
+        my @el = $driver->find_element('.card-header');
+        return $el[0]->get_text;
+    };
+
+    subtest 'filter with exact include' => sub {
+        my $text = $get_text->('/tests/overview?group_glob=opensuse');
+        like $text, qr/Summary of opensuse build/, 'job group match';
+    };
+
+    subtest 'filter with glob include' => sub {
+        my $text = $get_text->('/tests/overview?group_glob=*opensuse*');
+        like $text, qr/Summary of opensuse, opensuse test, opensuse development build/, 'job group match';
+    };
+
+    subtest 'filter with multiple glob includes' => sub {
+        my $text = $get_text->('/tests/overview?group_glob=opensuse*,SLE*');
+        like $text,
+          qr/Summary of opensuse, opensuse test, opensuse development, SLE 15 SP5, SLE 15 SP5 development build/,
+          'job group match';
+    };
+
+    subtest 'filter with exact exclude' => sub {
+        my $text = $get_text->('/tests/overview?not_group_glob=opensuse');
+        like $text,
+          qr/Summary of opensuse test, opensuse development, Tumbleweed, SLE 15 SP5, SLE 15 SP5 development build/,
+          'job group match';
+    };
+
+    subtest 'filter with glob exclude' => sub {
+        my $text = $get_text->('/tests/overview?not_group_glob=*SLE*');
+        like $text, qr/Summary of opensuse, opensuse test, opensuse development, Tumbleweed build/, 'job group match';
+    };
+
+    subtest 'filter with glob include and exclude' => sub {
+        my $text = $get_text->('/tests/overview?group_glob=*opensuse*,*SLE*&not_group_glob=*development*');
+        like $text, qr/Summary of opensuse, opensuse test, SLE 15 SP5 build/, 'job group match';
+    };
+
+    subtest 'filter with glob and no match' => sub {
+        my $text = $get_text->('/tests/overview?group_glob=does_not_exist');
+        like $text, qr/Overall Summary of multiple distri\/version/, 'no match';
+    };
+};
+
+subtest 'filter by result and state' => sub {
+    $driver->get('/tests/overview?state=done&result=incomplete');
+    my $header = $driver->find_element('#filter-panel .card-header');
+    like $header->get_text, qr/Filter.*done.*incomplete/, 'filter parameters shown in header';
+    ok $driver->find_element_by_id('filter-incomplete')->is_selected, 'incomplete checkbox checked';
+    ok $driver->find_element_by_id('filter-done')->is_selected, 'done checkbox checked';
+    ok !$driver->find_element_by_id('filter-failed')->is_selected, 'other checkbox not checked';
+};
+
+subtest 'add comments' => sub {
+    my @buttons = $driver->find_elements('button[title="Add comments"]');
+    is @buttons, 0, 'button for adding comments not present if not logged-in';
+
+    $driver->find_element_by_link_text('Login')->click;
+    $driver->get('/tests/overview?state=done&result=failed');
+    $driver->find_element_by_class_name('shepherd-cancel-icon')->click;
+    disable_bootstrap_animations;
+    $driver->find_element('button[title="Add comments"]')->click;
+    my $comment_text = 'comment via add-comments';
+    my $submit_button = $driver->find_element('#add-comments-controls button[type="submit"]');
+    $driver->find_element_by_id('text')->send_keys($comment_text);
+    is $submit_button->get_text, 'Submit comment on all 2 jobs', 'submit button displayed with number of jobs';
+    $submit_button->click;
+    wait_for_ajax msg => 'comments created';
+    like $driver->find_element_by_id('flash-messages')->get_text, qr/The comments have been created. Reload/,
+      'info about success shown';
+
+    my @failed_job_ids = map { $_->id } $jobs->search({result => FAILED})->all;
+    is $comments->search({job_id => {-in => \@failed_job_ids}, text => $comment_text})->count, 2,
+      'comments created on all relevant jobs';
+    is $comments->search({job_id => {-not_in => \@failed_job_ids}, text => $comment_text})->count, 0,
+      'comments not created on other jobs';
 };
 
 subtest "job template names displayed on 'Test result overview' page" => sub {

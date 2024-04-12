@@ -15,6 +15,7 @@ function getURLForType(type, event_data) {
       } else if (event_data.parent_group_id !== undefined) {
         return '/parent_group_overview/' + event_data.parent_group_id + '#comments';
       }
+      break;
     case 'jobtemplate_create':
       if (event_data.job_group_id) {
         return '/admin/job_templates/' + event_data.job_group_id;
@@ -47,6 +48,35 @@ function getURLForType(type, event_data) {
     case 'worker_register':
       return urlWithBase('/admin/workers/' + event_data.id);
   }
+}
+
+function undoComments(undoButton) {
+  const ids = undoButton.dataset.ids.split(',');
+  if (!window.confirm(`Do you really want to delete the ${ids.length} comment(s)?`)) {
+    return;
+  }
+  undoButton.style.display = 'none';
+  $.ajax({
+    url: urlWithBase('/api/v1/comments'),
+    method: 'DELETE',
+    data: ids.map(id => `id=${id}`).join('&'),
+    success: () => addFlash('info', 'The coments have been deleted.'),
+    error: (jqXHR, textStatus, errorThrown) => {
+      undoButton.style.display = 'inline';
+      addFlash('danger', 'The comments could not be deleted: ' + getXhrError(jqXHR, textStatus, errorThrown));
+    }
+  });
+}
+
+function getElementForEventType(type, eventData) {
+  if (type !== 'comments_create') {
+    return '';
+  }
+  const ids = (eventData?.created || [])
+    .map(data => parseInt(data?.id))
+    .filter(Number.isInteger)
+    .join(',');
+  return `<br><button class="btn btn-danger undo-event" style="float: right" data-ids="${ids}" onclick="undoComments(this)">Undo</button>`;
 }
 
 function loadAuditLogTable() {
@@ -109,19 +139,17 @@ function loadAuditLogTable() {
         width: '70%',
         render: function (data, type, row) {
           if (type === 'display' && data) {
-            var parsed_data;
+            let parsedData;
+            let typeSpecificElement = '';
             try {
-              parsed_data = JSON.stringify(JSON.parse(data), null, 2);
+              const eventData = JSON.parse(data);
+              parsedData = JSON.stringify(eventData, null, 2);
+              typeSpecificElement = getElementForEventType(row.event, eventData);
             } catch (e) {
-              parsed_data = data;
+              parsedData = data;
             }
-            return (
-              '<span class="audit_event_data" title="' +
-              htmlEscape(parsed_data) +
-              '">' +
-              htmlEscape(parsed_data) +
-              '</span>'
-            );
+            const escapedData = htmlEscape(parsedData);
+            return `${typeSpecificElement}<span class="audit_event_data" title="${escapedData}">${escapedData}</span>`;
           } else {
             return data;
           }
@@ -134,7 +162,7 @@ function loadAuditLogTable() {
 var scheduledProductsTable;
 
 function dataForLink(link) {
-  const rowData = scheduledProductsTable.row(link.parentNode).data();
+  const rowData = scheduledProductsTable.row(link.parentElement?.parentElement).data();
   if (rowData === undefined) {
     console.error('unable to find row data for action link');
   }

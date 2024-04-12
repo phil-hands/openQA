@@ -3,6 +3,7 @@
      id="developer-panel"
      data-developer-url="<%= $ws_developer_url %>"
      data-status-only-url="<%= $ws_status_only_url %>"
+     data-service-port-delta="<%= $service_port_delta %>"
      data-is-accessible="<%= ($is_devel_mode_accessible) ? ('true') : ('false') %>"
      data-own-user-id="<%= $current_user_id %>">
     <div class="card-header">
@@ -44,11 +45,9 @@
         </div>
         <div class="row">
             <div class="col-sm-12" id="developer-flash-messages">
-                % if ($worker_vnc) {
-                    <div id="developer-vnc-notice" class="alert alert-secondary developer-mode-element" role="alert" data-visible-on="isPaused">
-                        You might be able to connect to the SUT at <%= $worker_vnc %> via VNC with shared mode enabled (eg. <code>vncviewer <%= $worker_vnc %> -Shared</code> for TigerVNC).
-                    </div>
-                % }
+                <div id="developer-vnc-notice" class="alert alert-secondary developer-mode-element" role="alert" data-visible-on="isPaused,vncArg">
+                    You might be able to connect to the SUT at <span class="vnc-arg">?</span> via VNC with shared mode enabled (eg. <code>vncviewer <span class="vnc-arg">?</span> -Shared</code> for TigerVNC).
+                </div>
             </div>
         </div>
     </div>
@@ -152,7 +151,7 @@
                 </a>
                 <a href="#" onclick="resumeTestExecution(true); return false;"
                     class="btn btn-secondary developer-mode-element" data-visible-on="onFailure"
-                    data-toggle="tooltip" data-placement="bottom" title="Ignores the failure and resume the test execution">
+                    data-toggle="tooltip" data-placement="bottom" title="Ignores the failure and resumes the test execution">
                     <i class="fa fa-play-circle-o"></i> Ignore failure and resume
                 </a>
                 <a href="#" onclick="skipTimeout(); return false;"
@@ -163,7 +162,7 @@
                 <a href="<%= url_for('edit_test', testid => $testid) %>"
                     class="btn btn-secondary developer-mode-element"
                     data-visible-on="needleEditorReady"
-                    data-toggle="tooltip" data-placement="bottom" title="Allows creating/updating a needle from the latest screenshot/match (going back to the details to select a particlar screenshot is of course possible as well)">
+                    data-toggle="tooltip" data-placement="bottom" title="Allows creating/updating a needle from the latest screenshot/match (going back to the details to select a particular screenshot is of course possible as well)">
                     <i class="fa fa-thumb-tack"></i>
                     Open needle editor
                 </a>
@@ -182,12 +181,12 @@
         <div class="developer-mode-element" data-visible-on="isConnecting">
             <i class="fa fa-spinner fa-spin fa-lg"></i> <span id="developer-loading-info">establishing connection to backend ...</span>
             <p>
-                See <a href="http://open.qa/docs/#_steps_to_debug_developer_mode_setup" target="blank">steps to debug developer mode setup</a> if the the connection can
-                not be established in reasonable time.
+                See <a href="http://open.qa/docs/#_steps_to_debug_developer_mode_setup" target="blank">steps to debug developer mode setup</a> if the connection can
+                not be established in a reasonable time.
             </p>
         </div>
         <div id="developer-config-issue-note" class="developer-mode-element" data-visible-on="badConfiguration">
-            The developer mode is not available because of a configuration isse.
+            The developer mode is not available because of a configuration issue.
             See <a href="http://open.qa/docs/#_steps_to_debug_developer_mode_setup" target="blank">steps to debug developer mode setup</a>.
         </div>
     </div>

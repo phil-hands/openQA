@@ -51,8 +51,8 @@ sub startup ($self) {
     my $r = $self->routes->namespaces(['OpenQA::Shared::Controller', 'OpenQA::WebAPI::Controller', 'OpenQA::WebAPI']);
 
     # register basic routes
-    my $logged_in = $r->under('/')->to("session#ensure_user");
-    my $auth = $r->under('/')->to("session#ensure_operator");
+    my $logged_in = $r->under('/')->to('session#ensure_user');
+    my $auth = $r->under('/')->to('session#ensure_operator');
 
     # Routes used by plugins (UI and API)
     my $admin = $r->any('/admin');
@@ -78,7 +78,15 @@ sub startup ($self) {
     $self->asset->store->retries(5) if $Mojolicious::Plugin::AssetPack::VERSION > 2.13;
 
     # -> read assets/assetpack.def
-    $self->asset->process;
+    eval { $self->asset->process };
+    if (my $assetpack_error = $@) {    # uncoverable statement
+        $assetpack_error    # uncoverable statement
+          .= 'If you invoked this service for development (from a Git checkout) you probably just need to'
+          . ' invoke "make node_modules" before running this service. If you invoked this service via a packaged binary/service'
+          . " then there is probably a problem with the packaging.\n"
+          if $assetpack_error =~ qr/could not find input asset.*node_modules/i;    # uncoverable statement
+        die $assetpack_error;    # uncoverable statement
+    }
 
     # set cookie timeout to 48 hours (will be updated on each request)
     $self->app->sessions->default_expiration(48 * 60 * 60);
@@ -330,6 +338,8 @@ sub startup ($self) {
     $api_public_r->get('/job_groups')->name('apiv1_list_job_groups')->to('job_group#list');
     $api_public_r->get('/job_groups/<group_id:num>')->name('apiv1_get_job_group')->to('job_group#list');
     $api_public_r->get('/job_groups/<group_id:num>/jobs')->name('apiv1_get_job_group_jobs')->to('job_group#list_jobs');
+    $api_public_r->get('/job_groups/<group_id:num>/build_results')->name('apiv1_get_job_group_jobs')
+      ->to('job_group#build_results');
     $api_ra->post('/job_groups')->name('apiv1_post_job_group')->to('job_group#create');
     $api_ra->put('/job_groups/<group_id:num>')->name('apiv1_put_job_group')->to('job_group#update');
     $api_ra->delete('/job_groups/<group_id:num>')->name('apiv1_delete_job_group')->to('job_group#delete');
@@ -491,6 +501,8 @@ sub startup ($self) {
       ->name('apiv1_put_parent_group_comment')->to('comment#update');
     $api_ra->delete('/parent_groups/<parent_group_id:num>/comments/<comment_id:num>')
       ->name('apiv1_delete_parent_group_comment')->to('comment#delete');
+    $api_ru->post('/comments')->name('apiv1_post_comments')->to('comment#create_many');
+    $api_ra->delete('/comments')->name('apiv1_delete_comments')->to('comment#delete_many');
 
     $api_ra->delete('/user/<id:num>')->name('apiv1_delete_user')->to('user#delete');
 

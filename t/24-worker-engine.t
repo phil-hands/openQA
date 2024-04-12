@@ -8,7 +8,11 @@ use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Test::TimeLimit '10';
 use Mojo::Base -signatures;
 
-BEGIN { $ENV{OPENQA_CACHE_SERVICE_POLL_DELAY} = 0 }
+BEGIN {
+    $ENV{OPENQA_CACHE_SERVICE_POLL_DELAY} = 0;
+    delete $ENV{OPENQA_CACHE_MAX_INACTIVE_JOBS};
+    delete $ENV{OPENQA_CACHE_MAX_INACTIVE_JOBS_HARD_LIMIT};
+}
 
 use File::Spec::Functions qw(abs2rel catdir);
 use OpenQA::Constants 'WORKER_EC_ASSET_FAILURE';
@@ -32,6 +36,7 @@ use OpenQA::Utils qw(testcasedir productdir needledir locate_asset base_host);
     use Mojo::Base -base;
     has id => 42;
     has worker => undef;
+    has client => sub { Test::FakeClient->new };
     sub post_setup_status { 1 }
     sub is_stopped_or_stopping { 0 }
 }
@@ -51,6 +56,8 @@ use OpenQA::Utils qw(testcasedir productdir needledir locate_asset base_host);
     use Mojo::Base -base;
     has worker_id => 1;
     has webui_host => 'localhost';
+    has service_port_delta => 2;
+    has testpool_server => 'fake-testpool-server';
 }
 
 $ENV{OPENQA_CONFIG} = "$FindBin::Bin/data/24-worker-overall";
@@ -185,17 +192,32 @@ subtest 'asset caching' => sub {
     is $error, $test_dir, 'Cache directory updated';
 };
 
-sub _mock_cache_service_client ($status_data, $error = undef) {
+sub _mock_cache_service_client ($status_data, $info_data = undef, $error = undef) {
     my $cache_client_mock = Test::MockModule->new('OpenQA::CacheService::Client');
+    $info_data //= {active_workers => 1};
     $cache_client_mock->redefine(enqueue => 'some enqueue error');
-    $cache_client_mock->redefine(
-        info => OpenQA::CacheService::Response::Info->new(data => {active_workers => 1}, error => undef));
+    $cache_client_mock->redefine(info => OpenQA::CacheService::Response::Info->new(data => $info_data, error => undef));
     $cache_client_mock->redefine(
         status => OpenQA::CacheService::Response::Status->new(data => $status_data, error => $error));
     return $cache_client_mock;
 }
 
-subtest 'problems when caching assets' => sub {
+subtest 'handling availability error' => sub {
+    my %fake_status = (active_workers => 1, inactive_jobs => 46);
+    my $cache_client_mock = _mock_cache_service_client {}, \%fake_status;
+    my $cache_client = OpenQA::CacheService::Client->new;
+    my $cb_res;
+    my $cb = sub ($res) { $cb_res = $res };
+    my @args = ($cache_client, Test::FakeJob->new, {a => 1}, [('a') x 2], {}, 'webuihost', undef, $cb);
+    OpenQA::Worker::Engines::isotovideo::cache_assets @args;
+    like $cb_res->{error}, qr/Cache service queue already full/, 'error when hard-limit exceeded';
+
+    $fake_status{inactive_jobs} = 45;
+    OpenQA::Worker::Engines::isotovideo::cache_assets @args;
+    like $cb_res->{error}, qr/Failed to send asset request/, 'attempt to cache when below hard-limit';
+};
+
+subtest 'problems and special cases when caching assets' => sub {
     my %fake_status = (status => 'processed', output => 'Download of "FOO" failed: 404 Not Found');
     my $cache_client_mock = _mock_cache_service_client \%fake_status;
     $cache_client_mock->redefine(asset_path => 'some/path');
@@ -204,8 +226,9 @@ subtest 'problems when caching assets' => sub {
     my $error = 'not called';
     my $cb = sub ($err) { $error = $err; Mojo::IOLoop->stop };
     my $job = Test::FakeJob->new;
+    my %vars = (ISO_1 => 'FOO', CASEDIR => 'https://foo.git', NEEDLES_DIR => 'https://bar.git');
     my @assets = ('ISO_1');
-    my @args = ($job, {ISO_1 => 'FOO'}, \@assets, {ISO_1 => 'iso'}, 'webuihost', undef, $cb);
+    my @args = ($job, \%vars, \@assets, {ISO_1 => 'iso'}, 'webuihost', undef, $cb);
     OpenQA::Worker::Engines::isotovideo::cache_assets(OpenQA::CacheService::Client->new, @args);
     Mojo::IOLoop->start;
     is $error->{error}, 'Failed to send asset request for FOO: some enqueue error',
@@ -219,13 +242,41 @@ subtest 'problems when caching assets' => sub {
     is $error->{error}, 'Failed to download FOO to some/path', 'asset not found';
     is $error->{category}, WORKER_EC_ASSET_FAILURE, 'category set so problem is treated as asset failure';
 
-    $cache_client_mock = _mock_cache_service_client {}, 'some severe error';
+    $cache_client_mock = _mock_cache_service_client {}, undef, 'some severe error';
     $cache_client_mock->redefine(asset_request => Test::FakeRequest->new);
     $cache_client_mock->redefine(enqueue => 0);
     @assets = ('ISO_1');
     OpenQA::Worker::Engines::isotovideo::cache_assets(OpenQA::CacheService::Client->new, @args);
     Mojo::IOLoop->start;
     is $error->{error}, 'some severe error', 'job not "processed" due to some error';
+
+    subtest 'test sync skipped for Git-only jobs' => sub {
+        my $isotovideo_mock = Test::MockModule->new('OpenQA::Worker::Engines::isotovideo');
+        my $sync_tests_called;
+        $isotovideo_mock->redefine(cache_assets => sub (@args) { $args[-1]->(undef) });
+        $isotovideo_mock->redefine(sync_tests => sub (@) { $sync_tests_called = 1 });
+
+        OpenQA::Worker::Engines::isotovideo::do_asset_caching(@args);
+        is $error, undef, 'callback called without error (1)';
+        is $sync_tests_called, undef, 'sync tests was not called for Git-only job (separate needles repo)';
+
+        delete $vars{NEEDLES_DIR};    # no NEEDLES_DIR means needles are within CASEDIR or separate
+        OpenQA::Worker::Engines::isotovideo::do_asset_caching(@args);
+        is $error, undef, 'callback called without error (2)';
+        is $sync_tests_called, 1, 'sync tests was called for job where needles might be separate';
+
+        $vars{NEEDLES_DIR} = 'relative/path';    # considered relative to default needles, relying on sync
+        $sync_tests_called = undef;
+        OpenQA::Worker::Engines::isotovideo::do_asset_caching(@args);
+        is $error, undef, 'callback called without error (3)';
+        is $sync_tests_called, 1, 'sync tests called with relative NEEDLES_DIR (relative to default needles)';
+
+        delete $vars{CASEDIR};    # no CASEDIR means using default checkout, relying on sync
+        undef $sync_tests_called;
+        OpenQA::Worker::Engines::isotovideo::do_asset_caching(@args);
+        is $error, undef, 'callback called without error (4)';
+        is $sync_tests_called, 1, 'sync tests was called for job not using Git at all';
+    };
 };
 
 subtest '_handle_asset_processed' => sub {

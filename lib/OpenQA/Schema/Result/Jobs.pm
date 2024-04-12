@@ -18,6 +18,7 @@ use OpenQA::Utils (
 use OpenQA::App;
 use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
+use OpenQA::Markdown 'markdown_to_html';
 use OpenQA::Setup;
 use OpenQA::ScreenshotDeletion;
 use File::Basename qw(basename dirname);
@@ -315,6 +316,11 @@ sub scenario_description ($self) {
     return $scenario->description;
 }
 
+sub rendered_scenario_description ($self) {
+    return undef unless my $desc = $self->scenario_description;
+    return Mojo::ByteStream->new(markdown_to_html($desc));
+}
+
 # return 0 if we have no worker
 sub worker_id ($self) { $self->worker ? $self->worker->id : 0 }
 
@@ -415,7 +421,7 @@ sub settings_hash ($self, $prefetched = undef) {
     for my $column (qw(DISTRI VERSION FLAVOR MACHINE ARCH BUILD TEST)) {
         if (my $value = $self->$column) { $settings->{$column} = $value }
     }
-    $settings->{NAME} = sprintf "%08d-%s", $self->id, $self->name;
+    $settings->{NAME} = sprintf '%08d-%s', $self->id, $self->name;
     if ($settings->{JOB_TEMPLATE_NAME}) {
         my $test = $settings->{TEST};
         my $job_template_name = $settings->{JOB_TEMPLATE_NAME};
@@ -497,6 +503,7 @@ sub to_hash ($job, %args) {
             $j->{parent_group} = $parent_group->name;
         }
     }
+    $j->{missing_assets} = $job->missing_assets if $args{check_assets};
     return $j;
 }
 
@@ -518,7 +525,7 @@ sub can_be_duplicated ($self) {
 }
 
 sub _compute_asset_names_considering_parent_jobs ($parent_job_ids, $asset_name) {
-    [$asset_name, map { sprintf("%08d-%s", $_, $asset_name) } @$parent_job_ids]
+    [$asset_name, map { sprintf('%08d-%s', $_, $asset_name) } @$parent_job_ids]
 }
 
 sub _strip_parent_job_id ($parent_job_ids, $asset_name) {
@@ -776,7 +783,9 @@ sub cluster_jobs ($self, @args) {
             my $cancelwhole = 1;
             # check if the setting to disable cancelwhole is set: the var
             # must exist and be set to something false-y
-            my $cwset = $p->settings_hash->{PARALLEL_CANCEL_WHOLE_CLUSTER};
+            my $settings = $p->settings_hash;
+            my $cwset = $settings->{PARALLEL_CANCEL_WHOLE_CLUSTER};
+            $job->{one_host_only} = 1 if $settings->{PARALLEL_ONE_HOST_ONLY};
             $cancelwhole = 0 if (defined $cwset && !$cwset);
             if ($args{cancelmode} && !$cancelwhole) {
                 # skip calling cluster_jobs (so cancelling it and its other
@@ -1023,10 +1032,10 @@ sub save_screenshot ($self, $screen) {
 
     my $tmpdir = $self->worker->get_property('WORKER_TMPDIR');
     return unless -d $tmpdir;    # we can't help
-    my $current = readlink($tmpdir . "/last.png");
+    my $current = readlink($tmpdir . '/last.png');
     my $newfile = OpenQA::Utils::save_base64_png($tmpdir, $screen->{name}, $screen->{png});
-    unlink($tmpdir . "/last.png");
-    symlink("$newfile.png", $tmpdir . "/last.png");
+    unlink($tmpdir . '/last.png');
+    symlink("$newfile.png", $tmpdir . '/last.png');
     # remove old file
     unlink($tmpdir . "/$current") if $current;
 }
@@ -1103,7 +1112,7 @@ sub insert_test_modules ($self, $testmodules) {
 
 sub custom_module ($self, $module, $output) {
     my $parser = parser('Base');
-    $parser->include_results(1) if $parser->can("include_results");
+    $parser->include_results(1) if $parser->can('include_results');
 
     $parser->results->add($module);
     $parser->_add_output($output) if defined $output;
@@ -1192,14 +1201,14 @@ sub exclusively_used_screenshot_ids ($self) {
 }
 
 sub num_prefix_dir ($self, $archived = undef) {
-    my $numprefix = sprintf "%05d", $self->id / 1000;
+    my $numprefix = sprintf '%05d', $self->id / 1000;
     return catfile(resultdir($archived // $self->archived), $numprefix);
 }
 
 sub create_result_dir ($self) {
     my $dir = $self->result_dir;
     if (!$dir) {
-        $dir = sprintf "%08d-%s", $self->id, $self->name;
+        $dir = sprintf '%08d-%s', $self->id, $self->name;
         $dir = substr($dir, 0, 255);
         $self->update({result_dir => $dir});
         $dir = $self->result_dir;
@@ -1291,7 +1300,7 @@ sub parse_extra_tests ($self, $asset, $type, $script = undef) {
     eval {
         my $parser = parser($type);
 
-        $parser->include_results(1) if $parser->can("include_results");
+        $parser->include_results(1) if $parser->can('include_results');
         my $tmp_extra_test = tempfile;
 
         $asset->move_to($tmp_extra_test);
@@ -1309,7 +1318,7 @@ sub parse_extra_tests ($self, $asset, $type, $script = undef) {
     };
 
     if ($@) {
-        log_error("Failed parsing data $type for job " . $self->id . ": " . $@);
+        log_error("Failed parsing data $type for job " . $self->id . ': ' . $@);
         return;
     }
     return 1;
@@ -1333,7 +1342,7 @@ sub create_asset ($self, $asset, $scope, $local = undef) {
     $type = 'hdd' if $fname =~ /\.(?:qcow2|raw|vhd|vhdx)$/;
     $type //= 'other';
 
-    my $job_id = sprintf "%08d", $self->id;
+    my $job_id = sprintf '%08d', $self->id;
     $fname = "$job_id-$fname" if $scope ne 'public';
 
     my $assetdir = assetdir();
@@ -1440,10 +1449,10 @@ sub update_status ($self, $status) {
     my $state = $self->state;
     return {result => 0} unless $state eq RUNNING || $state eq UPLOADING || $state eq CANCELLED;
 
-    $self->append_log($status->{log}, "autoinst-log-live.txt");
-    $self->append_log($status->{serial_log}, "serial-terminal-live.txt");
-    $self->append_log($status->{serial_terminal}, "serial-terminal-live.txt");
-    $self->append_log($status->{serial_terminal_user}, "serial-terminal-live.txt");
+    $self->append_log($status->{log}, 'autoinst-log-live.txt');
+    $self->append_log($status->{serial_log}, 'serial-terminal-live.txt');
+    $self->append_log($status->{serial_terminal}, 'serial-terminal-live.txt');
+    $self->append_log($status->{serial_terminal_user}, 'serial-terminal-live.txt');
     # delete from the hash so it becomes dumpable for debugging
     my $screen = delete $status->{screen};
     $self->save_screenshot($screen) if $screen;
@@ -1495,7 +1504,8 @@ sub register_assets_from_settings ($self) {
     my %updated;
 
     # check assets and fix the file names
-    my $assets = $self->result_source->schema->resultset('Assets');
+    my $schema = $self->result_source->schema;
+    my $assets = $schema->resultset('Assets');
     for my $k (keys %assets) {
         my $asset = $assets{$k};
         my ($name, $type) = ($asset->{name}, $asset->{type});
@@ -1519,16 +1529,27 @@ sub register_assets_from_settings ($self) {
         $updated{$k} = $name;
     }
 
-    # ensure assets are updated in a consistent order across multiple processes to avoid ordering deadlocks
+    # insert assets
+    # note: Ensuring assets are updated in a consistent order across multiple processes to
+    #       avoid ordering deadlocks.
+    # note: Not updating the asset size here as doing it in this big transaction would lead
+    #       to deadlocks (see poo#120891).
+    my $dbh = $schema->storage->dbh;
+    my $sth_asset = $dbh->prepare(<<~'END_SQL');
+        INSERT INTO assets (type, name, t_created, t_updated)
+                    VALUES (?,    ?,    now(),     now())
+            ON CONFLICT DO NOTHING RETURNING id
+        END_SQL
+    my $sth_jobs_assets = $dbh->prepare(<<~'END_SQL');
+        INSERT INTO jobs_assets (job_id, asset_id, t_created, t_updated)
+                        VALUES (?,      ?,        now(),     now())
+            ON CONFLICT DO NOTHING
+        END_SQL
     for my $asset_info (sort { $a->{name} cmp $b->{name} } values %assets) {
-        # avoid plain create or we will get unique constraint problems
-        # in case ISO_1 and ISO_2 point to the same ISO
-        # note: Not updating the asset size here as doing it in this big transaction
-        #       would lead to deadlocks (see poo#120891).
-        my $asset = $assets->find_or_create($asset_info);
-        $self->jobs_assets->find_or_create({asset_id => $asset->id});
+        $sth_asset->execute($asset_info->{type}, $asset_info->{name});
+        my ($asset_id) = $sth_asset->fetchrow_array // $assets->find($asset_info)->id;
+        $sth_jobs_assets->execute($self->id, $asset_id);
     }
-
     return \%updated;
 }
 
@@ -1542,7 +1563,7 @@ sub reevaluate_children_asset_settings ($self, $include_self = 0, $visited = {})
 sub _asset_find ($name, $type, $parents) {
     # add undef to parents so that we check regular assets too
     for my $parent (@$parents, undef) {
-        my $fname = $parent ? sprintf("%08d-%s", $parent, $name) : $name;
+        my $fname = $parent ? sprintf('%08d-%s', $parent, $name) : $name;
         return $fname if locate_asset($type, $fname, mustexist => 1);
     }
     return undef;
@@ -1621,7 +1642,7 @@ sub _previous_scenario_jobs ($self, $rows = undef) {
         order_by => ['me.id DESC'],
         rows => $rows
     );
-    return $schema->resultset("Jobs")->search({-and => $conds}, \%attrs)->all;
+    return $schema->resultset('Jobs')->search({-and => $conds}, \%attrs)->all;
 }
 
 sub _relevant_module_result_for_carry_over_evaluation ($module_result) {
@@ -1669,7 +1690,7 @@ sub _carry_over_candidate ($self) {
     my $lookup_depth = $config->{lookup_depth};
     my $state_changes_limit = $config->{state_changes_limit};
 
-    my $label = sprintf "_carry_over_candidate(%d)", $self->id;
+    my $label = sprintf '_carry_over_candidate(%d)', $self->id;
     log_debug(sprintf "$label: _failure_reason=%s", $current_failure_reason);
 
     # we only do carryover for jobs with some kind of (soft) failure
@@ -1833,12 +1854,12 @@ sub git_diff ($self, $dir, $refspec_range, $limit = undef) {
     my $res = run_cmd_with_log_return_error($cmd);
     if ($res->{return_code}) {
         warn "Problem with [@$cmd] rc=$res->{return_code}: $res->{stdout} . $res->{stderr}";
-        return "Cannot display diff because of a git problem";
+        return 'Cannot display diff because of a git problem';
     }
     chomp(my $count = $res->{stdout});
     if ($count =~ tr/0-9//c) {
         warn "Problem with [@$cmd]: returned non-numeric string '$count'";
-        return "Cannot display diff because of a git problem";
+        return 'Cannot display diff because of a git problem';
     }
     return "Too many commits ($count) to create a diff between $refspec_range (maximum: $limit)" if $count > $limit;
 
@@ -1846,7 +1867,7 @@ sub git_diff ($self, $dir, $refspec_range, $limit = undef) {
     $res = run_cmd_with_log_return_error($cmd, stdout => 'trace');
     if ($res->{return_code}) {
         warn "Problem with [@$cmd] rc=$res->{return_code}: $res->{stdout} . $res->{stderr}";
-        return "Cannot display diff because of a git problem";
+        return 'Cannot display diff because of a git problem';
     }
     return $res->{stdout} . $res->{stderr};
 }
@@ -1948,6 +1969,29 @@ sub descendants ($self, $limit = -1) {
     $self->{_descendants} = $sth->fetchrow_array;
 }
 
+sub incomplete_ancestors ($self, $limit = -1) {
+    my $ancestors = $self->{_incomplete_ancestors};
+    return $ancestors if defined $ancestors;
+    my $sth = $self->result_source->schema->storage->dbh->prepare(<<~'EOM');
+    with recursive orig_id as (
+      select ? as orig_id, 0 as level, ? as orig_result, ? as orig_reason
+        union all
+      select id as orig_id, orig_id.level + 1 as level, result as orig_result, reason as orig_reason
+        from jobs join orig_id on orig_id.orig_id = jobs.clone_id
+        where result = 'incomplete' and (? < 0 or level < ?))
+      select orig_id, level, orig_reason from orig_id order by level asc;
+    EOM
+    $sth->bind_param(1, $self->id, SQL_BIGINT);
+    $sth->bind_param(2, $self->result, SQL_VARCHAR);
+    $sth->bind_param(3, $self->reason, SQL_VARCHAR);
+    $sth->bind_param(4, $limit, SQL_BIGINT);
+    $sth->bind_param(5, $limit, SQL_BIGINT);
+    $sth->execute;
+    $ancestors = $sth->fetchall_arrayref;
+    shift @$ancestors;
+    $self->{_incomplete_ancestors} = $ancestors;
+}
+
 sub latest_job ($self) {
     return $self unless my $clone = $self->clone;
     return $clone->latest_job;
@@ -2007,7 +2051,18 @@ sub cancel_whole_clone_chain ($self, @args) {
 # returns the related scheduled product; if the job has not been created by one the origin job is checked
 sub related_scheduled_product_id ($self) {
     if (my $sp_id = $self->scheduled_product_id) { return $sp_id }
-    if (my $origin = $self->origin) { return $origin->related_scheduled_product_id }
+    return $self->{_orig_scheduled_product_id} if exists $self->{_orig_scheduled_product_id};
+    my $sth = $self->result_source->schema->storage->dbh->prepare(<<~'EOM');
+        with recursive orig_id as (
+            select ? as orig_id, ? as prod
+            union all
+            select id as orig_id, scheduled_product_id as prod from jobs join orig_id on orig_id.orig_id = jobs.clone_id)
+        select prod from orig_id where prod is not null
+        EOM
+    $sth->bind_param(1, $self->id, SQL_BIGINT);
+    $sth->bind_param(2, undef, SQL_BIGINT);
+    $sth->execute;
+    $self->{_orig_scheduled_product_id} = $sth->fetchrow_array;
 }
 
 =head2 done
@@ -2047,28 +2102,12 @@ sub done ($self, %args) {
         $worker->update({job_id => undef});
     }
 
+    my %new_val = (state => DONE);
     # update result unless already known (it is already known for CANCELLED jobs)
     # update the reason if updating the result or if there is no reason yet
     my $reason = $args{reason};
-    my $result_unknown = $self->result eq NONE;
-    my $reason_unknown = !$self->reason;
-    my %new_val = (state => DONE);
     my $restart = 0;
-    $new_val{result} = $result if $result_unknown;
-    if (($result_unknown || $reason_unknown) && defined $reason) {
-        # restart incompletes when the reason matches the configured regex
-        my $auto_clone_regex = OpenQA::App->singleton->config->{global}->{auto_clone_regex};
-        $restart = 1 if $result eq INCOMPLETE && $auto_clone_regex && $reason =~ $auto_clone_regex;
-
-        # limit length of the reason
-        # note: The reason can be anything the worker picked up as useful information so better cut it at a
-        #       reasonable, human-readable length. This also avoids growing the database too big.
-        $reason = substr($reason, 0, 300) . '…' if defined $reason && length $reason > 300;
-        $new_val{reason} = $reason;
-    }
-    elsif ($reason_unknown && !defined $reason && $result eq INCOMPLETE) {
-        $new_val{reason} = 'no test modules scheduled/uploaded';
-    }
+    $self->_compute_result_and_reason(\%new_val, $result, $reason, \$restart);
     $self->update(\%new_val);
     $self->unblock;
     my %finalize_opts = (lax => 1);
@@ -2089,6 +2128,43 @@ sub done ($self, %args) {
     $self->enqueue_finalize_job_results([$carried_over], \%finalize_opts);
 
     return $new_val{result} // $self->result;
+}
+
+sub _compute_result_and_reason ($self, $new_val, $result, $reason, $restart) {
+    my $result_unknown = $self->result eq NONE;
+    my $reason_unknown = !$self->reason;
+    $new_val->{result} = $result if $result_unknown;
+    if (($result_unknown || $reason_unknown) && defined $reason) {
+        # restart incompletes when the reason matches the configured regex
+        my $append_reason = '';
+        my $auto_clone_regex = OpenQA::App->singleton->config->{global}->{auto_clone_regex};
+        if ($result eq INCOMPLETE and $auto_clone_regex and $reason =~ $auto_clone_regex) {
+            my $limit = OpenQA::App->singleton->config->{global}{auto_clone_limit};
+            my $ancestors = $self->incomplete_ancestors($limit + 1);
+            # how many of those incomplete ancestors had a reason not matching auto_clone?
+            my $unrelated = grep { $_->[2] !~ m/$auto_clone_regex/ } @$ancestors;
+            my $restarts = @$ancestors;
+            if ($restarts < $limit || $unrelated > 0) {
+                $append_reason = ' [Auto-restarting because reason matches the configured "auto_clone_regex".]';
+                $$restart = 1;
+            }
+            else {
+                $append_reason
+                  = ' [Not restarting job despite failure reason matching the configured "auto_clone_regex". ';
+                $append_reason .= "It has already been restarted $restarts times (limit is $limit).]";
+            }
+        }
+
+        # limit length of the reason
+        # note: The reason can be anything the worker picked up as useful information so better cut it at a
+        # reasonable, human-readable length. This also avoids growing the database too big.
+        $reason = substr($reason, 0, 300) . '…' if length $reason > 300;
+        $reason .= $append_reason;
+        $new_val->{reason} = $reason;
+    }
+    elsif ($reason_unknown && !defined $reason && $result eq INCOMPLETE) {
+        $new_val->{reason} = 'no test modules scheduled/uploaded';
+    }
 }
 
 sub cancel ($self, $result, $reason = undef) {

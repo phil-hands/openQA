@@ -39,13 +39,13 @@ sub clone_job_apply_settings ($argv, $depth, $settings, $options) {
 
     for my $arg (@$argv) {
         # split arg into key and value
-        unless ($arg =~ /([A-Z0-9_]+\+?)=(.*)/) {
-            warn "arg '$arg' does not match";
+        unless ($arg =~ /([A-Z0-9_]+)(:(\w+))?(\+)?=(.*)/) {
+            warn "command-line argument '$arg' is no valid setting and will be ignored\n";
             next;
         }
-        my ($key, $value) = ($1, $2);
-
-        next unless is_global_setting($key) || $depth <= 1 || $options->{'parental-inheritance'};
+        my ($key, $scope, $plus, $value) = ($1, $3, $4, $5);
+        next if defined $scope && ($settings->{TEST} // '') ne $scope;
+        next if !defined $scope && !is_global_setting($key) && $depth > 1 && !$options->{'parental-inheritance'};
 
         # delete key if value empty
         if (!defined $value || $value eq '') {
@@ -54,10 +54,7 @@ sub clone_job_apply_settings ($argv, $depth, $settings, $options) {
         }
 
         # allow appending via `+=`
-        if (substr($key, -1) eq '+') {
-            $key = substr $key, 0, -1;
-            $value = ($settings->{$key} // '') . $value;
-        }
+        $value = ($settings->{$key} // '') . $value if $plus;
 
         # assign value to key, delete overrides
         $settings->{$key} = $value;
@@ -70,6 +67,7 @@ sub clone_job_apply_settings ($argv, $depth, $settings, $options) {
 sub clone_job_get_job ($jobid, $url_handler, $options) {
     my $url = $url_handler->{remote_url}->clone;
     $url->path("jobs/$jobid");
+    $url->query->merge(check_assets => 1) unless $options->{'ignore-missing-assets'};
     my $tx = $url_handler->{remote}->max_redirects(3)->get($url);
     if ($tx->error) {
         my $err = $tx->error;
@@ -78,7 +76,7 @@ sub clone_job_get_job ($jobid, $url_handler, $options) {
         die "failed to get job '$jobid': $err->{code} $err->{message}";
     }
     if ($tx->res->code != 200) {
-        warn sprintf("unexpected return code: %s %s", $tx->res->code, $tx->res->message);
+        warn sprintf('unexpected return code: %s %s', $tx->res->code, $tx->res->message);
         exit 1;
     }
     my $job = $tx->res->json->{job};
@@ -113,8 +111,25 @@ sub _job_publishes_uefi_vars ($job, $file) {
     $job->{settings}->{UEFI} && _job_setting_is $job, PUBLISH_PFLASH_VARS => $file;
 }
 
+sub _check_for_missing_assets ($job, $parents, $options) {
+    return undef if $options->{'ignore-missing-assets'};
+    my $missing_assets = $job->{missing_assets};
+    return undef unless ref $missing_assets eq 'ARRAY';    # most likely an old version of the web UI
+    my @relevant_missing_assets;
+    for my $missing_asset (@$missing_assets) {
+        my ($type, $name) = split '/', $missing_asset, 2;
+        push @relevant_missing_assets, $missing_asset
+          unless _is_asset_generated_by_cloned_jobs $job, $parents, $name, $options;
+    }
+    return undef unless @relevant_missing_assets;
+    my $relevant_missing_assets = join("\n - ", @relevant_missing_assets);
+    my $note = 'Use --ignore-missing-assets or --skip-download to proceed regardless.';
+    die "The following assets are missing:\n - $relevant_missing_assets\n$note\n";
+}
+
 sub clone_job_download_assets ($jobid, $job, $url_handler, $options) {
     my $parents = _get_chained_parents($job, $url_handler, $options);
+    _check_for_missing_assets($job, $parents, $options);
     my $ua = $url_handler->{ua};
     my $remote_url = $url_handler->{remote_url};
     for my $type (keys %{$job->{assets}}) {
@@ -176,8 +191,8 @@ sub create_url_handler ($options) {
     $local_url->path('/api/v1/jobs');
     my $local = OpenQA::Client->new(
         api => $local_url->host,
-        apikey => $options->{'apikey'},
-        apisecret => $options->{'apisecret'});
+        apikey => $options->{apikey},
+        apisecret => $options->{apisecret});
     die "API key/secret for '$options->{host}' missing. Checkout '$0 --help' for the config file syntax/lookup.\n"
       unless $local->apikey && $local->apisecret;
 
@@ -292,7 +307,8 @@ sub clone_job ($jobid, $url_handler, $options, $post_params = {}, $jobs = {}, $d
     $settings->{CLONED_FROM} = $url_handler->{remote_url}->clone->path("/tests/$jobid")->to_string;
     if (my $group_id = $job->{group_id}) { $settings->{_GROUP_ID} = $group_id }
     clone_job_apply_settings($options->{args}, $relation eq 'children' ? 0 : $depth, $settings, $options);
-    OpenQA::Script::CloneJobSUSE::detect_maintenance_update($jobid, $url_handler, $settings);
+    OpenQA::Script::CloneJobSUSE::detect_maintenance_update($jobid, $url_handler, $settings)
+      unless $options->{'skip-checks'};
     clone_job_download_assets($jobid, $job, $url_handler, $options) unless $options->{'skip-download'};
 }
 

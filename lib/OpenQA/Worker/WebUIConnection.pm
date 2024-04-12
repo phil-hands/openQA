@@ -20,6 +20,7 @@ has 'worker_id';    # the ID the web UI uses to track this worker (populated on 
 has 'testpool_server';    # testpool server for this web UI host
 has 'working_directory';    # share directory for this web UI host
 has 'cache_directory';    # cache directory for this web UI host
+has 'service_port_delta';    # delta from web UI port on which to directly connect to livehandler
 
 # the websocket connection to receive commands from the web UI and send the status (Mojo::Transaction::WebSockets instance)
 has 'websocket_connection';
@@ -106,6 +107,7 @@ sub register ($self) {
         $self->_set_status($status => {error_message => $error_message});
         return undef;
     }
+    $self->service_port_delta($json_res->{service_port_delta});
     my $worker_id = $json_res->{id};
     $self->worker_id($worker_id);
     if (!defined $worker_id) {
@@ -284,7 +286,7 @@ sub send ($self, $method, $path, %args) {
     my @args = ($method, $ua_url);
     push(@args, 'json', $json_data) if $json_data;
     my $tx = $ua->build_tx(@args);
-    if ($callback eq "no") {
+    if ($callback eq 'no') {
         $ua->start($tx);
         return undef;
     }

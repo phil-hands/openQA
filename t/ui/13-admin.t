@@ -45,24 +45,32 @@ driver_missing unless my $driver = call_driver;
 plan skip_all => 'Install Selenium::Remote::WDKeys to run this test'
   unless can_load(modules => {'Selenium::Remote::WDKeys' => undef,});
 
-$driver->title_is("openQA");
-is($driver->find_element('#user-action a')->get_text(), 'Login', "no one logged in");
-$driver->find_element_by_link_text('Login')->click();
-# we're back on the main page
-$driver->title_is("openQA", "back on main page");
-# but ...
-
-is($driver->find_element('#user-action a')->get_text(), 'Logged in as Demo', "logged in as demo");
+$driver->title_is('openQA');
+is($driver->find_element('#user-action a')->get_text, 'Login', 'no one logged in');
+$driver->find_element_by_link_text('Login')->click;
+$driver->title_is('openQA', 'back on main page');
+is($driver->find_element('#user-action a')->get_text, 'Logged in as Demo', 'logged in as demo');
 
 # expand user menu
 $driver->find_element('#user-action a')->click();
-like($driver->find_element_by_id('user-action')->get_text(), qr/Operators Menu/, 'demo is operator');
-like($driver->find_element_by_id('user-action')->get_text(), qr/Administrators Menu/, 'demo is admin');
+like($driver->find_element_by_id('user-action')->get_text, qr/Operators Menu/, 'demo is operator');
+like($driver->find_element_by_id('user-action')->get_text, qr/Administrators Menu/, 'demo is admin');
 
-# Demo is admin, so go there
-$driver->find_element_by_link_text('Workers')->click();
+subtest 'Minion dashboard' => sub {
+    $driver->find_element_by_link_text('Minion Dashboard')->click;
+    wait_for_ajax msg => 'dashboard contents';
+    $driver->execute_script(q{$('.nav-link:contains("Active")')[0].click()});
+    wait_for_ajax msg => '"Active" table';
+    like $driver->find_element('body')->get_text, qr/No jobs found/i, 'no jobs to show';
+    ok javascript_console_has_no_warnings_or_errors, 'no JavaScript problems';
+    $driver->execute_script(q{$('.nav-link:contains("Back to Site")')[0].click()});
+    $driver->title_is('openQA', 'back on main page');
+};
 
-$driver->title_is("openQA: Workers", "on workers overview");
+# open workers page
+$driver->find_element('#user-action a')->click;
+$driver->find_element_by_link_text('Workers')->click;
+$driver->title_is('openQA: Workers', 'on workers overview');
 
 subtest 'add product' => sub() {
     # go to product first
@@ -677,17 +685,24 @@ subtest 'Manage API keys' => sub {
     };
 
     subtest 'create key with expiration date' => sub {
-        $driver->find_element('#api-keys-form input[type=submit]')->click;
-        is(scalar @{$driver->find_child_elements($tbody = api_keys_tbody, 'tr')}, 1, 'exactly one key present');
-        like($tbody->get_text, qr/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/, 'new key has expiration date');
+        my $row = wait_for_element(
+            trigger_function => sub { $driver->find_element('#api-keys-form input[type=submit]')->click },
+            selector => '#api-keys-tbody > tr',
+            description => 'key row present'
+        ) or return;
+        like($row->get_text, qr/\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}/, 'new key has expiration date');
     };
 
     subtest 'create key without expiration date' => sub {
+        $tbody = api_keys_tbody;
         unlike($tbody->get_text, qr/never/, 'no key without expiration date present so far');
         $driver->find_element_by_id('expiration')->click;
-        $driver->find_element('#api-keys-form input[type=submit]')->click;
-        is(scalar @{$driver->find_child_elements($tbody = api_keys_tbody, 'tr')}, 2, 'two keys present now');
-        like($tbody->get_text, qr/never/, 'new key has expiration date');
+        my $row = wait_for_element(
+            trigger_function => sub { $driver->find_element('#api-keys-form input[type=submit]')->click },
+            selector => '#api-keys-tbody tr:nth-child(2)',
+            description => 'key row present (without expiration)'
+        ) or return;
+        like($row->get_text, qr/never/, 'new key has expiration date');
     };
 };
 

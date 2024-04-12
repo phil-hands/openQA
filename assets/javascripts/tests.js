@@ -124,8 +124,8 @@ function renderTimeAgo(data, type, row, position, notAvailableMessage) {
     return haveData
       ? '<span title="' + data + '">' + jQuery.timeago(data) + '</span>'
       : notAvailableMessage
-      ? notAvailableMessage
-      : 'not yet';
+        ? notAvailableMessage
+        : 'not yet';
   }
   return haveData ? data : 'Z-9999-12-31';
 }
@@ -245,7 +245,7 @@ function renderTestLists() {
       this[paramName] = paramValues[0];
     }
   };
-  jQuery.each(['limit', 'groupid', 'match'], function (index, paramName) {
+  jQuery.each(['limit', 'groupid', 'match', 'group_glob', 'not_group_glob', 'comment'], (index, paramName) => {
     ajaxQueryParams.addFirstParam(paramName);
   });
   delete ajaxQueryParams.addFirstParam;

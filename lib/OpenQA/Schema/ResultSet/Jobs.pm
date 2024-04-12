@@ -53,11 +53,11 @@ sub latest_build {
         my $value = $args{$key};
 
         if (grep { $key eq $_ } qw(distri version flavor machine arch build test)) {
-            push(@conds, {"me." . uc($key) => $value});
+            push(@conds, {'me.' . uc($key) => $value});
         }
         else {
 
-            my $subquery = $schema->resultset("JobSettings")->search(
+            my $subquery = $schema->resultset('JobSettings')->search(
                 {
                     key => uc($key),
                     value => $value
@@ -155,17 +155,7 @@ sub create_from_settings {
         for my $id (@$ids) {
             if ($dependency_type eq OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED) {
                 my $parent_worker_class = $job_settings->find({job_id => $id, key => 'WORKER_CLASS'});
-                if ($parent_worker_class = $parent_worker_class ? $parent_worker_class->value : '') {
-                    if (!$settings{WORKER_CLASS}) {
-                        # assume we want to use the worker class from the parent here (and not the default which
-                        # is otherwise assumed)
-                        $settings{WORKER_CLASS} = $parent_worker_class;
-                    }
-                    elsif ($settings{WORKER_CLASS} ne $parent_worker_class) {
-                        die "Specified WORKER_CLASS ($settings{WORKER_CLASS}) does not match the one from"
-                          . " directly chained parent $id ($parent_worker_class)";
-                    }
-                }
+                _handle_directly_chained_dep($parent_worker_class, $id, \%settings);
             }
             push(@{$new_job_args{parents}}, {parent_job_id => $id, dependency => $dependency_type});
         }
@@ -201,6 +191,20 @@ sub create_from_settings {
     $job->calculate_blocked_by;
     $txn_guard->commit;
     return $job;
+}
+
+sub _handle_directly_chained_dep ($parent_worker_class, $id, $settings) {
+    if ($parent_worker_class = $parent_worker_class ? $parent_worker_class->value : '') {
+        if (!$settings->{WORKER_CLASS}) {
+            # assume we want to use the worker class from the parent here (and not the default which
+            # is otherwise assumed)
+            $settings->{WORKER_CLASS} = $parent_worker_class;
+        }
+        elsif ($settings->{WORKER_CLASS} ne $parent_worker_class) {
+            die "Specified WORKER_CLASS ($settings->{WORKER_CLASS}) does not match the one from"
+              . " directly chained parent $id ($parent_worker_class)";
+        }
+    }
 }
 
 sub _search_modules ($self, $module_re) {
@@ -266,7 +270,7 @@ sub _prepare_complex_query_search_args ($self, $args) {
         push @conds, {'me.group_id' => $args->{groupid} || undef};
     }
     elsif ($args->{group}) {
-        my $subquery = $schema->resultset("JobGroups")->search({name => $args->{group}})->get_column('id')->as_query;
+        my $subquery = $schema->resultset('JobGroups')->search({name => $args->{group}})->get_column('id')->as_query;
         push @conds, {'me.group_id' => {-in => $subquery}};
     }
 
@@ -287,16 +291,20 @@ sub _prepare_complex_query_search_args ($self, $args) {
             $js_settings{$key} = $args->{lc $key} if defined $args->{lc $key};
         }
         if (keys %js_settings) {
-            my $subquery = $schema->resultset("JobSettings")->query_for_settings(\%js_settings);
+            my $subquery = $schema->resultset('JobSettings')->query_for_settings(\%js_settings);
             push(@conds, {'me.id' => {-in => $subquery->get_column('job_id')->as_query}});
         }
 
         for my $key (qw(distri version flavor arch test machine)) {
-            push(@conds, {"me." . uc($key) => $args->{$key}}) if $args->{$key};
+            push(@conds, {'me.' . uc($key) => $args->{$key}}) if $args->{$key};
         }
         if (my $build = $args->{build}) {
             push @conds, {'me.BUILD' => ref $build eq 'ARRAY' ? {-in => $build} : $build};
         }
+    }
+
+    if (defined(my $c = $args->{comment_text})) {
+        push @conds, \['(select id from comments where job_id = me.id and text like ? limit 1) is not null', "%$c%"];
     }
 
     push(@conds, @{$args->{additional_conds}}) if $args->{additional_conds};

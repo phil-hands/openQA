@@ -237,7 +237,7 @@ sub start {
     # delete settings we better not allow to be set on job-level (and instead should only be set within the
     # worker config)
     my $job_settings = $self->info->{settings} // {};
-    delete $job_settings->{GENERAL_HW_CMD_DIR};
+    delete $job_settings->{$_} for qw(GENERAL_HW_CMD_DIR GIT_CACHE_DIR);
     for my $key (keys %$job_settings) {
         delete $job_settings->{$key} if rindex($key, 'EXTERNAL_VIDEO_ENCODER', 0) == 0;
     }
@@ -402,8 +402,8 @@ sub _stop_step_4_upload ($self, $reason, $callback) {
     my $pooldir = $self->worker->pool_directory;
 
     # add notes
-    log_info("+++ worker notes +++", channels => 'autoinst');
-    log_info(sprintf("End time: %s", strftime("%F %T", gmtime)), channels => 'autoinst');
+    log_info('+++ worker notes +++', channels => 'autoinst');
+    log_info(sprintf('End time: %s', strftime('%F %T', gmtime)), channels => 'autoinst');
     log_info("Result: $reason", channels => 'autoinst');
 
     # upload logs and assets
@@ -966,7 +966,7 @@ sub post_upload_progress_to_liveviewhandler {
     my $job_id = $self->id;
     $self->client->send(
         post => "/liveviewhandler/api/v1/jobs/$job_id/upload_progress",
-        service_port_delta => 2,    # liveviewhandler is supposed to run on web UI port + 2
+        service_port_delta => $self->client->service_port_delta,
         json => \%new_progress_info,
         non_critical => 1,
         callback => sub {
@@ -1020,7 +1020,7 @@ sub _upload_asset {
         });
     $ua->upload->once(
         'upload_chunk.prepare' => sub ($upload, $pieces) {
-            log_info("$filename: " . $pieces->size() . " chunks", channels => \@channels_worker_only, default => 1);
+            log_info("$filename: " . $pieces->size() . ' chunks', channels => \@channels_worker_only, default => 1);
             log_info("$filename: chunks of $chunk_size bytes each", channels => \@channels_worker_only, default => 1);
         });
     my $t_start;

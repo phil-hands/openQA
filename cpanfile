@@ -79,6 +79,7 @@ requires 'Sort::Versions';
 requires 'Storable';
 requires 'Test::More';
 requires 'Text::Diff';
+requires 'Text::Glob';
 requires 'Time::HiRes';
 requires 'Time::Moment';
 requires 'Time::ParseDate';
@@ -114,8 +115,8 @@ on 'test' => sub {
 
 };
 
-on 'devel' => sub {
-    requires 'Perl::Tidy', '== 20230912.0.0';
+on 'develop' => sub {
+    requires 'Perl::Tidy', '== 20240202.0.0';
 
 };
 

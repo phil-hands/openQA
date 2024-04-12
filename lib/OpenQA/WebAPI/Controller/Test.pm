@@ -135,7 +135,8 @@ sub list_ajax ($self) {
         state => [OpenQA::Jobs::Constants::FINAL_STATES],
         scope => $scope,
         match => $self->get_match_param,
-        groupid => $self->param('groupid'),
+        comment_text => $self->param('comment'),
+        groupids => $self->_prepare_groupids,
         limit => min(
             $limits->{all_tests_max_finished_jobs},
             $self->param('limit') // $limits->{all_tests_default_finished_jobs}
@@ -214,6 +215,7 @@ sub list_running_ajax {
     my $running = $self->schema->resultset('Jobs')->complex_query(
         state => [OpenQA::Jobs::Constants::EXECUTION_STATES],
         match => $self->get_match_param,
+        comment_text => $self->param('comment'),
         groupid => $self->param('groupid'),
         order_by => [{-desc => 'me.t_started'}, {-desc => 'me.id'}],
         columns => [
@@ -261,6 +263,7 @@ sub list_scheduled_ajax {
     my $scheduled = $self->schema->resultset('Jobs')->complex_query(
         state => [OpenQA::Jobs::Constants::PRE_EXECUTION_STATES],
         match => $self->get_match_param,
+        comment_text => $self->param('comment'),
         groupid => $self->param('groupid'),
         order_by => [{-desc => 'me.t_created'}, {-desc => 'me.id'}],
         columns => [
@@ -345,7 +348,7 @@ sub details ($self) {
     my %tplargs = (moduleid => '$MODULE$', stepid => '$STEP$');
     my $snips = {
         header => $self->render_to_string('test/details'),
-        bug_actions => $self->include_branding("external_reporting", %tplargs),
+        bug_actions => $self->include_branding('external_reporting', %tplargs),
         src_url => $self->url_for('src_step', testid => $job->id, moduleid => '$MODULE$', stepid => 1),
         module_url => $self->url_for('step', testid => $job->id, %tplargs),
         md5thumb_url => $self->url_for('thumb_image', md5_dirname => '$DIRNAME$', md5_basename => '$BASENAME$'),
@@ -363,7 +366,7 @@ sub live ($self) {
     my $job = $self->_stash_job or return $self->reply->not_found;
     my $current_user = $self->current_user;
     my $worker = $job->worker;
-    my $worker_vnc = ($worker ? $worker->host . ':' . (5990 + $worker->instance) : undef);
+    my $worker_vnc = $worker ? $worker->vnc_argument : undef;
     $self->stash(
         {
             ws_developer_url => determine_web_ui_web_socket_url($job->id),
@@ -371,7 +374,7 @@ sub live ($self) {
             developer_session => $job->developer_session,
             is_devel_mode_accessible => $current_user && $current_user->is_operator,
             current_user_id => $current_user ? $current_user->id : 'undefined',
-            worker_vnc => $worker_vnc,
+            service_port_delta => $self->config->{global}->{service_port_delta},
         });
     $self->render('test/live');
 }
@@ -439,7 +442,7 @@ sub show_filesrc {
         return $self->redirect_to($casedir_url);
     }
     my $setting_file_path = path($testcasedir, $filepath);
-    return $self->reply->not_found unless $setting_file_path && -e $setting_file_path;
+    return $self->reply->not_found unless $setting_file_path && -f $setting_file_path;
     my $context = path($setting_file_path)->slurp;
     $self->render(
         'test/link_context',
@@ -478,7 +481,7 @@ sub infopanel {
 sub _get_current_job ($self, $with_assets = 0) {
     return $self->reply->not_found unless defined $self->param('testid');
 
-    my $job = $self->schema->resultset("Jobs")
+    my $job = $self->schema->resultset('Jobs')
       ->find($self->param('testid'), {$with_assets ? (prefetch => qw(jobs_assets)) : ()});
     return $job;
 }
@@ -621,6 +624,7 @@ sub _calculate_preferred_machines {
 sub _prepare_job_results ($self, $all_jobs, $limit) {
     my %archs;
     my %results;
+    my @job_ids;
     my $aggregated = {
         none => 0,
         passed => 0,
@@ -712,11 +716,23 @@ sub _prepare_job_results ($self, $all_jobs, $limit) {
         $results{$distri}{$version}{$flavor}{$test} //= {};
         $results{$distri}{$version}{$flavor}{$test}{$arch} = $result;
 
+        # populate job IDs for adding multiple comments
+        push @job_ids, $id;
+
         # add description
         my $description = $settings_by_job_id{$id}->{JOB_DESCRIPTION} // $descriptions{$test_suite_names{$id}};
         $results{$distri}{$version}{$flavor}{$test}{description} //= $description;
     }
-    return ($limit_exceeded, \%archs, \%results, $aggregated);
+    return ($limit_exceeded, \%archs, \%results, \@job_ids, $aggregated);
+}
+
+sub _prepare_groupids ($self) {
+    return [0] unless my $groups = $self->groups_for_globs;
+    return [map { $_->id } @$groups] if @$groups;
+
+    my $v = $self->validation;
+    $v->optional('groupid')->num(0, undef);
+    return $v->is_valid('groupid') ? $self->every_param('groupid') : undef;
 }
 
 # avoid running a SELECT for each job
@@ -793,7 +809,7 @@ sub overview {
     my @jobs = $self->schema->resultset('Jobs')->complex_query(%$search_args)->latest_jobs($until);
 
     my $limit = $config->{misc_limits}->{tests_overview_max_jobs};
-    (my $limit_exceeded, $stash{archs}, $stash{results}, $stash{aggregated})
+    (my $limit_exceeded, $stash{archs}, $stash{results}, $stash{job_ids}, $stash{aggregated})
       = $self->_prepare_job_results(\@jobs, $limit);
 
     # determine distri/version from job results if not explicitly specified via search args
@@ -843,7 +859,7 @@ sub _get_latest_job ($self) {
         next unless defined $self->param($key);
         $search_args{$key} = $self->param($key);
     }
-    return $self->schema->resultset("Jobs")->complex_query(%search_args)->first;
+    return $self->schema->resultset('Jobs')->complex_query(%search_args)->first;
 }
 
 sub latest ($self) {
@@ -859,7 +875,7 @@ sub module_fails {
     my ($self) = @_;
 
     return $self->reply->not_found unless defined $self->param('testid') and defined $self->param('moduleid');
-    my $module = $self->app->schema->resultset("JobModules")->search(
+    my $module = $self->app->schema->resultset('JobModules')->search(
         {
             job_id => $self->param('testid'),
             name => $self->param('moduleid'),
@@ -872,7 +888,7 @@ sub module_fails {
     my $first_failed_step = 0;
     for my $detail (@{$module->results->{details}}) {
         $counter++;
-        next unless $detail->{result} eq 'fail';
+        next unless ($detail->{result} // '') eq 'fail';
         $first_failed_step = $counter if $first_failed_step == 0;
         push @needles, $_->{name} for @{$detail->{needles}};
     }
@@ -945,7 +961,6 @@ sub _add_job ($dependency_data, $job, $as_child_of, $preferred_depth) {
     my $job_id = $job->id;
     my $visited = $dependency_data->{visited};
     return $job_id if $visited->{$job_id};
-    $visited->{$job_id} = 1;
 
     # show only the latest child jobs but still require the cloned job to be an actual child
     if ($as_child_of) {
@@ -971,6 +986,7 @@ sub _add_job ($dependency_data, $job, $as_child_of, $preferred_depth) {
         blocked_by_id => $job->blocked_by_id,
     );
     $node{$_} = [] for OpenQA::JobDependencies::Constants::names;
+    $visited->{$job_id} = 1;
     push(@{$dependency_data->{nodes}}, \%node);
 
     # add parents

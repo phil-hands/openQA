@@ -255,7 +255,8 @@ sub _schedule_iso {
     for my $asset (values %{parse_assets_from_settings($args)}) {
         my ($name, $type) = ($asset->{name}, $asset->{type});
         return {error => 'Asset type and name must not be empty.'} unless $name && $type;
-        return {error => "Failed to register asset $name."} unless $assets->register($type, $name, {missing_ok => 1});
+        return {error => "Failed to register asset $name."}
+          unless $assets->register($type, $name, {missing_ok => 1, refresh_size => 1});
     }
 
     # read arguments for deprioritization and obsoleten
@@ -269,7 +270,7 @@ sub _schedule_iso {
     $force = delete $args->{_FORCE_OBSOLETE} || $force;
     if (($deprioritize || $obsolete) && $args->{TEST} && !$force) {
         return {error => 'One must not specify TEST and _DEPRIORITIZEBUILD=1/_OBSOLETE=1 at the same time as it is'
-              . 'likely not intended to deprioritize the whole build when scheduling a single scenario.'
+              . ' likely not intended to deprioritize the whole build when scheduling a single scenario.'
         };
     }
 
@@ -673,7 +674,7 @@ sub _check_for_cycle {
     my ($child, $parent, $jobs) = @_;
     $jobs->{$parent} = $child;
     return unless $jobs->{$child};
-    die "CYCLE" if $jobs->{$child} == $parent;
+    die 'CYCLE' if $jobs->{$child} == $parent;
     # go deeper into the graph
     _check_for_cycle($jobs->{$child}, $parent, $jobs);
 }
