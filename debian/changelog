@@ -1,3 +1,9 @@
+openqa (4.6.1712926289.b0d689b52-1) UNRELEASED; urgency=medium
+
+  * Update to new upstream version 4.6.1712926289.b0d689b52.
+
+ -- Philip Hands <phil@hands.com>  Fri, 12 Apr 2024 22:22:16 +0200
+
 openqa (4.6.1700240294.34068e38e-2) unstable; urgency=medium
 
   * Build-Depends on systemd-dev (closes: 1060501)
