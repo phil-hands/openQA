@@ -123,7 +123,7 @@ Build-Depends: debhelper-compat (= 13),
                libjs-popper.js (>= 1.16.1),
                node-jquery-ujs,
                libcode-tidyall-perl,
-Standards-Version: 4.6.2
+Standards-Version: 4.7.0
 Rules-Requires-Root: no
 Homepage: https://open.qa
 Vcs-Git: https://salsa.debian.org/debian/openqa.git
