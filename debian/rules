@@ -11,44 +11,36 @@ override_dh_auto_build:
 	rm assets/stylesheets/shepherd.scss t/ui/24-feature-tour.t
 	# create links to locally installed assets
 	# and convince assetpack to use local copies of remote assets:
-	mkdir -p assets/_debian
-	ln -s /usr/share/fonts-fork-awesome assets/_debian
-	ln -s /usr/share/fonts-roboto-fontface assets/_debian
-	sed -i -e 's%https://cdn\.jsdelivr\.net/npm/fork-awesome@1\.2\.0/css/fork-awesome\.min\.css%_debian/fonts-fork-awesome/css/fork-awesome.css%' assets/assetpack.def
+	mkdir -p node_modules
+	ln -s /usr/share/fonts-fork-awesome node_modules/fork-awesome
+	ln -s /usr/share/fonts-roboto-fontface node_modules
+	# FIXME: should probably locally minify this:
+	sed -i -e 's%/fork-awesome\.min\.css%/fork-awesome.css%' assets/assetpack.def
 	for ext in eot svg ttf woff woff2 ; do \
-		printf '\n! forkawesome-webfont.%s\n< _debian/fonts-fork-awesome/fonts/forkawesome-webfont.%s\n' $$ext $$ext >> assets/assetpack.def ; \
+		printf '\n! forkawesome-webfont.%s\n< ../node_modules/fork-awesome/fonts/forkawesome-webfont.%s\n' $$ext $$ext >> assets/assetpack.def ; \
 	done
-	ln -s -s /usr/share/javascript/chosen assets/_debian/libjs-chosen
-	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/chosen/1\.7\.0/%_debian/libjs-chosen/%' assets/assetpack.def
-	mkdir -p assets/_debian/datatables
-	cp --dereference -v -s /usr/share/javascript/jquery-datatables/css/dataTables.bootstrap4.css \
-		/usr/share/javascript/jquery-datatables/jquery.dataTables.js \
-		/usr/share/javascript/jquery-datatables/dataTables.bootstrap4.js assets/_debian/datatables
-	sed -i -e 's%https://cdn\.datatables\.net/1\.10\.16/\(css\|js\)/%_debian/datatables/%' assets/assetpack.def
-	mkdir -p assets/_debian/libjs-bootstrap4
-	ln -s /usr/share/sass/bootstrap assets/_debian/libjs-bootstrap4/sass
-	ln -s /usr/share/javascript/bootstrap4/js assets/_debian/libjs-bootstrap4/js
-	sed -i -e 's%https://raw\.githubusercontent\.com/twbs/bootstrap/v4\.6\.1/scss/\(.*\)%_debian/libjs-bootstrap4/sass/\1%' \
-	       -e 's%https://cdn\.jsdelivr\.net/npm/bootstrap@4\.6\.1/dist/js/bootstrap\.js%_debian/libjs-bootstrap4/js/bootstrap.js%' assets/assetpack.def
-	sed -i -e 's%cache/raw\.githubusercontent\.com/twbs/bootstrap/v4\.6\.1/scss%_debian/libjs-bootstrap4/sass%' assets/stylesheets/openqa.scss
-	ln -s /usr/share/javascript/codemirror assets/_debian/libjs-codemirror
-	sed -i -e 's%https://raw\.githubusercontent\.com/codemirror/CodeMirror/8097c7e75ce7ef0512debe9967d7568626106e53/\(lib\|mode\)\(.*\)%_debian/libjs-codemirror/\1\2%' assets/assetpack.def
-	ln -s /usr/share/javascript/jquery assets/_debian/libjs-jquery
-	sed -i -e 's%https://code\.jquery\.com/jquery-3\.6\.0\.js%_debian/libjs-jquery/jquery.js%' assets/assetpack.def
-	cp -v -r debian/missing-sources/bootstrap-4-multi-dropdown-navbar_957865f9 assets/_debian/bootstrap-4-multi-dropdown-navbar_957865f9
-	sed -i -e 's%https://raw\.githubusercontent\.com/bootstrapthemesco/bootstrap-4-multi-dropdown-navbar/beta2\.0/\(css\|js\)/%_debian/bootstrap-4-multi-dropdown-navbar_957865f9/%' assets/assetpack.def
-	ln -s /usr/share/javascript/jquery-timeago assets/_debian/libjs-jquery-timeago
-	sed -i -e 's%http://timeago\.yarp\.com/jquery\.timeago\.js%_debian/libjs-jquery-timeago/jquery.timeago.js%' assets/assetpack.def
-	ln -s /usr/share/nodejs/popper.js/dist assets/_debian/libjs-popper.js
-	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/popper\.js/1\.16\.1/umd/popper\.js%_debian/libjs-popper.js/umd/popper.js%' assets/assetpack.def
-	ln -s /usr/share/nodejs/jquery-ujs/src assets/_debian/node-jquery-ujs
-	sed -i -e 's%https://cdnjs\.cloudflare\.com/ajax/libs/jquery-ujs/1\.2\.1/rails\.js%_debian/node-jquery-ujs/rails.js%' assets/assetpack.def
-	cp -v -r debian/missing-sources/d3js_4.13.0 assets/_debian/d3js_4.13.0
-	sed -i -e 's%https://d3js\.org/d3\.v4\.js%_debian/d3js_4.13.0/d3.v4.js%' assets/assetpack.def
-	tar -xvz --transform='s%.*dist%assets/_debian/dagre-d3_0.5.0%' -f debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz dagre-d3-0.5.0/dist/dagre-d3.js
-	sed -i -e 's%https://raw\.githubusercontent\.com/dagrejs/dagre-d3/v0\.5\.0/dist/dagre-d3\.js%_debian/dagre-d3_0.5.0/dagre-d3.js%' assets/assetpack.def
-	cp -v -r debian/missing-sources/anser_2.0.1 assets/_debian/anser_2.0.1
-	sed -i -e 's%https://raw\.githubusercontent\.com/IonicaBizau/\(anser\)/\(2\.0\.1\)/lib/\(index\.js\)%_debian/\1_\2/\3%' assets/assetpack.def
+	ln -s -s /usr/share/javascript/chosen node_modules/chosen-js
+	mkdir -p node_modules/datatables.net-bs4
+	ln -s /usr/share/javascript/jquery-datatables node_modules/datatables.net-bs4/js
+	ln -s js/css node_modules/datatables.net-bs4/css
+	mkdir -p node_modules/datatables
+	ln -s ../datatables.net-bs4 node_modules/datatables/media
+	ln -s /usr/share/nodejs/bootstrap node_modules/bootstrap
+	ln -s /usr/share/nodejs/jquery-ujs node_modules/jquery-ujs
+	mkdir -p node_modules/d3
+	ln -s /usr/share/javascript/d3 node_modules/d3/dist
+	mkdir -p node_modules/jquery/dist
+	ln -s /usr/share/javascript/jquery/jquery.min.js node_modules/jquery/dist
+	# ln -s /usr/share/nodejs/jquery/dist node_modules/jquery/dist
+	ln -s /usr/share/nodejs/codemirror node_modules/codemirror
+	ln -s /usr/share/javascript/jquery-timeago node_modules/timeago
+	cp -v -r debian/missing-sources/bootstrap-4-multi-dropdown-navbar_957865f9 node_modules/bootstrap-4-multi-dropdown-navbar_957865f9
+	ln -s /usr/share/nodejs/popper.js/dist node_modules/libjs-popper.js
+	ln -s /usr/share/nodejs/jquery-ujs/src node_modules/node-jquery-ujs
+	cp -v -r debian/missing-sources/d3js_4.13.0 node_modules/d3js_4.13.0
+	tar -xvz --transform='s%.*dist%node_modules/dagre-d3/dist%' -f debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz dagre-d3-0.5.0/dist/dagre-d3.js
+	mkdir -p node_modules/anser/lib
+	cp debian/missing-sources/anser_2.0.1/index.js node_modules/anser/lib
 	ln -sf /usr/share/javascript/cropper/cropper.css assets/stylesheets/cropper.css
 	# ensure that there are no remote references left
 	! grep http assets/assetpack.def
@@ -87,7 +79,7 @@ override_dh_auto_test:
 		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
 
 execute_before_dh_auto_clean:
-	-rm -rf assets/_debian/
+	rm -fr node_modules/
 	rm -fr t/data/openqa/testresults/ .sass-cache/ assets/cache
 	rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
 	rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml

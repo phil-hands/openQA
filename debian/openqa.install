@@ -40,6 +40,7 @@ usr/share/openqa/templates
 usr/share/openqa/public
 usr/share/openqa/assets
 usr/share/openqa/dbicdh
+usr/share/openqa/node_modules
 usr/share/openqa/script/configure-web-proxy
 usr/share/openqa/script/create_admin
 usr/share/openqa/script/initdb
