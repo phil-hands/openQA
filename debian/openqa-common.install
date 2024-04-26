@@ -1,3 +1,4 @@
+usr/share/openqa/lib/Mojolicious/Plugin/AssetPack/Pipe/FetchForNode.pm
 usr/share/openqa/lib/OpenQA.pm
 usr/share/openqa/lib/OpenQA/App.pm
 usr/share/openqa/lib/OpenQA/BuildResults.pm
