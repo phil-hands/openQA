@@ -111,6 +111,7 @@ Build-Depends: debhelper-compat (= 13),
                yamllint <!nocheck>,
                libfilesys-df-perl <!nocheck>,
                libfile-map-perl <!nocheck>,
+               libtext-glob-perl <!nocheck>,
 #              for avoiding assetpack downloads
                fonts-fork-awesome,
                fonts-roboto,
