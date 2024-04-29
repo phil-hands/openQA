@@ -8,7 +8,7 @@ include /usr/share/dpkg/pkg-info.mk
 
 override_dh_auto_build:
 	# forget shepherd until it is packaged:
-	rm assets/stylesheets/shepherd.scss t/ui/24-feature-tour.t
+	-rm assets/stylesheets/shepherd.scss t/ui/24-feature-tour.t
 	# create links to locally installed assets
 	# and convince assetpack to use local copies of remote assets:
 	mkdir -p node_modules
@@ -66,12 +66,12 @@ override_dh_auto_test:
 	# revert the change that introduced this comment if those tests start failing again.
 
 	# FIXME: upstream depends upon a version of perltidy that's not yet in Debian
-	rm -f ./t/00-tidy.t
+	-rm ./t/00-tidy.t
 	# On debian we can't run test connecting to internet
-	rm -f ./t/40-script_openqa-clone-custom-git-refspec.t \
+	-rm ./t/40-script_openqa-clone-custom-git-refspec.t \
 		./t/40-openqa-clone-job.t
 	# Not enough permission for unshare use
-	rm -f ./t/32-openqa_client-script.t
+	-rm ./t/32-openqa_client-script.t
 
 	-export CI=1; export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
 		PATH=$$PATH:$$(ls -d /usr/lib/postgresql/*/bin) FULLSTACK=1 \
@@ -79,11 +79,22 @@ override_dh_auto_test:
 		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
 
 execute_before_dh_auto_clean:
-	rm -fr node_modules/
-	rm -fr t/data/openqa/testresults/ .sass-cache/ assets/cache
-	rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
-	rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
-	rm -fr $(CURDIR)/debian/DB
+	-rm -r node_modules/
+	-rm -r t/pool*
+	-rm -r t/data/openqa/share/factory/other
+	-rm -r t/data/openqa/share/factory/foo
+	-rm -r t/data/openqa/pool
+	-rm test_vars.json
+	-rm -r .tidyall.d/
+	-rm -r .tidyall
+	-rm t/data/openqa/share/factory/hdd/hdd_image.qcow2
+	-rm t/data/openqa/share/factory/hdd/00099963-hdd_image.qcow2
+	-rm t/data/openqa/share/factory/foo/some-repo
+	-rm assets/stylesheets/cropper.css
+	-rm -r t/data/openqa/testresults/ .sass-cache/ assets/cache
+	-rm assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
+	-rm t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
+	-rm -r $(CURDIR)/debian/DB
 
 pod2man_opts := --errors=stderr --section=1 --center "openQA Documentation" --release 'openQA $(DEB_VERSION_UPSTREAM)'
 execute_before_dh_installman:
