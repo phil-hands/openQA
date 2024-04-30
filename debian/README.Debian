@@ -1,0 +1,15 @@
+geekotest group (since 4.6.1712926289.b0d689b52-1)
+---------------
+
+If you want a user to be able to create new jobs on the local system (e.g. by
+running `openqa-clone-job`) then they will generally need to be able to write to
+the `iso` and `hdd` image directories under `/var/lib/openqa/share/factory/`.
+
+In order to enable that, those directories now default to being owned by the
+`geekotest` group, and having the group S-bit set. This means that a user can be
+given the required permissions by adding them to the `geekotest` group.
+
+The package tries to avoid touching local changes, so if you had already made
+your own arangements the upgrade should leave your settings as they are.
+
+ -- Philip Hands <phil@hands.com>, Thu,  2 May 2024 11:19:34 +0200

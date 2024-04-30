@@ -4,10 +4,13 @@ set -e
 
 case "$1" in
 install|upgrade)
-
 getent passwd geekotest >/dev/null || \
- useradd -r -g nogroup -c "openQA user" -d /var/lib/openqa geekotest
-
+    useradd -r -c "openQA user" -d /var/lib/openqa geekotest
+getent group geekotest >/dev/null || \
+    addgroup geekotest
+if [ "$(getent passwd geekotest | cut -d: -f4)" = "$(getent group nogroup | cut -d: -f3)" ]; then
+    usermod -g geekotest geekotest
+fi
 ;;
 esac
 
