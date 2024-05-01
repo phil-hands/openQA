@@ -14,11 +14,6 @@ override_dh_auto_build:
 	mkdir -p node_modules
 	ln -s /usr/share/fonts-fork-awesome node_modules/fork-awesome
 	ln -s /usr/share/fonts-roboto-fontface node_modules
-	# FIXME: should probably locally minify this:
-	sed -i -e 's%/fork-awesome\.min\.css%/fork-awesome.css%' assets/assetpack.def
-	for ext in eot svg ttf woff woff2 ; do \
-		printf '\n! forkawesome-webfont.%s\n< ../node_modules/fork-awesome/fonts/forkawesome-webfont.%s\n' $$ext $$ext >> assets/assetpack.def ; \
-	done
 	ln -s -s /usr/share/javascript/chosen node_modules/chosen-js
 	mkdir -p node_modules/datatables.net-bs4
 	ln -s /usr/share/javascript/jquery-datatables node_modules/datatables.net-bs4/js
