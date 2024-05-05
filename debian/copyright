@@ -21,7 +21,7 @@ License: GPL-3+
 
 Files: debian/*
 Copyright: 2016 Hideki Yamane <henrich@debian.org>
-           2017-2021 Philip Hands <phil@hands.com>
+           2017-2024 Philip Hands <phil@hands.com>
 License: GPL-2+
 
 Files: debian/missing-sources/d3js_4.13.0/*
