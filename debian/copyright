@@ -24,6 +24,10 @@ Copyright: 2016 Hideki Yamane <henrich@debian.org>
            2017-2024 Philip Hands <phil@hands.com>
 License: GPL-2+
 
+Files: assets/3rdparty/bootstrap-4-multi-dropdown-navbar/*
+Copyright: 2017-2020 https://github.com/Ataurr
+License: GPL-3+
+
 Files: debian/missing-sources/d3js_4.13.0/*
 Copyright: 2010-2018 Mike Bostock
 License: BSD-3-Clause

@@ -29,7 +29,6 @@ override_dh_auto_build:
 	# ln -s /usr/share/nodejs/jquery/dist node_modules/jquery/dist
 	ln -s /usr/share/nodejs/codemirror node_modules/codemirror
 	ln -s /usr/share/javascript/jquery-timeago node_modules/timeago
-	cp -v -r debian/missing-sources/bootstrap-4-multi-dropdown-navbar_957865f9 node_modules/bootstrap-4-multi-dropdown-navbar_957865f9
 	ln -s /usr/share/nodejs/popper.js/dist node_modules/libjs-popper.js
 	ln -s /usr/share/nodejs/jquery-ujs/src node_modules/node-jquery-ujs
 	cp -v -r debian/missing-sources/d3js_4.13.0 node_modules/d3js_4.13.0
