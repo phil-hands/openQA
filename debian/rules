@@ -9,37 +9,17 @@ include /usr/share/dpkg/pkg-info.mk
 override_dh_auto_build:
 	# forget shepherd until it is packaged:
 	-rm assets/stylesheets/shepherd.scss t/ui/24-feature-tour.t
-	# create links to locally installed assets
-	# and convince assetpack to use local copies of remote assets:
-	mkdir -p node_modules
-	ln -s /usr/share/fonts-fork-awesome node_modules/fork-awesome
-	ln -s /usr/share/fonts-roboto-fontface node_modules
-	ln -s -s /usr/share/javascript/chosen node_modules/chosen-js
-	mkdir -p node_modules/datatables.net-bs4
-	ln -s /usr/share/javascript/jquery-datatables node_modules/datatables.net-bs4/js
-	ln -s js/css node_modules/datatables.net-bs4/css
-	mkdir -p node_modules/datatables
-	ln -s ../datatables.net-bs4 node_modules/datatables/media
-	ln -s /usr/share/nodejs/bootstrap node_modules/bootstrap
-	ln -s /usr/share/nodejs/jquery-ujs node_modules/jquery-ujs
-	mkdir -p node_modules/d3
-	ln -s /usr/share/javascript/d3 node_modules/d3/dist
-	mkdir -p node_modules/jquery/dist
-	ln -s /usr/share/javascript/jquery/jquery.min.js node_modules/jquery/dist
-	# ln -s /usr/share/nodejs/jquery/dist node_modules/jquery/dist
-	ln -s /usr/share/nodejs/codemirror node_modules/codemirror
-	ln -s /usr/share/javascript/jquery-timeago node_modules/timeago
-	ln -s /usr/share/nodejs/popper.js/dist node_modules/libjs-popper.js
-	ln -s /usr/share/nodejs/jquery-ujs/src node_modules/node-jquery-ujs
-	cp -v -r debian/missing-sources/d3js_4.13.0 node_modules/d3js_4.13.0
-	tar -xvz --transform='s%.*dist%node_modules/dagre-d3/dist%' -f debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz dagre-d3-0.5.0/dist/dagre-d3.js
-	mkdir -p node_modules/anser/lib
+	# install files from debian/missing-sources
+	mkdir -p node_modules/anser/lib node_modules/d3js_4.13.0
+	cp debian/missing-sources/d3js_4.13.0/d3.v4.js node_modules/d3js_4.13.0
+	tar -xvzf debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz -C node_modules dagre-d3-0.5.0/dist/dagre-d3.js
 	cp debian/missing-sources/anser_2.0.1/index.js node_modules/anser/lib
-	ln -sf /usr/share/javascript/cropper/cropper.css assets/stylesheets/cropper.css
 	# ensure that there are no remote references left
 	! grep http assets/assetpack.def
 
 override_dh_auto_install:
+	mkdir -p node_modules
+	ln -s /usr/share node_modules/_usr_share
 	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 execute_after_dh_install:

@@ -40,7 +40,9 @@ usr/share/openqa/templates
 usr/share/openqa/public
 usr/share/openqa/assets
 usr/share/openqa/dbicdh
-usr/share/openqa/node_modules
+usr/share/openqa/node_modules/anser/lib/index.js
+usr/share/openqa/node_modules/d3js_4.13.0/
+usr/share/openqa/node_modules/dagre-d3-0.5.0/
 usr/share/openqa/script/configure-web-proxy
 usr/share/openqa/script/create_admin
 usr/share/openqa/script/initdb
