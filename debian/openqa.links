@@ -1,4 +1,3 @@
 etc/openqa /usr/share/openqa/etc/openqa
 
-usr/share/javascript/cropper/cropper.css   usr/share/openqa/assets/stylesheets/cropper.css
 usr/share                                  usr/share/openqa/node_modules/_usr_share
