@@ -35,6 +35,7 @@
   /etc/gitconfig r,
   /etc/libnl/classid r,
   /etc/machine-id r,
+  /etc/mailname r,
   /etc/openqa/client.conf r,
   /etc/openqa/client.conf.d/ r,
   /etc/openqa/client.conf.d/** r,
