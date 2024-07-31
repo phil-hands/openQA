@@ -16,7 +16,6 @@ Build-Depends: debhelper-compat (= 13),
 ### Bug#839569
 #              libselenium-remote-driver-perl (>= 1.0),
 ### for test&runtime
-#               libaliased-perl,
                libarchive-extract-perl,
                libbsd-resource-perl,
 #               libcache-cache-perl,
@@ -112,6 +111,7 @@ Build-Depends: debhelper-compat (= 13),
                libfilesys-df-perl <!nocheck>,
                libfile-map-perl <!nocheck>,
                libtext-glob-perl <!nocheck>,
+               libaliased-perl <!nocheck>,
 #              for avoiding assetpack downloads
                fonts-fork-awesome,
                fonts-roboto-fontface,
