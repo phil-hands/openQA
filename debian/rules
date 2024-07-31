@@ -47,7 +47,9 @@ override_dh_auto_test:
 	# Not enough permission for unshare use
 	-rm ./t/32-openqa_client-script.t
 
-	-export CI=1; export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
+	-export CI=1; \
+		export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
+		export CONTAINER_TEST=0 ; \
 		PATH=$$PATH:$$(ls -d /usr/lib/postgresql/*/bin) FULLSTACK=1 \
 		dh_auto_test -- \
 		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
