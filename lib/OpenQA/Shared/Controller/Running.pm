@@ -1,7 +1,7 @@
 # Copyright 2014-2021 SUSE LLC
 # SPDX-License-Identifier: GPL-2.0-or-later
 
-package OpenQA::WebAPI::Controller::Running;
+package OpenQA::Shared::Controller::Running;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use Mojo::Util 'b64_encode';
@@ -13,7 +13,6 @@ use OpenQA::Utils;
 use OpenQA::WebSockets::Client;
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
-use Try::Tiny;
 
 use constant IMAGE_STREAMING_INTERVAL => $ENV{OPENQA_IMAGE_STREAMING_INTERVAL} // 0.3;
 use constant TEXT_STREAMING_INTERVAL => $ENV{OPENQA_TEXT_STREAMING_INTERVAL} // 1.0;
@@ -112,14 +111,14 @@ sub streamtext ($self, $file_name, $start_hook = undef, $close_hook = undef) {
     # Check for new lines from the logfile using recurring timer
     # Setup utility function to close the connection if something goes wrong
     my $timer_id;
-    my $close_connection = sub {
+    my $close_connection = sub ($self) {
         Mojo::IOLoop->remove($timer_id);
         $close_hook->();
         $self->finish;
         close $log;
     };
     $timer_id = Mojo::IOLoop->recurring(
-        TEXT_STREAMING_INTERVAL() => sub {
+        TEXT_STREAMING_INTERVAL() => sub (@) {
             if (!$ino) {
                 # log file was not yet opened
                 return unless open($log, '<', $logfile);
@@ -147,7 +146,7 @@ sub streamtext ($self, $file_name, $start_hook = undef, $close_hook = undef) {
 
     # Stop monitoring the logfile when the connection closes
     $self->on(
-        finish => sub {
+        finish => sub (@) {
             Mojo::IOLoop->remove($timer_id);
             $close_hook->($worker, $job);
         });
@@ -158,10 +157,21 @@ sub livelog ($self) {
     $self->streamtext('autoinst-log-live.txt');
 }
 
-sub liveterminal {
-    my ($self) = @_;
+sub liveterminal ($self) {
     return 0 unless $self->init();
     $self->streamtext('serial-terminal-live.txt');
+}
+
+sub _send_livestream_command_to_worker ($client, $command, $verb, $worker_id, $job_id, $cb = undef) {
+    log_debug "Asking worker $worker_id to $verb providing livestream for job $job_id";
+    my $txn_cb = sub ($ua, $tx) {
+        return $cb ? $cb->(undef) : 1 unless my $err = $tx->error;
+        my $msg = $err->{code} ? "$err->{code} response: $err->{message}" : $err->{message};
+        $msg = "Unable to ask worker $worker_id to $verb providing livestream for $job_id: $msg";
+        log_error $msg;
+        $cb->($msg) if $cb;
+    };
+    $client->send_msg($worker_id, $command, $job_id, undef, $txn_cb);
 }
 
 sub streaming ($self) {
@@ -178,8 +188,16 @@ sub streaming ($self) {
     $self->render_later;
     Mojo::IOLoop->stream($self->tx->connection)->timeout(900);
     my $res = $self->res;
+    my $headers = $res->headers;
     $res->code(200);
-    $res->headers->content_type('text/event-stream');
+    $headers->content_type('text/event-stream');
+
+    # set CORS headers required when not using a reverse proxy (so the port differs)
+    if ($self->is_local_request) {
+        my $req_origin = $self->req->url->base->clone->port(undef);
+        $headers->append(Vary => 'Origin');
+        $headers->access_control_allow_origin("$req_origin:" . service_port('webui'));
+    }
 
     # setup a function to stop streaming again
     my $timer_id;
@@ -238,23 +256,11 @@ sub streaming ($self) {
             return undef unless defined $worker->job_id && $worker->job_id == $job_id;
 
             # ask worker to stop live stream
-            log_debug("Asking worker $worker_id to stop providing livestream for job $job_id");
-            try {
-                $client->send_msg($worker_id, WORKER_COMMAND_LIVELOG_STOP, $job_id);
-            }
-            catch {
-                log_error("Unable to ask worker $worker_id to stop providing livestream for $job_id: $_");
-            };
+            _send_livestream_command_to_worker($client, WORKER_COMMAND_LIVELOG_STOP, 'stop', $worker_id, $job_id);
         },
     );
-    try {
-        $client->send_msg($worker_id, WORKER_COMMAND_LIVELOG_START, $job_id);
-    }
-    catch {
-        my $error = "Unable to ask worker $worker_id to start providing livestream for $job_id: $_";
-        $self->write("data: $error\n\n", $close_connection);
-        log_error($error);
-    };
+    my $cb = sub ($error) { $self->write("data: $error\n\n", $close_connection) if defined $error };
+    _send_livestream_command_to_worker($client, WORKER_COMMAND_LIVELOG_START, 'start', $worker_id, $job_id, $cb);
 }
 
 1;

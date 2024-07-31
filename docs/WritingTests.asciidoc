@@ -473,6 +473,37 @@ sub run () {
 }
 --------------------------------------------------------------
 
+=== Logging package versions used for test
+
+There are two sets of packages that can be included in test logs:
+1. Packages installed on the worker itself - stored as `worker_packages.txt`.
+2. Packages installed on SUT - stored as `sut_packages.txt`.
+
+For both sets, if present, openQA will include the difference to the last good
+job in the "Investigation" tab of a failed job.
+
+To enable logging of worker package versions, set `PACKAGES_CMD` in
+`workers.ini`.  The command should print installed packages with their version
+to stdout. For RPM-based systems it can be for example `rpm -qa`.
+
+To enable logging of SUT package versions, make the test create the file
+`sut_packages.txt` in the current worker directory. If `upload_logs()` is used,
+the resulting file needs to be copied/moved.
+
+[caption="Example: "]
+.Logging SUT package versions
+[source,perl]
+--------------------------------------------------------------
+use Mojo::File qw(path);
+sub run {
+    ...
+    assert_script_run("rpm -qa > sut_packages.txt");
+    my $fname = upload_logs("sut_packages.txt");
+    path("ulogs/$fname")->move_to("sut_packages.txt");
+    ...
+}
+--------------------------------------------------------------
+
 === Assigning jobs to workers
 
 By default, any worker can get any job with the matching architecture.
@@ -641,8 +672,8 @@ eventually workers can be held back for the cluster.
 It is possible to ensure that all jobs within the same _parallel_ cluster are
 executed on the same worker host. This is useful for connecting the SUTs without
 having to connect the physical worker hosts. Use `PARALLEL_ONE_HOST_ONLY=1` to
-enable this. Note that adding this setting in `workers.ini` has currently *no*
-effect.
+enable this. This setting can be applied as a test variable during the time
+of scheduling as well as in the worker configuration file `workers.ini`.
 
 WARNING: You need to provide enough worker slots on single worker hosts to fit
 an entire cluster. So this feature is mainly intended to workaround situations
@@ -1941,24 +1972,24 @@ supplied as new, unambiguous download target file names.
 
 === Triggering tests based on an any remote Git refspec or open GitHub pull request
 
-openQA also supports to trigger tests using test code from an open pull
-request on GitHub or any branch or Git refspec. That means that code changes
-that are not yet available on a production instance of openQA can be tested
-safely to ensure the code changes work as expected before merging the code
-into a production repository and branch. This works by setting the
-`CASEDIR` parameter of os-autoinst to a valid Git repository path including
-an optional branch/refspec specifier. It is also possible to set `NEEDLES_DIR`
-to a valid Git repository path to use custom needles.
-See
-https://github.com/os-autoinst/os-autoinst/blob/master/doc/backend_vars.asciidoc
+openQA also supports to trigger tests using test code from a pull request or
+any branch or Git refspec. That means that code changes that are not yet
+available on a production instance of openQA can be tested safely to ensure the
+code changes work as expected before merging the code into a production
+repository and branch. This works by setting the `CASEDIR` parameter of
+os-autoinst to a valid Git repository path including an optional branch/refspec
+specifier. `NEEDLES_DIR` can be set in the same way to use custom needles. See
+https://github.com/os-autoinst/os-autoinst/blob/master/doc/backend_vars.asciidoc[the os-autoinst documentation]
 for details.
 
 [NOTE]
 ====
-The openQA worker normally default-initializes `CASEDIR` and `NEEDLES_DIR` to
-point to default repositories provided by the openQA instance. This behavior
-interacts with specifying a custom `CASEDIR` or `NEEDLES_DIR` in the following
-way:
+The openQA worker initializes `CASEDIR` and `NEEDLES_DIR` to point to
+repositories provided by the openQA instance (usually under
+`/var/lib/openqa/share/tests`).
+
+When the variables `CASEDIR` and `NEEDLES_DIR` are set, the behavior is as
+follows:
 
 * If `CASEDIR` or `NEEDLES_DIR` is customized the customized location is used
   instead of the default repository.
@@ -1991,9 +2022,10 @@ For example:
 openqa-clone-custom-git-refspec https://github.com/os-autoinst/os-autoinst-distri-opensuse/pull/6649 https://openqa.opensuse.org/tests/839191
 ----
 
-Note that customizing `CASEDIR` does *not* mean needles will be loaded from
-there, even if the repository specified as `CASEDIR` contains needles. To load
-needles from that repository, it needs to be specified as `NEEDLES_DIR` as well.
+As noted above, customizing `CASEDIR` does *not* mean needles will be loaded
+from there, even if the repository specified as `CASEDIR` contains needles. To
+load needles from that repository, it needs to be specified as `NEEDLES_DIR` as
+described in the note above.
 
 Keep in mind that if `PRODUCTDIR` is overwritten as well, it might not relate to
 the state of the specified git refspec that is passed via the command line
@@ -2026,8 +2058,9 @@ feature is explained in further detail in the corresponding
 <<UsersGuide.asciidoc#scenarios_yaml,users guide section>>.
 
 It is also possible to create a GitHub workflow that will clone and monitor an
-openQA job which is mentioned in the PR description. The scripts repository
-contains a pre-defined GitHub action for this. Checkout the documentation of the
+openQA job which is mentioned in the PR description or comment. The scripts
+repository contains a pre-defined GitHub action for this. Checkout the
+documentation of the
 https://github.com/os-autoinst/scripts/blob/master/openqa-clone-and-monitor-job-from-pr[openqa-clone-and-monitor-job-from-pr]
 script for further information and an example configuration.
 
@@ -2061,6 +2094,14 @@ https://github.com/os-autoinst/os-autoinst-distri-example/blob/master/scenario-d
 from the example distribution for an example. You may append a parameter like
 `SCENARIO_DEFINITIONS_YAML=path/of/yaml` to the query parameters of the webhook
 to change the lookup path of this file.
+
+=== Run isotovideo directly in the CI runner
+It is also possible to avoid using openQA at all and run the backend
+`isotovideo` directly within the CI runner. This simplifies the setup as no
+openQA instance is needed but of course test results cannot be examined using
+a web interface as usual. Checkout the
+https://github.com/os-autoinst/os-autoinst-distri-example/blob/main/README.md#local-testing-and-ci-environment[README of the example test distribution]
+for more information.
 
 ==== Setup a GitHub access token for openQA
 This setup is required for openQA to be able to report the status back to
@@ -2106,3 +2147,32 @@ created or updated.
    it could be delivered. If you have gotten a 200 response then everything
    is setup correctly. Otherwise, checkout the response of the delivery to
    investigate what is wrong.
+
+== Integrating test results from external systems
+
+The openQA web UI is suitable as a test management and reporting platform.
+Next to the automated openQA tests one can integrate test results from
+external systems or manual test results by selecting a worker class without a
+worker assigned to it. The following call to `openqa-cli` creates a test job
+with the name "my_manual_test" on a local openQA instance:
+
+----
+id=$(openqa-cli api -X post jobs test=my_manual_test worker_class=::manual | jq -r .id)
+----
+
+As necessary the test can be set to an according status. To link to external
+test results a comment can be added using the `$id` we have from the above
+call:
+
+----
+openqa-cli api -X post jobs/$id/comments text="Details on http://external.tests/$id"
+----
+
+After test completion an according result can be set, for example:
+
+----
+openqa-cli api -X post jobs/$id/set_done result=passed
+----
+
+Additional information can be provided on such jobs, e.g. clickable URLs
+pointing to other resources in the settings or uploaded test reports and logs.

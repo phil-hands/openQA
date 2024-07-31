@@ -10,7 +10,7 @@ use Test::MockModule;
 use Test::Mojo;
 use Test::Output 'combined_like';
 use Test::Warnings;
-use OpenQA::Test::Database;
+require OpenQA::Test::Database;
 use OpenQA::Test::TimeLimit '10';
 use OpenQA::WebAPI::Auth::OAuth2;
 use Mojo::File qw(tempdir path);
@@ -59,7 +59,7 @@ subtest OpenID => sub {
         handle_server_response => sub ($self, %args) { },
         args => sub ($self, $query) { {return_page => encode_base64url('/tests/42')}->{$query} });
     $t->get_ok('/response')->status_is(302);
-    $t->header_is('Location', '/tests/42', 'redirect to original papge after login');
+    $t->header_is('Location', '/tests/42', 'redirect to original page after login');
 
     $t->get_ok('/api_keys')->status_is(302);
     $t->header_is('Location', '/login?return_page=%2Fapi_keys', 'remember return_page for ensure_operator');

@@ -47,7 +47,7 @@
 %define python_scripts_requires %{nil}
 %endif
 # The following line is generated from dependencies.yaml
-%define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious::Plugin::AssetPack) >= 1.36 perl(YAML::PP) >= 0.026
+%define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious) perl(Mojolicious::Plugin::AssetPack) >= 1.36 perl(YAML::PP) >= 0.026
 # The following line is generated from dependencies.yaml
 %define common_requires ntp-daemon perl >= 5.20.0 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.340.0 perl(Regexp::Common) perl(Storable) perl(Text::Glob) perl(Time::Moment) perl(Try::Tiny)
 # runtime requirements for the main package that are not required by other sub-packages
@@ -58,7 +58,7 @@
 # The following line is generated from dependencies.yaml
 %define worker_requires bsdtar openQA-client optipng os-autoinst < 5 perl(Capture::Tiny) perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.7 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
 # The following line is generated from dependencies.yaml
-%define build_requires %assetpack_requires npm rubygem(sass)
+%define build_requires %assetpack_requires npm rubygem(sass) >= 3.7.4
 
 # All requirements needed by the tests executed during build-time.
 # Do not require on this in individual sub-packages except for the devel
@@ -161,10 +161,6 @@ Development package pulling in all build+test dependencies except chromedriver f
 %package devel
 Summary:        Development package pulling in all build+test dependencies
 Requires:       %{devel_requires}
-%ifarch s390x
-# missing chromedriver dependency
-ExclusiveArch:  do_not_build
-%endif
 
 %description devel
 Development package pulling in all build+test dependencies.
@@ -253,6 +249,9 @@ Use this package to setup a local instance with all services provided together.
 
 %package bootstrap
 Summary:        Automated openQA setup
+Requires:       curl
+Requires:       iputils
+Requires:       procps
 
 %description bootstrap
 This can automatically setup openQA - either directly on your system
@@ -664,6 +663,8 @@ fi
 %{_localstatedir}/lib/openqa/script
 %{_localstatedir}/lib/openqa/tests
 %{_datadir}/openqa/script/openqa-check-devel-repo
+%{_unitdir}/openqa-minion-restart.service
+%{_unitdir}/openqa-minion-restart.path
 
 %files worker
 %{_datadir}/openqa/lib/OpenQA/CacheService/

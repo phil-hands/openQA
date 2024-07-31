@@ -12,8 +12,9 @@ use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
 use OpenQA::JobGroupDefaults;
 use OpenQA::Schema::Result::Jobs;
+use OpenQA::Task::Git::Clone;
 use File::Copy;
-use OpenQA::Test::Database;
+require OpenQA::Test::Database;
 use OpenQA::Test::Utils qw(run_gru_job perform_minion_jobs);
 use OpenQA::Test::TimeLimit '160';
 use Test::MockModule;
@@ -569,7 +570,7 @@ subtest 'Gru tasks retry' => sub {
 $t->app->log(Mojo::Log->new(level => 'debug'));
 
 subtest 'handling failing GRU task' => sub {
-    my $ids = $t->app->gru->enqueue('gru_manual_task', ['fail'], undef, [{job_id => 99927}]);
+    my $ids = $t->app->gru->enqueue('gru_manual_task', ['fail'], undef, [99927]);
     ok my $gru_task = $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     ok my $associated_job = $gru_task->jobs->first->job, 'job associated';
     is $associated_job->result, NONE, 'associated job has no result yet';
@@ -584,7 +585,7 @@ subtest 'handling failing GRU task' => sub {
 };
 
 subtest 'handling user error occurring in GRU task' => sub {
-    my $ids = $t->app->gru->enqueue('gru_manual_task', ['user_error'], undef, [{job_id => 99928}]);
+    my $ids = $t->app->gru->enqueue('gru_manual_task', ['user_error'], undef, [99928]);
     ok my $gru_task = $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     ok my $associated_job = $gru_task->jobs->first->job, 'job associated';
     is $associated_job->result, NONE, 'associated job has no result yet';
@@ -601,7 +602,7 @@ subtest 'handling user error occurring in GRU task' => sub {
 
 subtest 'handling normally finishing GRU task' => sub {
     $jobs->find(99928)->update({state => SCHEDULED, result => NONE, reason => undef});
-    my $ids = $t->app->gru->enqueue('gru_manual_task', ['finish'], undef, [{job_id => 99928}]);
+    my $ids = $t->app->gru->enqueue('gru_manual_task', ['finish'], undef, [99928]);
     ok my $gru_task = $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     ok my $associated_job = $gru_task->jobs->first->job, 'job associated';
     is $associated_job->result, NONE, 'associated job has no result yet';
@@ -617,7 +618,7 @@ subtest 'handling normally finishing GRU task' => sub {
 
 subtest 'handling dying GRU task' => sub {
     $jobs->find(99928)->update({state => SCHEDULED, result => NONE, reason => undef});
-    my $ids = $t->app->gru->enqueue('gru_manual_task', ['die'], undef, [{job_id => 99928}]);
+    my $ids = $t->app->gru->enqueue('gru_manual_task', ['die'], undef, [99928]);
     ok my $gru_task = $schema->resultset('GruTasks')->find($ids->{gru_id}), 'gru task exists';
     ok my $associated_job = $gru_task->jobs->first->job, 'job associated';
     is $associated_job->result, NONE, 'associated job has no result yet';
@@ -633,6 +634,52 @@ subtest 'handling dying GRU task' => sub {
     $associated_job->discard_changes;
     is $associated_job->result, INCOMPLETE, 'associated job is incomplete';
     like $associated_job->reason, qr/^preparation failed: Thrown fail at/, 'reason of associated job set';
+};
+
+subtest 'git clone' => sub {
+    my $openqa_utils = Test::MockModule->new('OpenQA::Task::Git::Clone');
+    my @mocked_git_calls;
+    $openqa_utils->redefine(
+        run_cmd_with_log_return_error => sub ($cmd) {
+            my $stdout = '';
+            $stdout = 'ref: refs/heads/master	HEAD' if $cmd->[3] eq 'ls-remote';
+            $stdout = 'http://localhost/foo.git' if $cmd->[4] eq 'get-url';
+            $stdout = 'master' if $cmd->[3] eq 'branch';
+            my $git_call = join(' ', @$cmd);
+            push @mocked_git_calls, $git_call;
+            return {
+                status => 1,
+                return_code => 0,
+                stderr => '',
+                stdout => $stdout,
+            };
+        });
+    my $clone_dirs = {
+        '/etc/' => 'http://localhost/foo.git',
+        '/root/' => 'http://localhost/foo.git#foobranch',
+        '/this_directory_does_not_exist/' => 'http://localhost/bar.git',
+    };
+    my $res = run_gru_job($t->app, 'git_clone', $clone_dirs, {priority => 10});
+    is $res->{result}, 'Job successfully executed', 'minion job result indicates success';
+    like $mocked_git_calls[3], qr'git -C /etc/ fetch origin master', 'fetch origin master for /etc/';
+    like $mocked_git_calls[4], qr'reset --hard origin/master', 'reset origin/master for /etc/';
+    like $mocked_git_calls[8], qr'git -C /root/ fetch origin foobranch:foobranch', 'fetch non-default branch';
+    like $mocked_git_calls[10], qr'git clone http://localhost/bar.git /this_directory_does_not_exist/',
+      'clone to /this_directory_does_not_exist/';
+
+    subtest 'git clone retried on failure' => sub {
+        $ENV{OPENQA_GIT_CLONE_RETRIES} = 1;
+        $openqa_utils->redefine(_git_clone => sub (@) { die "fake error\n" });
+        $res = run_gru_job($t->app, 'git_clone', $clone_dirs, {priority => 10});
+        is $res->{retries}, 1, 'job retries incremented';
+        is $res->{state}, 'inactive', 'job set back to inactive';
+    };
+    subtest 'git clone fails when all retry attempts exhausted' => sub {
+        $ENV{OPENQA_GIT_CLONE_RETRIES} = 0;
+        $res = run_gru_job($t->app, 'git_clone', $clone_dirs, {priority => 10});
+        is $res->{retries}, 0, 'job retries not incremented';
+        is $res->{state}, 'failed', 'job considered failed';
+    };
 };
 
 subtest 'download assets with correct permissions' => sub {

@@ -60,7 +60,7 @@ function undoComments(undoButton) {
     url: urlWithBase('/api/v1/comments'),
     method: 'DELETE',
     data: ids.map(id => `id=${id}`).join('&'),
-    success: () => addFlash('info', 'The coments have been deleted.'),
+    success: () => addFlash('info', 'The comments have been deleted.'),
     error: (jqXHR, textStatus, errorThrown) => {
       undoButton.style.display = 'inline';
       addFlash('danger', 'The comments could not be deleted: ' + getXhrError(jqXHR, textStatus, errorThrown));
@@ -170,21 +170,27 @@ function dataForLink(link) {
 }
 
 function showScheduledProductModalDialog(title, body) {
-  const modalDialog = $('#scheduled-product-modal');
-  modalDialog.find('.modal-title').text(title);
-  modalDialog.find('.modal-body').empty().append(body);
-  modalDialog.modal();
+  const modalElement = document.getElementById('scheduled-product-modal');
+  const modalDialog = new bootstrap.Modal(modalElement);
+  modalElement.getElementsByClassName('modal-title')[0].textContent = title;
+  modalElement.getElementsByClassName('modal-body')[0].replaceChildren(body);
+  modalDialog.show();
 }
 
 function renderScheduledProductSettings(settings) {
-  const table = $('<table/>').addClass('table table-striped settings-table');
+  const tbody = document.createElement('tbody');
   for (const [key, value] of Object.entries(settings || {})) {
-    table.append(
-      $('<tr/>')
-        .append($('<td/>').text(key))
-        .append($('<td/>').append(renderHttpUrlAsLink(value)))
-    );
+    const tr = document.createElement('tr');
+    const keyTd = document.createElement('td');
+    const valueTd = document.createElement('td');
+    keyTd.append(key);
+    valueTd.append(renderHttpUrlAsLink(value));
+    tr.append(keyTd, valueTd);
+    tbody.append(tr);
   }
+  const table = document.createElement('table');
+  table.className = 'table table-striped settings-table';
+  table.append(tbody);
   return table;
 }
 
@@ -196,14 +202,8 @@ function showScheduledProductSettings(link) {
 }
 
 function renderScheduledProductResults(results) {
-  let element;
-  if (results) {
-    element = $('<pre></pre>');
-    element.text(JSON.stringify(results, undefined, 4));
-  } else {
-    element = $('<p></p>');
-    element.text('No results available.');
-  }
+  const element = document.createElement(results ? 'pre' : 'p');
+  element.textContent = results ? JSON.stringify(results, undefined, 4) : 'No results available.';
   return element;
 }
 

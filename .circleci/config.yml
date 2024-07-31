@@ -1,7 +1,7 @@
 version: 2.1
 
 orbs:
-  codecov: codecov/codecov@3.2.4
+  codecov: codecov/codecov@4.1.0
 
 aliases:
   - &restore_cache
@@ -261,9 +261,13 @@ jobs:
       - run: make coverage-report-html
       - store_artifacts: *store_cover_db
       - run: make coverage-report-codecov
+      - run:
+          # https://github.com/codecov/codecov-circleci-orb/issues/157
+          name: codecov gpg workaround for gpg 2.4 as included in Leap 15.6
+          command: mkdir -p ~/.gnupg
       - codecov/upload:
           file: cover_db/codecov.json
-          xtra_args: -v -Z
+          cli_args: -v
 
   build-docs: &docs-template
     docker:
@@ -313,6 +317,7 @@ workflows:
       - fullstack-unstable:
           <<: *requires_fullstack
       - codecov:
+          context: Codecov
           requires:
             - t
             - heavy
@@ -326,7 +331,7 @@ workflows:
 
   # Nightly jobs are using the GitHub user "os-autoinst-bot" to create PRs (search for occurrences of `os-autoinst-bot`
   # within this repository). This user's access token is configured on https://github.com/settings/tokens as usual and set
-  # as variable `GITHUB_TOKEN` on https://app.circleci.com/settings/project/github/os-autoinst/openQA/environment-variables.
+  # as variable `GITHUB_TOKEN` on https://app.circleci.com/settings/organization/github/os-autoinst/contexts/200658e0-47ad-4806-bca3-eefa618e6611.
   nightly:
     triggers:
       - schedule:
@@ -342,6 +347,8 @@ workflows:
       - cache-npm
       - cache-fullstack:
           <<: *requires
-      - dependencies-pr
+      - dependencies-pr:
+          context: GitHub
       - build-docs-nightly:
+          context: GitHub
           <<: *requires_fullstack

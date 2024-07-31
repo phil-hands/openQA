@@ -81,6 +81,7 @@ sub find_candidate_needles {
     # save implicit waiting time as long as we are only looking for elements
     # that should be visible already
     disable_timeout;
+    return {} unless $candidates_menus[0]->is_enabled;
     $candidates_menus[0]->click();
 
     # read the tags/needles from the HTML structure
@@ -249,7 +250,7 @@ subtest 'scheduled product shown' => sub {
         qr/\/admin\/productlog\?id=$expected_scheduled_product_id/,
         'scheduled product href'
     );
-    my $reschedule_link = $driver->find_element('#scheduled-product-info div > a');
+    my $reschedule_link = $driver->find_element('#restart-scheduled-product');
     my $expected_params = qr/scheduled_product_clone_id=$expected_scheduled_product_id&TEST=kde/;
     like $reschedule_link->get_attribute('data-url'), $expected_params, 'reschedule link shown';
     $reschedule_link->click;
@@ -467,7 +468,7 @@ subtest 'misc details: title, favicon, go back, go to source view, go to log vie
         qr{.*/tests/99946/modules/installer_timezone/steps/1/src$},
         'on src page for installer_timezone test'
     );
-    is($driver->find_element('.cm-comment')->get_text(), '#!/usr/bin/env perl', 'we have a perl comment');
+    is @{$driver->find_elements('.ace_comment')}[0]->get_text, '#!/usr/bin/env perl', 'shebang rendered as comment';
 
     # load "Logs & Assets" tab contents directly because accessing the tab within the whole page in a straight forward
     # way lead to unstability (see poo#94060)

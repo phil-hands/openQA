@@ -6,11 +6,6 @@ div.progress {
     margin-bottom: 9px;
     height: 18px;
 }
-.darkmode {
-    div.progress {
-        background-color: $default-bg-color-darktheme;
-    }
-}
 #build-results .progress {
     min-width: 24.5em;
 }
@@ -29,7 +24,6 @@ td div.progress {
         // don' use flex box because it leads to undesired overflow behavior
         display: inline;
         overflow: hidden;
-        padding-top: 10px;
         a {
             display: block;
             width: 100%;
@@ -79,6 +73,11 @@ td div.progress {
         margin-top: 2px;
     }
 }
+@include media-breakpoint-up(xl) {
+    .build-label {
+        max-width: 50%;
+    }
+}
 .col-lg-4.text-nowrap {
     display: flex;
     align-items: baseline;
@@ -112,10 +111,10 @@ h2 .fa {
 }
 
 // highlighting on running table under 'All tests'
-.highlight_parent {
+.highlight_parent td {
     background-color: $color-highlight-parent !important;
 }
-.highlight_child {
+.highlight_child td {
     background-color: $color-highlight-child !important;
 }
 

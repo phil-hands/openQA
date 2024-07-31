@@ -53,6 +53,8 @@ sub read_config ($app) {
             force_result_regex => '',
             parallel_children_collapsable_results => join(' ', OK_RESULTS),
             service_port_delta => $ENV{OPENQA_SERVICE_PORT_DELTA} // 2,
+            access_control_allow_origin_header => undef,
+            api_hmac_time_tolerance => 300,
         },
         rate_limits => {
             search => 5,
@@ -65,6 +67,7 @@ sub read_config ($app) {
             update_branch => '',
             do_push => 'no',
             do_cleanup => 'no',
+            git_auto_clone => 'no',
         },
         scheduler => {
             max_job_scheduled_time => 7,

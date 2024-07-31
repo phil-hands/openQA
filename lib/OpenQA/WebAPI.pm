@@ -4,6 +4,7 @@
 package OpenQA::WebAPI;
 use Mojo::Base 'Mojolicious', -signatures;
 
+use OpenQA::Assets;
 use OpenQA::Schema;
 use OpenQA::WebAPI::Plugin::Helpers;
 use OpenQA::Log 'setup_log';
@@ -11,8 +12,8 @@ use OpenQA::Utils qw(detect_current_version service_port);
 use OpenQA::Setup;
 use OpenQA::WebAPI::Description qw(get_pod_from_controllers set_api_desc);
 use Mojo::File 'path';
+use Mojo::Util 'trim';
 use Try::Tiny;
-use YAML::PP qw(LoadFile);
 
 has secrets => sub ($self) { $self->schema->read_application_secrets };
 
@@ -70,26 +71,12 @@ sub startup ($self) {
     OpenQA::Setup::load_plugins($self, $auth);
     OpenQA::Setup::set_secure_flag_on_cookies_of_https_connection($self);
     OpenQA::Setup::prepare_settings_ui_keys($self);
+    OpenQA::Assets::setup($self);
 
-    # setup asset pack, note that the config file is shared with tools/generate-packed-assets
-    $self->plugin(AssetPack => LoadFile($self->home->child('assets', 'assetpack.yml')));
-
-    # The feature was added in the 2.14 release, the version check can be removed once openQA depends on a newer version
-    $self->asset->store->retries(5) if $Mojolicious::Plugin::AssetPack::VERSION > 2.13;
-
-    # -> read assets/assetpack.def
-    eval { $self->asset->process };
-    if (my $assetpack_error = $@) {    # uncoverable statement
-        $assetpack_error    # uncoverable statement
-          .= 'If you invoked this service for development (from a Git checkout) you probably just need to'
-          . ' invoke "make node_modules" before running this service. If you invoked this service via a packaged binary/service'
-          . " then there is probably a problem with the packaging.\n"
-          if $assetpack_error =~ qr/could not find input asset.*node_modules/i;    # uncoverable statement
-        die $assetpack_error;    # uncoverable statement
-    }
 
     # set cookie timeout to 48 hours (will be updated on each request)
-    $self->app->sessions->default_expiration(48 * 60 * 60);
+    my $app = $self->app;
+    $app->sessions->default_expiration(48 * 60 * 60);
 
     # commands
     push @{$self->commands->namespaces}, 'OpenQA::WebAPI::Command';
@@ -172,7 +159,6 @@ sub startup ($self) {
     $test_r->get('/status')->name('status')->to('running#status');
     $test_r->get('/livelog')->name('livelog')->to('running#livelog');
     $test_r->get('/liveterminal')->name('liveterminal')->to('running#liveterminal');
-    $test_r->get('/streaming')->name('streaming')->to('running#streaming');
     $test_r->get('/edit')->name('edit_test')->to('running#edit');
     $test_r->get('/badge')->name('test_result_badge')->to('test#badge');
 
@@ -392,10 +378,7 @@ sub startup ($self) {
     $api_description{'apiv1_worker'}
       = 'Each entry contains the "hostname", the boolean flag "connected" which can be 0 or 1 depending on the connection to the websockets server and the field "status" which can be "dead", "idle", "running". A worker can be considered "up" when "connected=1" and "status!=dead"';
     $api_ro->post('/workers')->name('apiv1_create_worker')->to('worker#create');
-    my $worker_r = $api_ro->any('/workers/<workerid:num>');
-    push @api_routes, $worker_r;
     $api_public_r->any('/workers/<workerid:num>')->get('/')->name('apiv1_worker')->to('worker#show');
-    $worker_r->post('/commands/')->name('apiv1_create_command')->to('command#create');
     $api_ro->delete('/workers/<worker_id:num>')->name('apiv1_worker_delete')->to('worker#delete');
 
     # api/v1/mutex
@@ -530,7 +513,7 @@ sub startup ($self) {
     $self->plugin('OpenQA::WebAPI::Plugin::MemoryLimit');
 
     # add method to be called before rendering
-    $self->app->hook(
+    $app->hook(
         before_render => sub ($c, $args) {
             # return errors as JSON if accepted but HTML not
             if (!$c->accepts('html') && $c->accepts('json') && $args->{status} && $args->{status} != 200) {
@@ -539,6 +522,21 @@ sub startup ($self) {
             }
             $c->stash('api_description', \%api_description);
         });
+
+    # allow configuring Cross-Origin Resource Sharing (CORS)
+    if (my $access_control_allow_origin = $app->config->{global}->{access_control_allow_origin_header}) {
+        my %allowed_origins = map { trim($_) => 1 } split ',', $access_control_allow_origin;
+        my $fallback_origin = delete $allowed_origins{'*'} ? '*' : undef;
+        $app->hook(
+            after_render => sub ($c, $output, $format) {
+                return unless ($c->stash('namespace') // '') eq 'OpenQA::WebAPI::Controller::API::V1';
+                return unless my $req_origin = $c->req->url->base;
+                return unless my $res_origin = exists $allowed_origins{$req_origin} ? $req_origin : $fallback_origin;
+                my $headers = $c->res->headers;
+                $headers->append(Vary => 'Origin');
+                $headers->access_control_allow_origin($res_origin);
+            });
+    }
 }
 
 sub schema ($self) { OpenQA::Schema->singleton }

@@ -11,7 +11,7 @@ use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Scheduler::Model::Jobs;
 use OpenQA::Constants qw(WEBSOCKET_API_VERSION WORKER_COMMAND_GRAB_JOBS);
-use OpenQA::Test::Database;
+require OpenQA::Test::Database;
 use Test::Output 'combined_like';
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
@@ -464,7 +464,7 @@ subtest 'clone and schedule parallel cluster' => sub {
     $jobs->find($_)->done(result => PASSED) for ($jobA2, $jobB2, $jobC2, $jobD2, $jobE2, $jobF2);
 };
 
-subtest 're-use vlan' => sub {
+subtest 'reuse vlan' => sub {
     $jobA = _job_create('A');
     $jobB = _job_create('B');
     $jobC = _job_create('C', [$jobB->id]);
@@ -1174,6 +1174,17 @@ subtest 'parallel siblings of running jobs are allocated' => sub {
         $scheduled_jobs{99998}->{matching_workers} = [$workers->find($worker_ids[-1])];
         $schedule->_pick_siblings_of_running($allocated_jobs, $allocated_workers);
         ok exists $allocated_jobs->{99998}, 'job 99998 allocated' or diag explain $allocated_jobs;
+    };
+    subtest 'no jobs allocated with dependency pinning (via worker property) and mismatching hosts' => sub {
+        my ($allocated_jobs, $allocated_workers) = ({}, {});
+        # pretend the job itself does not have the one_host_only-flag
+        delete $scheduled_jobs{99998}->{one_host_only};
+        # pretend the worker slot being used has the PARALLEL_ONE_HOST_ONLY property
+        my $relevant_worker = $workers->find($worker_on_different_host_id);
+        $relevant_worker->set_property(PARALLEL_ONE_HOST_ONLY => 1);
+        $scheduled_jobs{99998}->{matching_workers} = [$relevant_worker];
+        $schedule->_pick_siblings_of_running($allocated_jobs, $allocated_workers);
+        ok !exists $allocated_jobs->{99998}, 'job 99998 not allocated' or diag explain $allocated_jobs;
     };
 };
 

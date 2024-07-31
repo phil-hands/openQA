@@ -250,7 +250,7 @@ subtest 'filtering by architecture' => sub {
     subtest 'filter for specific archs' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-arch')->send_keys('i586,i686');
-        $driver->find_element('#filter-panel .btn-default')->click();
+        $driver->find_element('#filter-panel button[type="submit"]')->click();
 
         element_visible('#flavor_DVD_arch_i586', qr/i586/);
         element_not_present('#flavor_DVD_arch_x86_64');
@@ -269,7 +269,7 @@ subtest 'filtering by flavor' => sub {
     subtest 'filter for specific flavors' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-flavor')->send_keys('DVD');
-        $driver->find_element('#filter-panel .btn-default')->click();
+        $driver->find_element('#filter-panel button[type="submit"]')->click();
 
         element_visible('#flavor_DVD_arch_i586', qr/i586/);
         element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
@@ -302,7 +302,7 @@ subtest 'filtering by test' => sub {
     subtest 'filter for specific test' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-test')->send_keys('textmode');
-        $driver->find_element('#filter-panel .btn-default')->click();
+        $driver->find_element('#filter-panel button[type="submit"]')->click();
 
         my @rows = $driver->find_elements('#content tbody tr');
         is(scalar @rows, 1, 'exactly one row present');
@@ -349,17 +349,17 @@ subtest 'filtering by distri' => sub {
 
 subtest 'filtering does not reveal old jobs' => sub {
     $driver->get('/tests/overview?arch=&result=failed&distri=opensuse&version=13.1&build=0091&groupid=1001');
-    is($driver->find_element('#summary .badge-danger')->get_text(), '1', 'filtering for failures gives only one job');
+    is($driver->find_element('#summary .text-bg-danger')->get_text(), '1', 'filtering for failures gives only one job');
     is(scalar @{$driver->find_elements('#res-99946')}, 1, 'textmode job still shown');
     is(scalar @{$driver->find_elements('#res-99920')}, 0, 'and old kde job not revealed');
 
     $driver->get('/tests/overview?arch=&failed_modules=zypper_up&distri=opensuse&version=13.1&build=0091&groupid=1001');
-    is($driver->find_element('#summary .badge-danger')->get_text(),
+    is($driver->find_element('#summary .text-bg-danger')->get_text(),
         '1', 'filtering for failed modules works for latest job');
     is(scalar @{$driver->find_elements('#res-99946')}, 1, 'textmode job matches failed modules filter');
 
     $driver->get('/tests/overview?arch=&failed_modules=bar&distri=opensuse&version=13.1&build=0091&groupid=1001');
-    is scalar @{$driver->find_elements('#summary .badge-danger')}, 0,
+    is scalar @{$driver->find_elements('#summary .text-bg-danger')}, 0,
       'filtering for failed modules does not reveal old job';
 };
 
@@ -448,7 +448,7 @@ subtest "filtering by machine" => sub {
     subtest 'filter for specific machine' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-machine')->send_keys('uefi');
-        $driver->find_element('#filter-panel .btn-default')->click();
+        $driver->find_element('#filter-panel button[type="submit"]')->click();
 
         element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
         element_not_present('#flavor_DVD_arch_i586');
@@ -464,7 +464,7 @@ subtest "filtering by machine" => sub {
 
         $driver->find_element('#filter-machine')->clear();
         $driver->find_element('#filter-machine')->send_keys('64bit,uefi');
-        $driver->find_element('#filter-panel .btn-default')->click();
+        $driver->find_element('#filter-panel button[type="submit"]')->click();
 
         element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
         element_visible('#flavor_NET_arch_x86_64', qr/x86_64/);

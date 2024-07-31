@@ -52,6 +52,7 @@ subtest 'Test configuration default modes' => sub {
             force_result_regex => '',
             parallel_children_collapsable_results_sel => ' .status:not(.result_passed):not(.result_softfailed)',
             auto_clone_limit => 20,
+            api_hmac_time_tolerance => 300,
         },
         rate_limits => {
             search => 5,
@@ -64,6 +65,7 @@ subtest 'Test configuration default modes' => sub {
             update_branch => '',
             do_push => 'no',
             do_cleanup => 'no',
+            git_auto_clone => 'no',
         },
         'scheduler' => {
             max_job_scheduled_time => 7,

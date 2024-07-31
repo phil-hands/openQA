@@ -23,7 +23,6 @@ CHECKSTYLE ?= 0
 PROVE_ARGS ?= --trap ${EXTRA_PROVE_ARGS} $(TESTS)
 endif
 PROVE_LIB_ARGS ?= -l
-CONTAINER_IMG ?= openqa:latest
 TEST_PG_PATH ?= /dev/shm/tpg
 # TIMEOUT_M: Timeout for one retry of tests in minutes
 TIMEOUT_M ?= 60
@@ -40,7 +39,6 @@ LANGUAGE =
 LANG = C.utf8
 mkfile_path := $(abspath $(lastword $(MAKEFILE_LIST)))
 current_dir := $(patsubst %/,%,$(dir $(mkfile_path)))
-container_env_file := "$(current_dir)/container.env"
 unstables := $(shell cat tools/unstable_tests.txt | tr '\n' :)
 shellfiles := $$(file --mime-type script/* t/* container/worker/*.sh tools/* | sed -n 's/^\(.*\):.*text\/x-shellscript.*$$/\1/p')
 
@@ -64,8 +62,7 @@ install-generic:
 		mkdir -p "$(DESTDIR)"/usr/share/openqa/$$i ;\
 		cp -a $$i/* "$(DESTDIR)"/usr/share/openqa/$$i ;\
 	done
-	for f in $(shell grep --perl-regexp '\.\.\/node_modules\/.*\.*+' assets/assetpack.def | sed -e 's|<* ../||') \
-		node_modules/fork-awesome/fonts/* node_modules/chosen-js/*.png; do \
+	for f in $(shell perl -Ilib -mOpenQA::Assets -e OpenQA::Assets::list); do \
 		install -m 644 -D --target-directory="$(DESTDIR)/usr/share/openqa/$${f%/*}" "$$f";\
 	done
 
@@ -104,6 +101,7 @@ install-generic:
 	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system
 	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system-generators
 	install -d -m 755 "$(DESTDIR)"/usr/lib/tmpfiles.d
+	eval "$$(perl -V:installvendorlib)" && sed -i -e "s^installvendorlib^$$installvendorlib^" systemd/openqa-minion-restart.path
 	for i in systemd/*.{service,slice,target,timer,path}; do \
 		install -m 644 $$i "$(DESTDIR)"/usr/lib/systemd/system ;\
 	done
@@ -282,25 +280,6 @@ public/favicon.ico: assets/images/logo.svg
 	done
 	convert assets/images/logo-16.png assets/images/logo-32.png assets/images/logo-64.png assets/images/logo-128.png -background white -alpha remove public/favicon.ico
 	rm assets/images/logo-128.png assets/images/logo-32.png assets/images/logo-64.png
-
-.PHONY: container-test-build
-container-test-build:
-	${CRE} build --no-cache $(current_dir)/container/openqa -t $(DOCKER_IMG)
-
-.PHONY: $(container_env_file)
-$(container_env_file):
-	env | grep -E 'CHECKSTYLE|FULLSTACK|UITEST|GH|TRAVIS|CPAN|DEBUG|ZYPPER' > $@
-
-.PHONY: launch-container-to-run-tests-within
-launch-container-to-run-tests-within: $(container_env_file)
-	${CRE} run --env-file $(container_env_file) -v $(current_dir):/opt/openqa \
-	   $(CONTAINER_IMG) make coverage-codecov
-	rm $(container_env_file)
-
-.PHONY: prepare-and-launch-container-to-run-tests-within
-.NOTPARALLEL: prepare-and-launch-container-to-run-tests-within
-prepare-and-launch-container-to-run-tests-within: container-test-build launch-container-to-run-tests-within
-	echo "Use '${CRE} rm' and '${CRE} rmi' to remove the container and image if necessary"
 
 # all additional checks not called by prove
 .PHONY: test-checkstyle-standalone

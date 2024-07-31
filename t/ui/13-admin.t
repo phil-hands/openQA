@@ -206,7 +206,7 @@ subtest 'add test suite' => sub() {
     is(scalar @{$driver->find_elements('//button[@title="Edit"]', 'xpath')}, 7, '7 edit buttons before');
 
     # search (settings taken into account, cleared when adding new row)
-    my $search_input = $driver->find_element('.dataTables_filter input');
+    my $search_input = $driver->find_element('.dt-search input');
     $search_input->send_keys('DESKTOP=kdeINSTALLONLY=1');
     @cells = $driver->find_child_elements($elem, 'td');
     is(scalar @cells, 1 * $column_count, 'everything filtered out but one row');
@@ -218,8 +218,7 @@ subtest 'add test suite' => sub() {
     );
 
     is($driver->find_element_by_xpath('//input[@value="New test suite"]')->click(), 1, 'new test suite');
-    is(element_prop_by_selector('.dataTables_filter input'), '((DESKTOP=kdeINSTALLONLY=1)|(new row))',
-        'search cleared');
+    is(element_prop_by_selector('.dt-search input'), '((DESKTOP=kdeINSTALLONLY=1)|(new row))', 'search cleared');
     @cells = $driver->find_child_elements($elem, 'td');
     is(scalar @cells, 2 * $column_count, 'filtered row and empty row present');
     is($cells[0 * $column_count + 0]->get_text(), 'RAID0', 'filtered row has correct name');
@@ -270,7 +269,7 @@ subtest 'add test suite' => sub() {
     $elem = $driver->find_element('.admintable tbody tr:nth-child(7)');
     is($elem->get_text(), "$suiteName testKey=$suiteValue", 'stored text is the same except key');
 
-    $elem = $driver->find_element('#test-suites_filter input[type=search]');
+    $elem = $driver->find_element('.dt-search input');
     $elem->send_keys("^kde");
     @fields = $driver->find_elements('.admintable tbody tr');
     is(@fields, 1, "search using regex");
@@ -295,29 +294,24 @@ subtest 'add job group' => sub() {
     # add new parentless group, leave name empty (which should lead to error)
     $driver->find_element_by_xpath('//a[@title="Add new job group on top-level"]')->click();
     is($driver->find_element('#create_group_button')->get_attribute('disabled'),
-        'true', 'create group submit button is disabled if leave name is empty');
+        'true', 'create group submit button is disabled if name is empty');
     # now leave group name with blank which also lead to error
     my $groupname = $driver->find_element_by_id('new_group_name');
     $groupname->send_keys('   ');
     is($driver->find_element('#create_group_button')->get_attribute('disabled'),
-        'true', 'create group submit button is disabled if leave name as blank');
+        'true', 'create group submit button is disabled if name only consists of white-spaces');
     is(
         $driver->find_element('#new_group_name')->get_attribute('class'),
         'form-control is-invalid',
         'group name input marked as invalid'
     );
-    $groupname->clear();
-    $driver->find_element_by_id('create_group_button')->click();
-    wait_for_ajax;
-    $list_element = $driver->find_element_by_id('job_group_list');
-    @parent_group_entries = $driver->find_child_elements($list_element, 'li');
-    is((shift @parent_group_entries)->get_text(), 'opensuse', 'first parentless group present');
-    is((shift @parent_group_entries)->get_text(), 'opensuse test', 'second parentless group present');
-    is(@parent_group_entries, 0, 'and also no more parent groups');
 
     # add new parentless group (dialog should still be open), this time enter a name
-    $driver->find_element_by_id('new_group_name')->send_keys('Cool Group');
-    $driver->find_element_by_id('create_group_button')->click();
+    $groupname->clear;
+    $groupname->send_keys('Cool Group');
+    wait_until(sub { ($driver->find_element_by_id('create_group_button')->get_attribute('disabled') // '') ne 'true' },
+        'submit button no longer disabled');
+    $driver->find_element_by_id('create_group_button')->click;
     wait_for_ajax;
 
     # new group should be present
@@ -443,6 +437,22 @@ subtest 'job property editor' => sub() {
         $driver->refresh();
         is element_prop('editor-size-limit'), '', 'size edited';
     };
+
+    subtest 'edit parent group properties' => sub {
+        $driver->find_element('#user-action a')->click();
+        $driver->find_element_by_link_text('Job groups')->click();
+        $driver->find_element('#parent_group_1 span a')->click();
+        $driver->find_element_by_id('editor-name')->send_keys('Cool Parent Group');
+        my $ele = $driver->find_element_by_id('editor-keep-logs-in-days');
+        $ele->send_keys(Selenium::Remote::WDKeys->KEYS->{control}, 'a');
+        $ele->send_keys('123');
+        $driver->find_element('#properties p.buttons button.btn-primary')->click();
+        wait_for_ajax(msg => 'ensure there is no race condition, even though the page is reloaded');
+        $driver->find_element('#user-action a')->click();
+        $driver->find_element_by_link_text('Job groups')->click();
+        $driver->find_element('#parent_group_1 span a')->click();
+        is element_prop('editor-keep-logs-in-days'), '123', 'keep important results in days edited';
+    };
 };
 
 subtest 'edit job templates' => sub() {
@@ -454,7 +464,7 @@ subtest 'edit job templates' => sub() {
         ok($form->child('.progress-indication')->is_hidden(), 'spinner is hidden');
         is(scalar @{$driver->find_elements('Test new medium as part of this group', 'link_text')},
             0, 'link to add a new medium (via legacy editor) not shown');
-        my $yaml = $driver->execute_script('return editor.doc.getValue();');
+        my $yaml = $driver->execute_script('return editor.getValue();');
         like($yaml, qr/products:\s*{}.*scenarios:\s*{}/s, 'default YAML was fetched') or diag explain $yaml;
     };
 
@@ -467,7 +477,7 @@ subtest 'edit job templates' => sub() {
         wait_for_ajax;
         ok($form->is_displayed(), 'editor form is shown');
         ok($form->child('.progress-indication')->is_hidden(), 'spinner is hidden');
-        $yaml = $driver->execute_script('return editor.doc.getValue();');
+        $yaml = $driver->execute_script('return editor.getValue();');
         like($yaml, qr/scenarios:/, 'YAML was fetched') or diag explain $yaml;
     };
 
@@ -501,7 +511,7 @@ subtest 'edit job templates' => sub() {
     $yaml .= "        testsuite: advanced_kde\n";
     $yaml .= "        priority: 11\n";
     $yaml =~ s/\n/\\n/g;
-    $driver->execute_script("editor.doc.setValue(\"$yaml\");");
+    $driver->execute_script("editor.setValue(\"$yaml\");");
     $driver->find_element_by_id('preview-template')->click();
     wait_for_ajax;
     like($result->get_text(), qr/Preview of the changes/, 'preview shown') or diag explain $result->get_text();
@@ -533,17 +543,17 @@ subtest 'edit job templates' => sub() {
     $yaml .= "        testsuite: advanced_kde\n";
     $yaml .= "        priority: 99\n";
     $yaml =~ s/\n/\\n/g;
-    $driver->execute_script("editor.doc.setValue(\"$yaml\");");
+    $driver->execute_script("editor.setValue(\"$yaml\");");
     $driver->find_element_by_id('save-template')->click();
     wait_for_ajax;
     like($result->get_text(), qr/YAML saved!/, 'saving confirmed') or diag explain $result->get_text();
 
     # Empty the editor
-    $driver->execute_script("editor.doc.setValue('');");
+    $driver->execute_script("editor.setValue('');");
     $driver->find_element_by_id('save-template')->click();
     wait_for_ajax;
     like($result->get_text(), qr/YAML saved!/, 'saving confirmed') or diag explain $result->get_text();
-    $yaml = $driver->execute_script('return editor.doc.getValue();');
+    $yaml = $driver->execute_script('return editor.getValue();');
     is($yaml, "products: {}\nscenarios: {}\n", 'YAML was reset to default') or diag explain $yaml;
 
     my $first_tab = $driver->get_current_window_handle();
@@ -554,24 +564,24 @@ subtest 'edit job templates' => sub() {
     $result = $form->child('.result');
     $yaml .= " # additional comment";
     my $jsyaml = $yaml =~ s/\n/\\n/gr;
-    $driver->execute_script("editor.doc.setValue(\"$jsyaml\");");
+    $driver->execute_script("editor.setValue(\"$jsyaml\");");
     $driver->find_element_by_id('save-template')->click();
     wait_for_ajax;
     like($result->get_text(), qr/YAML saved!/, 'second tab saved') or diag explain $result->get_text();
-    my $saved_yaml = $driver->execute_script('return editor.doc.getValue();');
+    my $saved_yaml = $driver->execute_script('return editor.getValue();');
     is($saved_yaml, "$yaml\n", 'YAML got a final linebreak') or diag explain $yaml;
     # Try and save, after the database has already been modified
     $driver->switch_to_window($first_tab);
     $form = $driver->find_element_by_id('editor-form');
     $result = $form->child('.result');
     $jsyaml .= " # one more comment\\n";
-    $driver->execute_script("editor.doc.setValue(\"$jsyaml\");");
+    $driver->execute_script("editor.setValue(\"$jsyaml\");");
     $driver->find_element_by_id('save-template')->click();
     wait_for_ajax;
     like($result->get_text(), qr/Template was modified/, 'conflict reported') or diag explain $result->get_text();
 
     # Make the YAML invalid
-    $driver->execute_script('editor.doc.setValue("invalid: true");');
+    $driver->execute_script('editor.setValue("invalid: true");');
     $driver->find_element_by_id('preview-template')->click();
     wait_for_ajax;
     like($result->get_text(), qr/There was a problem applying the changes/, 'error shown');

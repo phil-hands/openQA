@@ -227,6 +227,8 @@ sub overview ($self) {
     my $failed_modules = $self->param_hash('failed_modules');
     my $states = $self->param_hash('state');
     my $results = $self->param_hash('result');
+    my $archs = $self->param_hash('arch');
+    my $machines = $self->param_hash('machine');
 
     my @jobs = $self->schema->resultset('Jobs')->complex_query(%$search_args)->latest_jobs;
 
@@ -234,6 +236,8 @@ sub overview ($self) {
     for my $job (@jobs) {
         next if $states && !$states->{$job->state};
         next if $results && !$results->{$job->result};
+        next if $archs && !$archs->{$job->ARCH};
+        next if $machines && !$machines->{$job->MACHINE};
         if ($failed_modules) {
             next if $job->result ne OpenQA::Jobs::Constants::FAILED;
             next unless OpenQA::Utils::any_array_item_contained_by_hash($job->failed_modules, $failed_modules);
@@ -340,6 +344,8 @@ sub _create_job ($self, $global_params, $job_suffix = undef, $job_specific_param
     # enqueue gru jobs and calculate blocked by
     push @{$downloads->{$_}}, [$job_id] for keys %$downloads;
     $self->gru->enqueue_download_jobs($downloads);
+    my $clones = create_git_clone_list($job_settings);
+    $self->gru->enqueue_git_clones($clones, [$job_id]) if keys %$clones;
     return $job_id;
 }
 

@@ -85,6 +85,8 @@ disable_timeout;
 
 $driver->title_is('openQA', 'on main page');
 $driver->find_element_by_link_text('Login')->click();
+$driver->find_element_by_id('dont-notify')->click;
+$driver->find_element_by_class_name('shepherd-cancel-icon')->click;
 
 subtest 'restart job from info panel in test results' => sub {
     subtest 'parent job shows options for advanced restart' => sub {
@@ -244,9 +246,8 @@ subtest 'check cluster jobs restart in /tests page' => sub {
     is($driver->get_title(), 'openQA: Test results', 'back to /tests page');
 
     # Check parallel jobs restart in page 2 of finished jobs
-    my @page_next = $driver->find_elements('#results_next .page-link');
-    (shift(@page_next))->click();
-    wait_for_ajax();
+    $driver->find_element('#results_wrapper [aria-label="Next"]')->click;
+    wait_for_ajax(msg => '2nd page of finished jobs table');
 
     my $master_node = $driver->find_element('#job_99902 td.test');
     my $slave_node = $driver->find_element('#job_99903 td.test');

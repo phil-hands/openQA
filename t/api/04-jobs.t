@@ -222,47 +222,38 @@ subtest 'validation of IDs' => sub {
 };
 
 subtest 'job overview' => sub {
+    # define expected jobs
+    my %job_99940 = (id => 99940, name => 'opensuse-Factory-DVD-x86_64-Build0048@0815-doc@64bit');
+    my %job_99939 = (id => 99939, name => 'opensuse-Factory-DVD-x86_64-Build0048-kde@64bit');
+    my %job_99938 = (id => 99938, name => 'opensuse-Factory-DVD-x86_64-Build0048-doc@64bit');
+    my %job_99936 = (id => 99936, name => 'opensuse-Factory-DVD-x86_64-Build0048-kde@64bit-uefi');
+    my %job_99981 = (id => 99981, name => 'opensuse-13.1-GNOME-Live-i686-Build0091-RAID0@32bit');
+
     my $query = Mojo::URL->new('/api/v1/jobs/overview');
 
-    # overview for latest build in group 1001
-    $query->query(
-        distri => 'opensuse',
-        version => 'Factory',
-        groupid => '1001',
-    );
-    $t->get_ok($query->path_query)->status_is(200);
-    is_deeply(
-        $t->tx->res->json,
-        [
-            {
-                id => 99940,
-                name => 'opensuse-Factory-DVD-x86_64-Build0048@0815-doc@64bit',
-            }
-        ],
-        'latest build present'
-    );
+    subtest 'specific distri/version within job group' => sub {
+        $query->query(distri => 'opensuse', version => 'Factory', groupid => '1001');
+        $t->get_ok($query->path_query)->status_is(200);
+        $t->json_is('' => [\%job_99940], 'latest build present');
+    };
 
-    # overview for build 0048
-    $query->query(build => '0048');
-    $t->get_ok($query->path_query)->status_is(200);
-    is_deeply(
-        $t->tx->res->json,
-        [
-            {
-                id => 99939,
-                name => 'opensuse-Factory-DVD-x86_64-Build0048-kde@64bit',
-            },
-            {
-                id => 99938,
-                name => 'opensuse-Factory-DVD-x86_64-Build0048-doc@64bit',
-            },
-            {
-                id => 99936,
-                name => 'opensuse-Factory-DVD-x86_64-Build0048-kde@64bit-uefi',
-            },
-        ],
-        'latest build present'
-    );
+    subtest 'specific build without additional parameters' => sub {
+        $query->query(build => '0048');
+        $t->get_ok($query->path_query)->status_is(200);
+        $t->json_is('' => [\%job_99939, \%job_99938, \%job_99936], 'latest build present');
+    };
+
+    subtest 'additional parameters' => sub {
+        $query->query(build => '0048', machine => '64bit');
+        $t->get_ok($query->path_query)->status_is(200);
+        $t->json_is('' => [\%job_99939, \%job_99938], 'only 64-bit jobs present');
+        $query->query(arch => 'i686');
+        $t->get_ok($query->path_query)->status_is(200);
+        $t->json_is('' => [\%job_99981], 'only i686 jobs present');
+        $query->query(build => '0048', state => DONE, result => SOFTFAILED);
+        $t->get_ok($query->path_query)->status_is(200);
+        $t->json_is('' => [\%job_99939, \%job_99936], 'only softfailed jobs present');
+    };
 
     subtest 'limit parameter' => sub {
         $query->query(build => '0048', limit => 1);
@@ -833,13 +824,13 @@ subtest 'json representation of group overview (actually not part of the API)' =
     is_deeply(
         $b48,
         {
-            reviewed => '',
-            commented => '',
+            reviewed => 0,
+            commented => 0,
             comments => 0,
             softfailed => 1,
             failed => 1,
             labeled => 0,
-            all_passed => '',
+            all_passed => 0,
             total => 3,
             passed => 0,
             skipped => 0,
@@ -1559,6 +1550,37 @@ subtest 'handle FOO_URL' => sub {
         'http://localhost/foo.iso' => [locate_asset('iso', 'foo.iso', mustexist => 0), 0],
       },
       'the download gru tasks were created correctly';
+};
+
+subtest 'handle git CASEDIR' => sub {
+    $testsuites->create(
+        {
+            name => 'handle_foo_casedir',
+            description => '',
+            settings => [
+                {key => 'CASEDIR', value => 'http://localhost/foo.git'},
+                {key => 'DISTRI', value => 'foobar'},
+                {key => 'NEEDLES_DIR', value => 'http://localhost/bar.git'}
+            ],
+        });
+    my $params = {TEST => 'handle_foo_casedir',};
+    OpenQA::App->singleton->config->{'scm git'}->{git_auto_clone} = 'yes';
+    $t->post_ok('/api/v1/jobs', form => $params)->status_is(200);
+
+    my $job_id = $t->tx->res->json->{id};
+    my $result = $jobs->find($job_id)->settings_hash;
+
+    my $gru_dep = $schema->resultset('GruDependencies')->find({job_id => $job_id});
+    my $gru_task = $gru_dep->gru_task;
+    is $gru_task->taskname, 'git_clone', 'the git clone job was created';
+    my @gru_args = @{$gru_task->args};
+    my $gru_task_values = shift @gru_args;
+    is_deeply $gru_task_values,
+      {
+        't/data/openqa/share/tests/foobar' => 'http://localhost/foo.git',
+        't/data/openqa/share/tests/foobar/needles' => 'http://localhost/bar.git'
+      },
+      'the git clone gru tasks were created correctly';
 };
 
 subtest 'show parent group name and id when getting job details' => sub {

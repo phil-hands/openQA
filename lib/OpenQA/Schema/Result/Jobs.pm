@@ -36,6 +36,7 @@ use Text::Diff;
 use OpenQA::File;
 use OpenQA::Parser 'parser';
 use OpenQA::WebSockets::Client;
+use List::Util qw(any);
 use Scalar::Util qw(looks_like_number);
 # The state and results constants are duplicated in the Python client:
 # if you change them or add any, please also update const.py.
@@ -520,8 +521,10 @@ sub to_hash ($job, %args) {
 Checks if a given job can be duplicated - not cloned yet and in correct state.
 
 =cut
-sub can_be_duplicated ($self) {
-    (!defined $self->clone_id) && !(grep { $self->state eq $_ } PRISTINE_STATES);
+sub can_be_duplicated ($self) { (!defined $self->clone_id) && !$self->is_pristine }
+
+sub is_pristine ($self) {
+    any { $self->state eq $_ } PRISTINE_STATES;
 }
 
 sub _compute_asset_names_considering_parent_jobs ($parent_job_ids, $asset_name) {
@@ -571,8 +574,7 @@ sub is_ok ($self) {
 
 sub is_ok_to_retry ($self) {
     return 1 unless my $result = $self->result;
-    return 0 if grep { $_ eq $result } OK_RESULTS;    # retry is not needed if job is ok
-    return 0 if $result eq USER_CANCELLED;    # retry is not needed if job is user-cancelled
+    return 0 if any { $_ eq $result } (OK_RESULTS, ABORTED_RESULTS);    # retry is not needed if job is ok/aborted
     return 1;
 }
 
@@ -1897,7 +1899,8 @@ sub investigate ($self, %args) {
             eval { Mojo::File->new($_->result_dir(), 'vars.json')->slurp }
               // undef
         } ($prev, $self);
-        $inv{diff_packages_to_last_good} = $self->packages_diff($prev, $ignore) // 'Diff of packages not available';
+        $inv{diff_packages_to_last_good} = $self->packages_diff($prev, $ignore, 'worker_packages.txt');
+        $inv{diff_sut_packages_to_last_good} = $self->packages_diff($prev, $ignore, 'sut_packages.txt');
         last unless $self_file && $prev_file;
         # just ignore any problems on generating the diff with eval, e.g.
         # files missing. This is a best-effort approach.
@@ -1927,11 +1930,11 @@ sub investigate ($self, %args) {
     return \%inv;
 }
 
-sub packages_diff ($self, $prev, $ignore) {
-    my $current_file = path($self->result_dir, 'worker_packages.txt');
-    return unless -e $current_file;
-    my $prev_file = path($prev->result_dir, 'worker_packages.txt');
-    return unless -e $prev_file;
+sub packages_diff ($self, $prev, $ignore, $filename, $fallback = 'Diff of packages not available') {
+    my $current_file = path($self->result_dir, $filename);
+    return $fallback unless -e $current_file;
+    my $prev_file = path($prev->result_dir, $filename);
+    return $fallback unless -e $prev_file;
     my @files_packages = map { $_->slurp } ($prev_file, $current_file);
     my $diff_packages = eval { diff(\$files_packages[0], \$files_packages[1], {CONTEXT => 0}) };
     return join("\n", grep { !/(^@@|$ignore)/ } split(/\n/, $diff_packages));

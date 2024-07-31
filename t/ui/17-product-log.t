@@ -136,16 +136,18 @@ subtest 'rescheduled ISO shown after refreshing page' => sub {
     ok($table, 'products tables found');
     @rows = $driver->find_child_elements($table, './tbody/tr[./td[text() = "whatever.iso"]]', 'xpath');
     is(scalar @rows, 2, 'rescheduled ISO shown');
+    like $rows[0]->get_text(), qr/2.*Demo.*added/,
+      'newly added product shown as first row; status is added as async flag was passed';
     like(
         $driver->find_element_by_id('product_log_table_info')->get_text(),
         qr/Showing 1 to 2 of 2 entries/,
         'Info line shows number of entries'
     );
-    $driver->find_element('#product_log_table_filter input')->send_keys('whatever.iso');
+    $driver->find_element('#scheduled-products .dt-search input')->send_keys('whatever.iso');
     wait_for_ajax(msg => 'search applied');
     @rows = $driver->find_child_elements($table, './tbody/tr[./td[text() = "whatever.iso"]]', 'xpath');
     is(scalar @rows, 2, 'still two ISOs shown');
-    $driver->find_element('#product_log_table_filter input')->send_keys('foo');
+    $driver->find_element('#scheduled-products .dt-search input')->send_keys('foo');
     wait_until(
         sub {
             scalar @{$driver->find_child_elements($table, './tbody/tr[./td[text() = "whatever.iso"]]', 'xpath')} == 0;

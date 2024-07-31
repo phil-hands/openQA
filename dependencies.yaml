@@ -20,11 +20,12 @@ targets:
 assetpack_requires:
   perl(CSS::Minifier::XS): '>= 0.01'
   perl(JavaScript::Minifier::XS): '>= 0.11'
+  perl(Mojolicious):
   perl(Mojolicious::Plugin::AssetPack): '>= 1.36'
   perl(YAML::PP): '>= 0.026'
 
 build_requires:
-  rubygem(sass):
+  rubygem(sass): '>= 3.7.4'
   npm:
   '%assetpack_requires':
 
@@ -80,7 +81,7 @@ devel_no_selenium_requires:
   sudo:
   tar:
   xorg-x11-fonts:
-  perl(Perl::Tidy): '== 20240202.0.0'
+  perl(Perl::Tidy): '== 20240511.0.0'
 
 devel_requires:
   '%devel_no_selenium_requires':

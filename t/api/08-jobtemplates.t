@@ -738,6 +738,13 @@ $t->json_is(
     'posting invalid YAML template - error content',
 );
 
+subtest 'Empty testsuite is invalid' => sub {
+    $form{template} = path("$FindBin::Bin/../data/08-testsuite-empty.yaml")->slurp;
+    $t->post_ok('/api/v1/job_templates_scheduling/' . $opensuse->id, form => \%form);
+    $t->status_is(400);
+    $t->json_is('/error_status' => 400, 'posting invalid YAML');
+};
+
 subtest 'Create and modify groups with YAML' => sub {
     my $job_group_id3 = $job_groups->create({name => 'foo'})->id;
     ok($job_group_id3, "Created group foo ($job_group_id3)");
@@ -931,7 +938,7 @@ subtest 'Create and modify groups with YAML' => sub {
             '' => {
                 error => [
                         'Job template name \'foobar\' is defined more than once. '
-                      . 'Use a unique name and specify \'testsuite\' to re-use test suites in multiple scenarios.'
+                      . 'Use a unique name and specify \'testsuite\' to reuse test suites in multiple scenarios.'
                 ],
                 error_status => 400,
                 id => $job_group_id3,

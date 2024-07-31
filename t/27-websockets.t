@@ -19,7 +19,7 @@ use OpenQA::WebSockets;
 use OpenQA::WebSockets::Model::Status;
 use OpenQA::Constants 'WEBSOCKET_API_VERSION';
 use OpenQA::Test::Client 'client';
-use OpenQA::Test::Database;
+require OpenQA::Test::Database;
 use OpenQA::Test::FakeWebSocketTransaction;
 use Test::Output;
 use Test::MockModule;
@@ -92,7 +92,7 @@ subtest 'web socket message handling' => sub {
 
     # make sure the API version matches in subsequent tests
     $worker->set_property('WEBSOCKET_API_VERSION', WEBSOCKET_API_VERSION);
-    $worker->{_websocket_api_version_} = WEBSOCKET_API_VERSION;
+    $worker->{_websocket_api_version} = WEBSOCKET_API_VERSION;
 
     subtest 'unknown type' => sub {
         combined_like {

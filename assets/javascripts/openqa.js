@@ -16,15 +16,8 @@ function getCookie(cname) {
 }
 
 function setupForAll() {
-  $('[data-toggle="tooltip"]').tooltip({html: true});
-  $('[data-toggle="popover"]').popover({html: true});
-  // workaround for popover with hover on text for firefox
-  $('[data-toggle="popover"]').on('click', function (e) {
-    e.target.closest('a').focus();
-  });
-
-  //$('[data-submenu]').submenupicker();
-
+  document.querySelectorAll('[data-bs-toggle="popover"]').forEach(e => new bootstrap.Popover(e, {html: true}));
+  document.querySelectorAll('[data-bs-toggle="tooltip"]').forEach(e => new bootstrap.Tooltip(e, {html: true}));
   $.ajaxSetup({
     headers: {'X-CSRF-TOKEN': $('meta[name="csrf-token"]').attr('content')}
   });
@@ -42,9 +35,7 @@ function addFlash(status, text, container) {
 
   var div = $('<div class="alert alert-primary alert-dismissible fade show" role="alert"></div>');
   div.append(makeFlashElement(text));
-  div.append(
-    '<button type="button" class="close" data-dismiss="alert" aria-label="Close"><span aria-hidden="true">&times;</span></button>'
-  );
+  div.append('<button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Close"></button>');
   div.addClass('alert-' + status);
   container.append(div);
   return div;
@@ -119,16 +110,34 @@ function renderDataSize(sizeInByte) {
 }
 
 function alignBuildLabels() {
-  var values = $.map($('.build-label'), function (el, index) {
-    return parseInt($(el).css('width'));
-  });
-  var max = Math.max.apply(null, values);
-  $('.build-label').css('min-width', max + 'px');
+  const max = Math.max(...Array.from(document.getElementsByClassName('build-label')).map(e => e.offsetWidth));
+  const style = document.createElement('style');
+  document.head.appendChild(style);
+  style.sheet.insertRule(`@media (min-width: 1000px) { .build-label { width: ${max}px; } }`);
 }
 
 // reloads the page - this wrapper exists to be able to disable the reload during tests
 function reloadPage() {
   location.reload();
+}
+
+function makeUrlPort(servicePortDelta) {
+  // read port from the location of the current page
+  let port = Number.parseInt(window.location.port);
+  if (Number.isNaN(port)) {
+    // don't put a port in the URL if there's no explicit port
+    port = '';
+  } else {
+    if (port !== 80 || port !== 443) port += servicePortDelta;
+    port = ':' + port;
+  }
+  return port;
+}
+
+function makeUrlAbsolute(url, servicePortDelta) {
+  const location = window.location;
+  const port = makeUrlPort(servicePortDelta);
+  return location.protocol + '//' + location.hostname + port + (url.indexOf('/') !== 0 ? '/' : '') + url;
 }
 
 // returns an absolute "ws://" URL for the specified URL which might be relative
@@ -138,17 +147,8 @@ function makeWsUrlAbsolute(url, servicePortDelta) {
     return url;
   }
 
-  // read port from the page's current URL
-  var location = window.location;
-  var port = Number.parseInt(location.port);
-  if (Number.isNaN(port)) {
-    // don't put a port in the URL if there's no explicit port
-    port = '';
-  } else {
-    if (port !== 80 || port !== 443) port += servicePortDelta;
-    port = ':' + port;
-  }
-
+  const location = window.location;
+  const port = makeUrlPort(servicePortDelta);
   return (
     (location.protocol == 'https:' ? 'wss://' : 'ws:/') +
     location.hostname +

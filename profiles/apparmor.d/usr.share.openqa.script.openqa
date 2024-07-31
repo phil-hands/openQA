@@ -22,6 +22,7 @@
   /usr/bin/dash ix,
   /usr/bin/perl ix,
   /usr/bin/pwd ix,
+  /usr/bin/sleep rix,
   /usr/bin/ssh rcx,
   /usr/bin/timeout rix,
   /usr/bin/unzip{,-plain} rix,
@@ -156,6 +157,7 @@
   /usr/bin/tac mrix,
   /usr/bin/tail mrix,
   /usr/bin/wget ix,
+  /usr/bin/seq rix,
 
   owner /var/log/openqa_gru wk,
 
