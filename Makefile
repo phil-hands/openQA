@@ -93,7 +93,7 @@ build-manpages: $(man_dir) $(manpages)
 
 .PHONY: clean
 clean:
-	-rm -r build
+	-rm -rf build
 
 .PHONY: install-generic
 install-generic:
