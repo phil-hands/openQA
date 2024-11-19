@@ -29,10 +29,5 @@
     "jquery": "^3.7.1",
     "jquery-ujs": "^1.2.3",
     "timeago": "^1.6.7"
-  },
-  "overrides": {
-    "dagre-d3": {
-      "d3": "npm:d3"
-    }
   }
 }
