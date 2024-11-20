@@ -1,8 +1,8 @@
-openqa (4.6.1722418987.a743edeb6-1) UNRELEASED; urgency=medium
+openqa (4.6.1732034221.ae34b08ff-1) UNRELEASED; urgency=medium
 
-  * Update to new upstream version 4.6.1722418987.a743edeb6.
+  * Update to new upstream version 4.6.1732034221.ae34b08ff.
 
- -- Philip Hands <phil@hands.com>  Wed, 31 Jul 2024 12:47:38 +0200
+ -- Philip Hands <phil@hands.com>  Wed, 20 Nov 2024 11:44:47 +0100
 
 openqa (4.6.1712926289.b0d689b52-2) unstable; urgency=medium
 
