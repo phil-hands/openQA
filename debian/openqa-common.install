@@ -34,7 +34,6 @@ usr/share/openqa/lib/OpenQA/WebAPI.pm
 usr/share/openqa/lib/OpenQA/WebSockets.pm
 usr/share/openqa/lib/OpenQA/Worker.pm
 usr/share/openqa/lib/OpenQA/YAML.pm
-usr/share/openqa/lib/perlcritic
 usr/share/openqa/script/fetchneedles
 var/lib/openqa/share
 var/lib/openqa/factory
