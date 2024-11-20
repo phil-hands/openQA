@@ -3,6 +3,7 @@
 
 package OpenQA::Schema::Result::Needles;
 
+## no critic (OpenQA::RedundantStrictWarning)
 use 5.018;
 
 use Mojo::Base 'DBIx::Class::Core', -signatures;
@@ -213,6 +214,14 @@ sub to_json ($self) {
         json_path => "/needles/$needle_id/json",
         image_path => "/needles/$needle_id/image",
     };
+}
+
+my $fmt = '%Y-%m-%dT%H:%M:%S%z';    # with offset
+sub last_seen_time_fmt ($self) {
+    $self->last_seen_time ? $self->last_seen_time->strftime($fmt) : 'never';
+}
+sub last_matched_time_fmt ($self) {
+    $self->last_matched_time ? $self->last_matched_time->strftime($fmt) : 'never';
 }
 
 1;

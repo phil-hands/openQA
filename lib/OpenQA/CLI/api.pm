@@ -16,14 +16,11 @@ has usage => sub {
 };
 
 sub command ($self, @args) {
-
-    my $data = $self->data_from_stdin;
-
     die $self->usage
       unless getopt \@args,
       'a|header=s' => \my @headers,
       'D|data-file=s' => \my $data_file,
-      'd|data=s' => \$data,
+      'd|data=s' => \(my $data = ''),
       'f|form' => \my $form,
       'j|json' => \my $json,
       'param-file=s' => \my @param_file,
@@ -32,11 +29,10 @@ sub command ($self, @args) {
 
     @args = $self->decode_args(@args);
     die $self->usage unless my $path = shift @args;
+    $data = $data_file eq '-' ? $self->data_from_stdin : path($data_file)->slurp if $data_file;
 
-    $data = path($data_file)->slurp if $data_file;
-    my @data = ($data);
     my $params = $form ? decode_json($data) : $self->parse_params(\@args, \@param_file);
-    @data = (form => $params) if keys %$params;
+    my @data = keys %$params ? (form => $params) : ($data);
 
     my $headers = $self->parse_headers(@headers);
     $headers->{Accept} //= 'application/json';
@@ -122,8 +118,8 @@ sub command ($self, @args) {
         --apisecret <secret>      API secret
     -a, --header <name:value>     One or more additional HTTP headers
     -D, --data-file <path>        Load content to send with request from file
-    -d, --data <string>           Content to send with request, alternatively
-                                  you can also pipe data to openqa-cli
+                                  or from stdin by specifying "-" as path
+    -d, --data <string>           Content to send with request
     -f, --form                    Turn JSON object into form parameters
         --host <host>             Target host, defaults to http://localhost
     -h, --help                    Show this summary of available options

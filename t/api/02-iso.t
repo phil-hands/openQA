@@ -547,17 +547,14 @@ subtest 'Handling different WORKER_CLASS in directly chained dependency chains' 
         $schema->txn_begin;
         add_opensuse_test('chained-a', WORKER_CLASS => 'foo');
         add_opensuse_test('chained-b', START_DIRECTLY_AFTER_TEST => 'chained-a', WORKER_CLASS => 'foo');
-        add_opensuse_test('chained-c', START_DIRECTLY_AFTER_TEST => 'chained-b', WORKER_CLASS => 'bar');
-        add_opensuse_test('chained-d', START_DIRECTLY_AFTER_TEST => 'chained-c', WORKER_CLASS => 'bar');
-        add_opensuse_test('chained-e', START_DIRECTLY_AFTER_TEST => 'chained-d', WORKER_CLASS => 'bar');
+        add_opensuse_test('chained-c', START_DIRECTLY_AFTER_TEST => 'chained-b', WORKER_CLASS => 'bar,baz');
+        add_opensuse_test('chained-d', START_DIRECTLY_AFTER_TEST => 'chained-c', WORKER_CLASS => 'bar,baz');
+        add_opensuse_test('chained-e', START_DIRECTLY_AFTER_TEST => 'chained-d', WORKER_CLASS => 'bar,baz');
 
         my $res = schedule_iso($t, {%iso, _GROUP => 'opensuse test'});
         is($res->json->{count}, 0, 'none of the jobs has been scheduled');
-        like(
-            $_->{error_messages}->[0],
-qr/Worker class of chained-(c|d|e) \(bar\) does not match the worker class of its directly chained parent \(foo\)/,
-            'error reported'
-        ) for @{$res->json->{failed}};
+        like($_->{error_messages}->[0], qr/chained-(c|d|e) \(bar,baz\) does not match .* \(foo\)/, 'error reported')
+          for @{$res->json->{failed}};
         $schema->txn_rollback;
     };
 };
@@ -566,8 +563,8 @@ for my $machine_separator (qw(@ :)) {
     $schema->txn_begin;
     subtest "Create dependency for jobs on different machines"
       . " - dependency setting are correct (using machine separator '$machine_separator')" => sub {
-        $t->post_ok('/api/v1/machines', form => {name => '64bit-ipmi', backend => 'ipmi', 'settings[TEST]' => 'ipmi'})
-          ->status_is(200);
+        $t->post_ok('/api/v1/machines',
+            json => {name => '64bit-ipmi', backend => 'ipmi', settings => {'TEST' => 'ipmi'}})->status_is(200);
         add_opensuse_test('supportserver1');
         add_opensuse_test('supportserver2', MACHINE => ['64bit-ipmi']);
         add_opensuse_test(
@@ -618,7 +615,7 @@ for my $machine_separator (qw(@ :)) {
 
 subtest 'Create dependency for jobs on different machines - best match and log error dependency' => sub {
     $schema->txn_begin;
-    $t->post_ok('/api/v1/machines', form => {name => 'powerpc', backend => 'qemu', 'settings[TEST]' => 'power'})
+    $t->post_ok('/api/v1/machines', json => {name => 'powerpc', backend => 'qemu', settings => {'TEST' => 'power'}})
       ->status_is(200);
 
     add_opensuse_test('install_ltp', MACHINE => ['powerpc']);
@@ -672,7 +669,7 @@ subtest 'Create dependency for jobs on different machines - log error parents' =
     $schema->txn_begin;
     my @machines = qw(ppc ppc-6G ppc-1G ppc-2G s390x);
     for my $m (@machines) {
-        $t->post_ok('/api/v1/machines', form => {name => $m, backend => 'qemu', 'settings[TEST]' => 'test'})
+        $t->post_ok('/api/v1/machines', json => {name => $m, backend => 'qemu', settings => {'TEST' => 'test'}})
           ->status_is(200);
     }
     add_opensuse_test('supportserver', MACHINE => ['ppc', '64bit', 's390x']);

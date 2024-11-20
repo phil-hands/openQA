@@ -17,7 +17,9 @@
 
 
 # can't use linebreaks here!
-%define openqa_services openqa-webui.service openqa-gru.service openqa-websockets.service openqa-scheduler.service openqa-enqueue-audit-event-cleanup.service openqa-enqueue-audit-event-cleanup.timer openqa-enqueue-asset-cleanup.service openqa-enqueue-asset-cleanup.timer openqa-enqueue-result-cleanup.service openqa-enqueue-result-cleanup.timer openqa-enqueue-bug-cleanup.service openqa-enqueue-bug-cleanup.timer
+%define openqa_main_service openqa-webui.service
+%define openqa_extra_services openqa-gru.service openqa-websockets.service openqa-scheduler.service openqa-enqueue-audit-event-cleanup.service openqa-enqueue-audit-event-cleanup.timer openqa-enqueue-asset-cleanup.service openqa-enqueue-git-auto-update.service openqa-enqueue-asset-cleanup.timer openqa-enqueue-result-cleanup.service openqa-enqueue-result-cleanup.timer openqa-enqueue-bug-cleanup.service openqa-enqueue-bug-cleanup.timer openqa-enqueue-git-auto-update.timer
+%define openqa_services %{openqa_main_service} %{openqa_extra_services}
 %define openqa_worker_services openqa-worker.target openqa-slirpvde.service openqa-vde_switch.service openqa-worker-cacheservice.service openqa-worker-cacheservice-minion.service
 %if %{undefined tmpfiles_create}
 %define tmpfiles_create() \
@@ -39,6 +41,14 @@
 %bcond_with python_scripts
 %else
 %bcond_without python_scripts
+%endif
+# exclude additional sub packages that would pull in a lot of extra dependencies on SLE
+%if 0%{?sle_version} && !0%{?is_opensuse}
+%bcond_with devel_package
+%bcond_with munin_package
+%else
+%bcond_without devel_package
+%bcond_without munin_package
 %endif
 # runtime requirements that also the testsuite needs
 %if %{with python_scripts}
@@ -64,16 +74,18 @@
 # Do not require on this in individual sub-packages except for the devel
 # package.
 # The following line is generated from dependencies.yaml
-%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires ShellCheck curl jq openssh-common os-autoinst-devel perl(App::cpanminus) perl(Perl::Critic) perl(Perl::Critic::Freenode) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-setuptools python3-yamllint shfmt
+%define test_requires %common_requires %main_requires %python_scripts_requires %worker_requires curl jq openssh-common os-autoinst perl(App::cpanminus) perl(Selenium::Remote::Driver) >= 1.23 perl(Selenium::Remote::WDKeys) perl(Test::Exception) perl(Test::Fatal) perl(Test::MockModule) perl(Test::MockObject) perl(Test::Mojo) perl(Test::Most) perl(Test::Output) perl(Test::Pod) perl(Test::Strict) perl(Test::Warnings) >= 0.029 postgresql-server python3-setuptools
 %ifarch x86_64
 %define qemu qemu qemu-kvm
 %else
 %define qemu qemu
 %endif
 # The following line is generated from dependencies.yaml
+%define style_check_requires ShellCheck perl(Code::TidyAll) perl(Perl::Critic) perl(Perl::Critic::Freenode) python3-yamllint shfmt
+# The following line is generated from dependencies.yaml
 %define cover_requires perl(Devel::Cover) perl(Devel::Cover::Report::Codecovbash)
 # The following line is generated from dependencies.yaml
-%define devel_no_selenium_requires %build_requires %cover_requires %qemu %test_requires curl perl(Perl::Tidy) postgresql-devel rsync sudo tar xorg-x11-fonts
+%define devel_no_selenium_requires %build_requires %cover_requires %qemu %style_check_requires %test_requires curl perl(Perl::Tidy) postgresql-devel rsync sudo tar xorg-x11-fonts
 # The following line is generated from dependencies.yaml
 %define devel_requires %devel_no_selenium_requires chromedriver
 
@@ -91,7 +103,8 @@ BuildRequires:  fdupes
 # for install-opensuse in Makefile
 %if 0%{?is_opensuse}
 BuildRequires:  openSUSE-release
-%else
+%endif
+%if 0%{?sle_version} && !0%{?is_opensuse}
 BuildRequires:  sles-release
 %endif
 BuildRequires:  %{build_requires}
@@ -151,6 +164,7 @@ revision of the operating system, reporting the errors detected for each
 combination of hardware configuration, installation options and variant of the
 operating system.
 
+%if %{with devel_package}
 %package no-selenium-devel
 Summary:        Development package pulling in all build+test dependencies except chromedriver for Selenium based tests
 Requires:       %{devel_no_selenium_requires}
@@ -164,6 +178,7 @@ Requires:       %{devel_requires}
 
 %description devel
 Development package pulling in all build+test dependencies.
+%endif
 
 %package common
 Summary:        The openQA common tools for web-frontend and workers
@@ -191,6 +206,7 @@ Recommends:     pngquant
 Recommends:     openssh-common
 %if 0%{?suse_version} >= 1330
 Requires(pre):  group(nogroup)
+Requires(pre):  group(kvm)
 %endif
 
 %description worker
@@ -285,6 +301,7 @@ upgrading the system if devel:openQA packages are stable and contain updates. It
 is complementary to auto-update which also reboots the system and does updates
 regardless of whether devel:openQA contains updates.
 
+%if %{with munin_package}
 %package munin
 Summary:        Munin scripts
 Requires:       munin
@@ -295,6 +312,7 @@ Requires:       perl
 %description munin
 Use this package to install munin scripts that allow to monitor some openQA
 statistics.
+%endif
 
 
 %prep
@@ -382,10 +400,13 @@ ln -s %{_datadir}/openqa/script/openqa-label-all %{buildroot}%{_bindir}/openqa-l
 %endif
 
 # munin
+%if %{with munin_package}
 install -d -m 755 %{buildroot}/%{_prefix}/lib/munin/plugins
 install -m 755 contrib/munin/plugins/minion %{buildroot}/%{_prefix}/lib/munin/plugins/openqa_minion_
 install -d -m 755 %{buildroot}/%{_sysconfdir}/munin/plugin-conf.d
 install -m 644 contrib/munin/config/minion.config %{buildroot}/%{_sysconfdir}/munin/plugin-conf.d/openqa-minion
+install -m 755 contrib/munin/utils/munin-mail %{buildroot}/%{_datadir}/openqa/script/munin-mail
+%endif
 
 cd %{buildroot}
 grep -rl %{_bindir}/env . | while read file; do
@@ -504,7 +525,12 @@ fi
 %service_del_preun openqa-continuous-update.timer
 
 %postun
-%service_del_postun %{openqa_services}
+# reload main service (but do not restart it via service_del_postun to minimize downtimes)
+if [ -x /usr/bin/systemctl ] && [ $1 -ge 1 ]; then
+    /usr/bin/systemctl reload %{openqa_main_service} || :
+fi
+# restart other services
+%service_del_postun %{openqa_extra_services}
 %restart_on_update apparmor
 
 %postun worker
@@ -580,6 +606,8 @@ fi
 %{_unitdir}/openqa-enqueue-audit-event-cleanup.timer
 %{_unitdir}/openqa-enqueue-asset-cleanup.service
 %{_unitdir}/openqa-enqueue-asset-cleanup.timer
+%{_unitdir}/openqa-enqueue-git-auto-update.service
+%{_unitdir}/openqa-enqueue-git-auto-update.timer
 %{_unitdir}/openqa-enqueue-result-cleanup.service
 %{_unitdir}/openqa-enqueue-result-cleanup.timer
 %{_unitdir}/openqa-enqueue-bug-cleanup.service
@@ -613,6 +641,7 @@ fi
 %{_datadir}/openqa/script/openqa-enqueue-asset-cleanup
 %{_datadir}/openqa/script/openqa-enqueue-audit-event-cleanup
 %{_datadir}/openqa/script/openqa-enqueue-bug-cleanup
+%{_datadir}/openqa/script/openqa-enqueue-git-auto-update
 %{_datadir}/openqa/script/openqa-enqueue-result-cleanup
 %{_datadir}/openqa/script/openqa-gru
 %{_datadir}/openqa/script/openqa-rollback
@@ -640,7 +669,9 @@ fi
 %{_sysusersdir}/geekotest.conf
 %endif
 
+%if %{with devel_package}
 %files devel
+%endif
 
 %files common
 %dir %{_datadir}/openqa
@@ -774,14 +805,18 @@ fi
 %{_unitdir}/openqa-continuous-update.*
 %{_datadir}/openqa/script/openqa-continuous-update
 
+%if %{with munin_package}
 %files munin
 %defattr(-,root,root)
 %doc contrib/munin/config/minion.config
+%dir %{_datadir}/openqa/script
 %dir %{_prefix}/lib/munin
 %dir %{_prefix}/lib/munin/plugins
 %dir %{_sysconfdir}/munin
 %dir %{_sysconfdir}/munin/plugin-conf.d
 %{_prefix}/lib/munin/plugins/openqa_minion_
+%{_datadir}/openqa/script/munin-mail
 %config(noreplace) %{_sysconfdir}/munin/plugin-conf.d/openqa-minion
+%endif
 
 %changelog

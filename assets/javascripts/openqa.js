@@ -23,6 +23,17 @@ function setupForAll() {
   });
 }
 
+function getCSRFToken() {
+  return document.querySelector('meta[name="csrf-token"]').content;
+}
+
+function fetchWithCSRF(resource, options) {
+  options ??= {};
+  options.headers ??= {};
+  options.headers['X-CSRF-TOKEN'] ??= getCSRFToken();
+  return window.fetch(resource, options);
+}
+
 function makeFlashElement(text) {
   return typeof text === 'string' ? '<span>' + text + '</span>' : text;
 }
@@ -83,7 +94,8 @@ function updateQueryParams(params) {
   if (!history.replaceState) {
     return; // skip if not supported
   }
-  var search = [];
+  const search = [];
+  const hash = document.location.hash;
   $.each(params, function (key, values) {
     $.each(values, function (index, value) {
       if (value === undefined) {
@@ -93,7 +105,7 @@ function updateQueryParams(params) {
       }
     });
   });
-  history.replaceState({}, document.title, window.location.pathname + '?' + search.join('&'));
+  history.replaceState({}, document.title, `?${search.join('&')}${hash}`);
 }
 
 function renderDataSize(sizeInByte) {
@@ -226,7 +238,12 @@ function forceJobRestartViaRestartLink(restartLink) {
   restartLink.click();
 }
 
-function restartJob(ajaxUrl, jobId) {
+function restartJob(ajaxUrl, jobIds, comment) {
+  let singleJobId;
+  if (!Array.isArray(jobIds)) {
+    singleJobId = jobIds;
+    jobIds = [jobIds];
+  }
   var showError = function (reason) {
     var errorMessage = '<strong>Unable to restart job';
     if (reason) {
@@ -236,15 +253,24 @@ function restartJob(ajaxUrl, jobId) {
     }
     addFlash('danger', errorMessage);
   };
-
-  return $.ajax({
-    type: 'POST',
-    url: ajaxUrl,
-    success: function (data, res, xhr) {
-      var responseJSON = xhr.responseJSON;
+  const body = new FormData();
+  body.append('comment', comment);
+  return fetchWithCSRF(ajaxUrl, {method: 'POST', body: body})
+    .then(response => {
+      if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
+      return response.json();
+    })
+    .then(responseJSON => {
       var newJobUrl;
       try {
-        newJobUrl = responseJSON.test_url[0][jobId];
+        if (singleJobId) {
+          newJobUrl = responseJSON.test_url[0][singleJobId];
+        } else {
+          const testUrlData = responseJSON?.test_url;
+          if (Array.isArray(testUrlData)) {
+            newJobUrl = testUrlData.map(item => Object.values(item)[0]);
+          }
+        }
       } catch {
         // Intentionally ignore all errors
       }
@@ -252,21 +278,27 @@ function restartJob(ajaxUrl, jobId) {
         showJobRestartResults(
           responseJSON,
           newJobUrl,
-          restartJob.bind(undefined, addParam(ajaxUrl, 'force', '1'), jobId)
+          restartJob.bind(undefined, addParam(ajaxUrl, 'force', '1'), jobIds, comment)
         )
       ) {
         return;
       }
       if (newJobUrl) {
-        window.location.replace(newJobUrl);
+        if (Array.isArray(newJobUrl)) {
+          addFlash(
+            'info',
+            'The jobs have been restarted. <a href="javascript: location.reload()">Reload</a> the page to show changes.'
+          );
+        } else {
+          window.location.replace(newJobUrl);
+        }
       } else {
-        showError('URL for new job not available');
+        throw 'URL for new job not available';
       }
-    },
-    error: function (xhr, ajaxOptions, thrownError) {
-      showError(xhr.responseJSON ? xhr.responseJSON.error : undefined);
-    }
-  });
+    })
+    .catch(error => {
+      showError(error);
+    });
 }
 
 function htmlEscape(str) {
@@ -468,12 +500,12 @@ function renderJobStatus(item, id) {
   request.send();
 }
 
-function renderActivityView(ajaxUrl, currentUser) {
+function renderActivityView(ajaxUrl) {
   const spinner = document.getElementById('progress-indication');
   spinner.style.display = 'block';
   const request = new XMLHttpRequest();
   const query = new URLSearchParams();
-  query.append('search[value]', 'user:' + encodeURIComponent(currentUser) + ' event:job_');
+  query.append('search[value]', 'event:job_');
   query.append('order[0][column]', '0'); // t_created
   query.append('order[0][dir]', 'desc');
   request.open('GET', ajaxUrl + '?' + query.toString());
@@ -565,19 +597,38 @@ function renderComments(row) {
 }
 
 function renderHttpUrlAsLink(value) {
-  const span = document.createElement('span');
-  for (let match; (match = value.match(/https?:\/\/[^\s,]*/)); ) {
-    const url = match[0];
-    const link = document.createElement('a');
-    link.href = url;
-    link.target = 'blank';
-    link.appendChild(document.createTextNode(url));
-    span.appendChild(document.createTextNode(value.substr(0, match.index)));
-    span.appendChild(link);
-    value = value.substr(match.index + url.length);
+  if (!value) {
+    return document.createTextNode('');
   }
-  span.appendChild(document.createTextNode(value));
-  return span;
+  const fragment = document.createDocumentFragment();
+  if (Array.isArray(value)) {
+    value.forEach((item, index) => {
+      fragment.appendChild(renderHttpUrlAsLink(item));
+      if (index < value.length - 1) {
+        fragment.appendChild(document.createTextNode(', ')); // seperator between items
+      }
+    });
+    return fragment;
+  }
+  if (typeof value !== 'string') {
+    value = String(value);
+  }
+  const urlRegex = /https?:\/\/[^\s,]*/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = urlRegex.exec(value)) !== null) {
+    if (match.index > lastIndex) {
+      fragment.appendChild(document.createTextNode(value.substring(lastIndex, match.index)));
+    }
+    const a = document.createElement('a');
+    a.href = a.textContent = match[0];
+    fragment.appendChild(a);
+    lastIndex = urlRegex.lastIndex;
+  }
+  if (lastIndex < value.length) {
+    fragment.appendChild(document.createTextNode(value.substring(lastIndex)));
+  }
+  return fragment.hasChildNodes() ? fragment : document.createTextNode(value);
 }
 
 function getXhrError(jqXHR, textStatus, errorThrown) {

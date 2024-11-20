@@ -29,7 +29,8 @@ use OpenQA::SeleniumTest;
 my $t = Test::Mojo->new('OpenQA::WebAPI');
 
 $ENV{OPENQA_CONFIG} = my $config_dir = tempdir("$FindBin::Script-XXXX");
-$config_dir->child('openqa.ini')->spew("[scheduler]\nmax_running_jobs = 3");
+my $cfg = "[scheduler]\nmax_running_jobs = 3\n[scm git]\ngit_auto_update = no";
+$config_dir->child('openqa.ini')->spew($cfg);
 
 my @job_params = (
     group_id => 1002,
@@ -249,20 +250,10 @@ subtest 'available comments shown' => sub {
         "Bug referenced: bsc#4\nclosed bugzilla bug",
         'available bugref (bsc#4) shown for finished jobs'
     );
-
-  SKIP: {
-        skip 'comment icon for running and scheduled jobs skipped to imporove performance', 2;
-        is(
-            $driver->find_element('#job_99963 .fa-comment')->get_attribute('title'),
-            '2 comments available',
-            'available comments shown for running jobs'
-        );
-        is(
-            $driver->find_element('#job_99928 .fa-comment')->get_attribute('title'),
-            '1 comment available',
-            'available comments shown for scheduled jobs'
-        );
-    }
+    is_deeply([$driver->find_elements('#job_99963 .fa-comment')],
+        [], 'available comments not shown for running jobs (for performance reasons)');
+    is_deeply([$driver->find_elements('#job_99928 .fa-comment')],
+        [], 'available comments not shown for scheduled jobs (for performance reasons)');
 };
 
 $driver->find_element_by_link_text('Build0091')->click();
@@ -433,6 +424,19 @@ subtest 'filter-finished' => sub {
     $driver->find_element_by_id('todofilter')->click;
     wait_for_ajax(msg => 'table re-loaded after unchecking TODO-checkbox');
     cmp_ok scalar $driver->find_elements('#results tbody tr', 'css'), '>', scalar @jobs, 'all jobs shown again';
+};
+
+subtest 'result filter does not affect scheduled and running jobs' => sub {
+    $driver->get('/tests?resultfilter=Failed');
+
+    my @running_jobs = $driver->find_elements('#running tbody tr');
+    is scalar @running_jobs, 3, 'Running jobs are displayed';
+
+    my @scheduled_jobs = $driver->find_elements('#scheduled tbody tr');
+    is scalar @scheduled_jobs, 3, 'Scheduled jobs are displayed';
+
+    my @finished_jobs = $driver->find_elements('#results tbody tr');
+    is scalar @finished_jobs, 3, 'Finished jobs table is correctly filtered';
 };
 
 subtest 'match parameter' => sub {

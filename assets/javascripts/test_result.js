@@ -358,7 +358,7 @@ function handleKeyDownOnTestDetails(e) {
 function setPageHashAccordingToCurrentTab(tabNameOrHash, replace) {
   // don't mess with #step hashes within details tab
   const currentHash = window.location.hash;
-  if (tabNameOrHash === 'details' && currentHash.search('#step/') === 0) {
+  if (tabNameOrHash === 'details' && (currentHash.startsWith('#step/') || currentHash.startsWith('#line-'))) {
     return;
   }
 
@@ -459,15 +459,18 @@ function activateTabAccordingToHashChange() {
   }
 
   // check for tabs, steps or comments matching the hash
-  var link = $("[href='" + hash + "'], [data-href='" + hash + "']");
-  var tabName = hash.substr(1);
-  if (hash.search('#step/') === 0) {
-    setCurrentPreviewFromStepLinkIfPossible(link);
+  let link = $(`[href='${hash}'], [data-href='${hash}']`);
+  let tabName = hash.substr(1);
+  let isStep = hash.startsWith('#step/');
+  if (hash.startsWith('#line-') || isStep) {
+    if (isStep) {
+      setCurrentPreviewFromStepLinkIfPossible(link);
+      // note: It is not a problem if the details haven't been loaded so far. Once the details become available the hash
+      //       is checked again and the exact step preview will be shown.
+    }
     link = $("[href='#details']");
     tabName = 'details';
-    // note: It is not a problem if the details haven't been loaded so far. Once the details become available the hash
-    //       is checked again and the exact step preview will be shown.
-  } else if (hash.search('#comment-') === 0) {
+  } else if (hash.startsWith('#comment-')) {
     link = $("[href='#comments']");
     tabName = 'comments';
   } else if (link.attr('role') !== 'tab' || link.prop('aria-expanded')) {
@@ -494,27 +497,30 @@ function loadTabPanelElement(tabName, tabConfig) {
     return false;
   }
   tabConfig.panelElement = tabPanelElement; // for easier access in custom renderers
-  $.ajax({
-    url: ajaxUrl,
-    method: 'GET',
-    success: function (response) {
+  fetch(ajaxUrl, {method: 'GET'})
+    .then(response => {
+      if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
+      if (response.headers.get('Content-Type').includes('application/json')) return response.json();
+      return response.text();
+    })
+    .then(response => {
       const customRenderer = tabConfig.renderContents;
       if (customRenderer) {
         return customRenderer.call(tabConfig, response);
       }
       tabPanelElement.innerHTML = response;
-    },
-    error: function (xhr, ajaxOptions, thrownError) {
+    })
+    .catch(error => {
+      console.error(error);
       const customRenderer = tabConfig.renderError;
       if (customRenderer) {
-        return customRenderer.call(tabConfig, xhr, ajaxOptions, thrownError);
+        return customRenderer.call(tabConfig, error);
       }
       tabPanelElement.innerHTML = '';
       tabPanelElement.appendChild(
-        document.createTextNode('Unable to load ' + (tabConfig.descriptiveName || tabName) + '.')
+        document.createTextNode(`Unable to load ${tabConfig.descriptiveName || tabName}: ${error}`)
       );
-    }
-  });
+    });
   tabPanelElement.innerHTML =
     '<p style="text-align: center;"><i class="fa fa-spinner fa-spin fa-lg"></i> Loading ' +
     (tabConfig.descriptiveName || tabName) +
@@ -578,20 +584,162 @@ function setupResult(jobid, state, result, status_url) {
   setInfoPanelClassName(state, result);
 }
 
-function loadEmbeddedLogFiles() {
+function delay(callback, ms) {
+  let timer;
+  return function () {
+    clearTimeout(timer);
+    timer = setTimeout(callback.bind(this, ...arguments), ms || 0);
+  };
+}
+
+function filterLogLines(input, viaSearchBox = true) {
+  if (input === undefined) {
+    return;
+  }
+  const string = input.value;
+  if (string === input.dataset.lastString) {
+    // abort if the value does not change which can happen because there are multiple event handlers calling this function
+    return;
+  }
+  const match = string.match(/^\/(.*)\/([i]*)$/);
+  const regex = match ? new RegExp(match[1], match[2]) : undefined;
+  input.dataset.lastString = string;
+  displaySearchInfo('Searching…');
+  $('.embedded-logfile').each(function (index, logFileElement) {
+    const content = logFileElement.content;
+    if (content === undefined) {
+      return;
+    }
+    const lines = Array.from(content);
+    let lineNumber = 0;
+    let matchingLines = 0;
+    if (string.length > 0) {
+      for (const line of lines) {
+        const lineAsText = ansiToText(line);
+        if (regex ? lineAsText.match(regex) : lineAsText.includes(string)) {
+          ++matchingLines;
+        } else {
+          lines[lineNumber] = undefined;
+        }
+        ++lineNumber;
+      }
+      displaySearchInfo(`Showing ${matchingLines} / ${lineNumber} lines`);
+    } else {
+      displaySearchInfo('');
+    }
+    showLogLines(logFileElement, lines, viaSearchBox);
+  });
+  const params = parseQueryParams();
+  string.length > 0 ? (params.filter = [string]) : delete params.filter;
+  updateQueryParams(params);
+}
+
+function filterEmbeddedLogFiles() {
+  const searchBox = document.getElementById('filter-log-file');
+  if (searchBox) {
+    const filterParam = parseQueryParams().filter?.[0];
+    if (filterParam !== undefined) {
+      searchBox.value = filterParam;
+    }
+  }
+  loadEmbeddedLogFiles(filterLogLines.bind(null, searchBox, false));
+}
+
+function showLogLines(logFileElement, lines, viaSearchBox = false) {
+  const tableElement = document.createElement('table');
+  const currentHash = document.location.hash;
+  let lineNumber = 0;
+  let currentLineElement = undefined;
+  logFileElement.innerHTML = '';
+  for (const line of lines) {
+    ++lineNumber;
+    if (line === undefined) {
+      continue;
+    }
+    const lineElement = document.createElement('tr');
+    const lineNumberElement = document.createElement('td');
+    const lineNumberLinkElement = document.createElement('a');
+    const lineContentElement = document.createElement('td');
+    const hash = '#' + (lineElement.id = 'line-' + lineNumber);
+    lineNumberLinkElement.href = hash;
+    lineNumberLinkElement.onclick = () => {
+      if (currentLineElement !== undefined) {
+        currentLineElement.classList.remove('line-current');
+      }
+      lineContentElement.classList.add('line-current');
+      currentLineElement = lineContentElement;
+    };
+    lineNumberLinkElement.append(lineNumber);
+    lineNumberElement.className = 'line-number';
+    lineContentElement.className = 'line-content';
+    if (hash === currentHash) {
+      lineNumberLinkElement.onclick();
+    }
+    lineContentElement.innerHTML = ansiToHtml(line);
+    lineNumberElement.appendChild(lineNumberLinkElement);
+    lineElement.append(lineNumberElement, lineContentElement);
+    tableElement.appendChild(lineElement);
+  }
+  logFileElement.appendChild(tableElement);
+
+  // trigger the current hash again or delete it if no longer valid
+  if (currentLineElement && !viaSearchBox) {
+    currentLineElement.scrollIntoView();
+  } else if (currentHash.startsWith('line-') && !currentLineElement) {
+    document.location.hash = '';
+  }
+
+  // setup event handler to update the current line when the hash changes
+  if (window.hasHandlerForUpdatingCurrentLine) {
+    return;
+  }
+  addEventListener('hashchange', event => {
+    const hash = document.location.hash;
+    if (hash.startsWith('#line-')) {
+      const lineNumberLinkElement = document.querySelector(hash + ' .line-number a');
+      if (lineNumberLinkElement) {
+        lineNumberLinkElement.onclick();
+      }
+    }
+  });
+  window.hasHandlerForUpdatingCurrentLine = true;
+}
+
+function loadEmbeddedLogFiles(filter) {
   $('.embedded-logfile').each(function (index, logFileElement) {
     if (logFileElement.dataset.contentsLoaded) {
       return;
     }
-    $.ajax(logFileElement.dataset.src)
-      .done(function (response) {
-        logFileElement.innerHTML = ansiToHtml(response);
+    fetch(logFileElement.dataset.src)
+      .then(response => {
+        if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
+        return response.text();
+      })
+      .then(response => {
+        const lines = (logFileElement.content = response.split(/\r?\n/));
+        filter ? filter() : showLogLines(logFileElement, lines, false);
         logFileElement.dataset.contentsLoaded = true;
       })
-      .fail(function (jqXHR, textStatus, errorThrown) {
-        logFileElement.appendChild(document.createTextNode('Unable to load logfile: ' + errorThrown));
+      .catch(error => {
+        log.error(error);
+        logFileElement.appendChild(document.createTextNode(`Unable to load logfile: ${error}`));
       });
   });
+}
+
+window.onload = function () {
+  const searchBox = document.getElementById('filter-log-file');
+  if (!searchBox) {
+    return;
+  }
+  const filter = filterLogLines.bind(null, searchBox, true);
+  searchBox.addEventListener('keyup', delay(filter), 1000);
+  searchBox.addEventListener('change', filter, false);
+  searchBox.addEventListener('search', filter, false);
+};
+
+function displaySearchInfo(text) {
+  document.getElementById('filter-info').innerHTML = text;
 }
 
 function setCurrentPreviewFromStepLinkIfPossible(stepLink) {
@@ -782,12 +930,16 @@ function renderCommentsTab(response) {
       }
       const id = found[1];
       const url = urlWithBase('/api/v1/experimental/jobs/' + id + '/status');
-      $.ajax(url)
-        .done(function (response) {
+      fetch(url)
+        .then(response => {
+          if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
+          return response.json();
+        })
+        .then(job => {
+          if (job.error) throw job.error;
           const span = document.createElement('span');
           span.className = 'openqa-testref';
           const i = document.createElement('i');
-          const job = response;
           const stateHTML = testStateHTML(job);
           i.className = stateHTML[0];
           span.title = stateHTML[1];
@@ -795,7 +947,9 @@ function renderCommentsTab(response) {
           element.parentNode.replaceChild(span, element);
           span.appendChild(element);
         })
-        .fail(function (jqXHR, textStatus, errorThrown) {});
+        .catch(error => {
+          console.error(error);
+        });
     });
 }
 

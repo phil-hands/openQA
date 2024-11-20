@@ -34,6 +34,7 @@ BEGIN {
 use Fcntl;
 use File::Path qw(make_path remove_tree);
 use File::Spec::Functions 'catdir';
+use List::Util qw(all max min);
 use Mojo::IOLoop;
 use Mojo::File 'path';
 use POSIX;
@@ -95,6 +96,7 @@ sub new ($class, $cli_options) {
     $self->{_pool_directory_lock_fd} = undef;
     $self->{_shall_terminate} = 0;
     $self->{_finishing_off} = undef;
+    $self->{_ovs_dbus_service_name} = $ENV{OVS_DBUS_SERVICE_NAME} // 'org.opensuse.os_autoinst.switch';
 
     return $self;
 }
@@ -582,6 +584,8 @@ sub is_stopping ($self) {
     return $current_job->status eq 'stopping';
 }
 
+sub is_qemu ($executable_path) { defined $executable_path && $executable_path =~ m{/qemu-[^/]+$} }
+
 # checks whether a qemu instance using the current pool directory is running and returns its PID if that's the case
 sub is_qemu_running ($self) {
     return undef unless my $pool_directory = $self->pool_directory;
@@ -592,16 +596,19 @@ sub is_qemu_running ($self) {
     close($fh);
     return undef unless $pid;
 
-    my $link = readlink("/proc/$pid/exe");
-    if (!$link || !($link =~ /\/qemu-[^\/]+$/)) {
-        # delete the obsolete PID file (it might have been spared on cleanup if QEMU was still running)
-        unlink($pid_file) unless $self->no_cleanup;
-        return undef;
-    }
-    return undef unless $link;
-    return undef unless $link =~ /\/qemu-[^\/]+$/;
+    return $pid if is_qemu(readlink("/proc/$pid/exe"));
 
-    return $pid;
+    # delete the obsolete PID file (it might have been spared on cleanup if QEMU was still running)
+    unlink($pid_file) unless $self->no_cleanup;
+    return undef;
+}
+
+sub is_ovs_dbus_service_running ($self) {
+    eval { defined &Net::DBus::system or require Net::DBus };
+    return 0 if $@;
+    my $bus = ($self->{_system_dbus} //= Net::DBus->system(nomainloop => 1));
+    my $service = eval { defined $bus->get_service('org.opensuse.os_autoinst.switch') };
+    return !$@ && $service;
 }
 
 # checks whether the worker is available
@@ -626,7 +633,12 @@ sub check_availability ($self) {
     }
 
     # auto-detect worker address if not specified explicitly
-    return 'Unable to determine worker address (WORKER_HOSTNAME)' unless $self->settings->auto_detect_worker_address;
+    my $settings = $self->settings;
+    return 'Unable to determine worker address (WORKER_HOSTNAME)' unless $settings->auto_detect_worker_address;
+
+    # check org.opensuse.os_autoinst.switch if it is a MM-capable worker slot
+    return "D-Bus service '$self->{_ovs_dbus_service_name}' is not running"
+      if $settings->has_class('tap') && !$self->is_ovs_dbus_service_running;
 
     return undef;
 }
@@ -671,7 +683,7 @@ sub _handle_client_status_changed ($self, $client, $event_data) {
     }
     # handle failures where it makes sense to reconnect
     elsif ($status eq 'failed') {
-        my $interval = $ENV{OPENQA_WORKER_CONNECT_INTERVAL} // 10;
+        my $interval = $event_data->{retry_after} // $ENV{OPENQA_WORKER_CONNECT_INTERVAL} // 10;
         log_warning("$error_message - trying again in $interval seconds");
         Mojo::IOLoop->timer($interval => sub { $client->register() });
         # stop current job if not accepted yet but out of acceptance attempts
@@ -739,18 +751,24 @@ sub _handle_job_status_changed ($self, $job, $event_data) {
     }
 }
 
-sub _load_avg ($field = 2) {
-    my $value = eval { (split(' ', path($ENV{OPENQA_LOAD_AVG_FILE} // '/proc/loadavg')->slurp))[$field] };
+sub _load_avg ($path = $ENV{OPENQA_LOAD_AVG_FILE} // '/proc/loadavg') {
+    my @load = eval { split(' ', path($path)->slurp) };
     log_warning "Unable to determine average load: $@" if $@;
-    return looks_like_number($value) ? $value : undef;
+    splice @load, 3;    # remove non-load numbers
+    log_error "Unable to parse system load from file '$path'" and return [] unless all { looks_like_number $_ } @load;
+    return \@load;
 }
 
-sub _check_system_utilization ($self) {
-    my $settings = $self->settings->global_settings;
-    return undef unless my $threshold = $settings->{CRITICAL_LOAD_AVG_THRESHOLD};
-    my $load_avg = _load_avg;
-    return "The average load $load_avg is exceeding the configured threshold of $threshold."
-      if defined $load_avg && $load_avg >= $threshold;
+sub _check_system_utilization (
+    $self,
+    $threshold = $self->settings->global_settings->{CRITICAL_LOAD_AVG_THRESHOLD},
+    $load = _load_avg())
+{
+    return undef unless $threshold && @$load >= 3;
+    # look at the load evolution over time to react quick enough if the load
+    # rises but accept a falling edge
+    return "The average load (@$load) is exceeding the configured threshold of $threshold."
+      if max(@$load) > $threshold && ($load->[0] > $load->[1] || $load->[0] > $load->[2] || min(@$load) > $threshold);
     return undef;
 }
 
@@ -772,9 +790,7 @@ sub _lock_pool_directory ($self) {
 
     chdir $pool_directory || die "cannot change directory to $pool_directory: $!\n";
     open(my $lockfd, '>>', '.locked') or die "cannot open lock file in $pool_directory: $!\n";
-    unless (fcntl($lockfd, F_SETLK, pack('ssqql', F_WRLCK, 0, 0, 0, $$))) {
-        die "$pool_directory already locked\n";
-    }
+    die "$pool_directory already locked\n" unless fcntl $lockfd, F_SETLK, pack('ssqql', F_WRLCK, 0, 0, 0, $$);
     $lockfd->autoflush(1);
     truncate($lockfd, 0);
     print $lockfd "$$\n";

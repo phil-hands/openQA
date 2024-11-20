@@ -3,7 +3,7 @@
 
 package OpenQA::Schema::Result::ScheduledProducts;
 
-
+## no critic (OpenQA::RedundantStrictWarning)
 use Mojo::Base 'DBIx::Class::Core', -signatures;
 
 use Mojo::Base -base, -signatures;
@@ -232,6 +232,75 @@ sub _delete_prefixed_args_storing_info_about_product_itself ($args) {
     }
 }
 
+sub _log_wrong_parents ($self, $parent, $cluster_parents, $failed_job_info) {
+    my $job_id = $cluster_parents->{$parent};
+    return undef if $job_id eq 'depended';
+    my $error_msg = "$parent has no child, check its machine placed or dependency setting typos";
+    log_warning($error_msg);
+    push @$failed_job_info, {job_id => $job_id, error_messages => [$error_msg]};
+}
+
+sub _create_jobs_in_database ($self, $jobs, $failed_job_info, $skip_chained_deps, $include_children,
+    $successful_job_ids)
+{
+    my $schema = $self->result_source->schema;
+    my $jobs_resultset = $schema->resultset('Jobs');
+    my @created_jobs;
+    my %tmp_downloads;
+    my %clones;
+
+    # remember ids of created parents
+    my %job_ids_by_test_machine;    # key: "TEST@MACHINE", value: "array of job ids"
+
+    for my $settings (@{$jobs || []}) {
+        $settings->{_GROUP_ID} = delete $settings->{GROUP_ID};
+
+        # create a new job with these parameters and count if successful, do not send job notifies yet
+        try {
+            # Any setting name ending in _URL is special: it tells us to download
+            # the file at that URL before running the job
+            my $download_list = create_downloads_list($settings);
+            create_git_clone_list($settings, \%clones);
+            my $job = $jobs_resultset->create_from_settings($settings, $self->id);
+            push @created_jobs, $job;
+            my $j_id = $job->id;
+            $job_ids_by_test_machine{_job_ref($settings)} //= [];
+            push @{$job_ids_by_test_machine{_job_ref($settings)}}, $j_id;
+            $self->_create_download_lists(\%tmp_downloads, $download_list, $j_id);
+        }
+        catch {
+            push @$failed_job_info, {job_name => $settings->{TEST}, error_message => $_};
+        }
+    }
+    # keep track of ...
+    my %created_jobs;    # ... for cycle detection
+    my %cluster_parents;    # ... for checking wrong parents
+
+    # jobs are created, now recreate dependencies and extract ids
+    for my $job (@created_jobs) {
+        my $error_messages
+          = $self->_create_dependencies_for_job($job, \%job_ids_by_test_machine, \%created_jobs, \%cluster_parents,
+            $skip_chained_deps, $include_children);
+        if (!@$error_messages) {
+            push @$successful_job_ids, $job->id;
+        }
+        else {
+            push @$failed_job_info, {job_id => $job->id, error_messages => $error_messages};
+        }
+    }
+
+    $self->_log_wrong_parents($_, \%cluster_parents, $failed_job_info) for sort keys %cluster_parents;
+    $_->calculate_blocked_by for @created_jobs;
+    my %downloads = map {
+        $_ => [
+            [keys %{$tmp_downloads{$_}->{destination}}], $tmp_downloads{$_}->{do_extract},
+            $tmp_downloads{$_}->{blocked_job_id}]
+    } keys %tmp_downloads;
+    my $gru = OpenQA::App->singleton->gru;
+    $gru->enqueue_download_jobs(\%downloads);
+    $gru->enqueue_git_clones(\%clones, $successful_job_ids) if keys %clones;
+}
+
 =over 4
 
 =item _schedule_iso()
@@ -246,7 +315,6 @@ sub _schedule_iso {
     my ($self, $args) = @_;
 
     my @notes;
-    my $gru = OpenQA::App->singleton->gru;
     my $schema = $self->result_source->schema;
     my $user_id = $self->user_id;
 
@@ -324,90 +392,13 @@ sub _schedule_iso {
     # define function to create jobs in the database; executed as transaction
     my @successful_job_ids;
     my @failed_job_info;
-    my %tmp_downloads;
-    my %clones;
-    my $create_jobs_in_database = sub {
-        my $jobs_resultset = $schema->resultset('Jobs');
-        my @created_jobs;
-
-        # remember ids of created parents
-        my %job_ids_by_test_machine;    # key: "TEST@MACHINE", value: "array of job ids"
-
-        for my $settings (@{$jobs || []}) {
-            my $prio = delete $settings->{PRIO};
-            $settings->{_GROUP_ID} = delete $settings->{GROUP_ID};
-
-            # create a new job with these parameters and count if successful, do not send job notifies yet
-            try {
-                # Any setting name ending in _URL is special: it tells us to download
-                # the file at that URL before running the job
-                my $download_list = create_downloads_list($settings);
-                create_git_clone_list($settings, \%clones);
-                my $job = $jobs_resultset->create_from_settings($settings, $self->id);
-                push @created_jobs, $job;
-                my $j_id = $job->id;
-                $job_ids_by_test_machine{_job_ref($settings)} //= [];
-                push @{$job_ids_by_test_machine{_job_ref($settings)}}, $j_id;
-
-                # set prio if defined explicitly (otherwise default prio is used)
-                $job->update({priority => $prio}) if (defined($prio));
-
-                $self->_create_download_lists(\%tmp_downloads, $download_list, $j_id);
-            }
-            catch {
-                push(@failed_job_info, {job_name => $settings->{TEST}, error_message => $_});
-            }
-        }
-        # keep track of ...
-        my %created_jobs;    # ... for cycle detection
-        my %cluster_parents;    # ... for checking wrong parents
-
-        # jobs are created, now recreate dependencies and extract ids
-        for my $job (@created_jobs) {
-            my $error_messages
-              = $self->_create_dependencies_for_job($job, \%job_ids_by_test_machine, \%created_jobs, \%cluster_parents,
-                $skip_chained_deps, $include_children);
-            if (!@$error_messages) {
-                push(@successful_job_ids, $job->id);
-            }
-            else {
-                push(
-                    @failed_job_info,
-                    {
-                        job_id => $job->id,
-                        error_messages => $error_messages
-                    });
-            }
-        }
-
-        # log wrong parents
-        for my $parent_test_machine (sort keys %cluster_parents) {
-            my $job_id = $cluster_parents{$parent_test_machine};
-            next if $job_id eq 'depended';
-            my $error_msg = "$parent_test_machine has no child, check its machine placed or dependency setting typos";
-            log_warning($error_msg);
-            push(
-                @failed_job_info,
-                {
-                    job_id => $job_id,
-                    error_messages => [$error_msg]});
-        }
-
-        # now calculate blocked_by state
-        for my $job (@created_jobs) {
-            $job->calculate_blocked_by;
-        }
-        my %downloads = map {
-            $_ => [
-                [keys %{$tmp_downloads{$_}->{destination}}], $tmp_downloads{$_}->{do_extract},
-                $tmp_downloads{$_}->{blocked_job_id}]
-        } keys %tmp_downloads;
-        $gru->enqueue_download_jobs(\%downloads);
-        $gru->enqueue_git_clones(\%clones, \@successful_job_ids) if keys %clones;
-    };
 
     try {
-        $schema->txn_do($create_jobs_in_database);
+        $schema->txn_do(
+            sub {
+                $self->_create_jobs_in_database($jobs, \@failed_job_info, $skip_chained_deps, $include_children,
+                    \@successful_job_ids);
+            });
     }
     catch {
         my $error = shift;
@@ -603,7 +594,7 @@ sub _generate_jobs {
             my $error = OpenQA::JobSettings::generate_settings(\%params);
             $error_message .= $error if defined $error;
 
-            $settings{PRIO} = defined($priority) ? $priority : $job_template->prio;
+            $settings{_PRIORITY} = $priority // $job_template->prio;
             $settings{GROUP_ID} = $job_template->group_id;
 
             _populate_wanted_jobs_for_test_arg($args, \%settings, \%wanted);
@@ -691,7 +682,8 @@ Internal method used by the B<job_create_dependencies()> method
 sub _create_dependencies_for_parents ($self, $job, $created_jobs, $deptype, $parents) {
     my $schema = $self->result_source->schema;
     my $job_dependencies = $schema->resultset('JobDependencies');
-    my $worker_class;
+    my $job_settings = $schema->resultset('JobSettings');
+    my $worker_classes;
     for my $parent (@$parents) {
         try {
             _check_for_cycle($job->id, $parent, $created_jobs);
@@ -700,25 +692,15 @@ sub _create_dependencies_for_parents ($self, $job, $created_jobs, $deptype, $par
             die 'There is a cycle in the dependencies of ' . $job->TEST;
         };
         if ($deptype eq OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED) {
-            unless (defined $worker_class) {
-                $worker_class = $job->settings->find({key => 'WORKER_CLASS'});
-                $worker_class = $worker_class ? $worker_class->value : '';
-            }
-            my $parent_worker_class
-              = $schema->resultset('JobSettings')->find({job_id => $parent, key => 'WORKER_CLASS'});
-            $parent_worker_class = $parent_worker_class ? $parent_worker_class->value : '';
-            if ($worker_class ne $parent_worker_class) {
+            $worker_classes //= join(',', @{$job_settings->all_values_sorted($job->id, 'WORKER_CLASS')});
+            my $parent_worker_classes = join(',', @{$job_settings->all_values_sorted($parent, 'WORKER_CLASS')});
+            if ($worker_classes ne $parent_worker_classes) {
                 my $test_name = $job->TEST;
-                die
-"Worker class of $test_name ($worker_class) does not match the worker class of its directly chained parent ($parent_worker_class)";
+                die "Worker class of $test_name ($worker_classes) does not match the worker class of its "
+                  . "directly chained parent ($parent_worker_classes)";
             }
         }
-        $job_dependencies->create(
-            {
-                child_job_id => $job->id,
-                parent_job_id => $parent,
-                dependency => $deptype,
-            });
+        $job_dependencies->create({child_job_id => $job->id, parent_job_id => $parent, dependency => $deptype});
     }
 }
 
@@ -793,13 +775,13 @@ sub _schedule_from_yaml ($self, $args, $skip_chained_deps, $include_children, @l
                 my $machine_settings = $mach->{settings} // {};
                 _merge_settings_and_worker_classes($machine_settings, $settings, \@worker_class);
                 $settings->{BACKEND} = $mach->{backend} if $mach->{backend};
-                $settings->{PRIO} = $mach->{priority} // DEFAULT_JOB_PRIORITY;
+                $settings->{_PRIORITY} = $mach->{priority} // DEFAULT_JOB_PRIORITY;
             }
         }
 
         # set priority of job if specified
         if (my $priority = $job_template->{priority}) {
-            $settings->{PRIO} = $priority;
+            $settings->{_PRIORITY} = $priority;
         }
 
         # handle further settings

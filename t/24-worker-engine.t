@@ -316,7 +316,13 @@ subtest '_handle_asset_processed' => sub {
     $status->data->{has_download_error} = 1;    # assume download error
     $error = OpenQA::Worker::Engines::isotovideo::_handle_asset_processed(@args);
     is ref $error, 'HASH', 'error when download failed although asset is still existing'
-      and $error->{error}, 'Failed to download path2 to some/path2', 'expected error message returned';
+      and is $error->{error}, 'Failed to download path2 to some/path2', 'expected error message returned';
+
+    $status = OpenQA::CacheService::Response::Status->new(error => 'error');
+    $args[1] = 'UEFI_PFLASH_VARS';
+    delete $vars->{UEFI_PFLASH_VARS};
+    is OpenQA::Worker::Engines::isotovideo::_handle_asset_processed(@args), undef, 'no error for UEFI_PFLASH_VARS';
+    is $vars->{UEFI_PFLASH_VARS}, undef, 'asset URI not set because asset does not exist';
 };
 
 subtest 'syncing tests' => sub {
@@ -347,7 +353,7 @@ subtest 'syncing tests' => sub {
     is $result, 'cache-dir/webuihost/tests', 'returns synced test directory on success' or diag explain $result;
 };
 
-subtest 'symlink testrepo, logging behavior' => sub {
+subtest 'symlink testrepo, logging behavior, variable expansion' => sub {
     my $pool_directory = tempdir('poolXXXX');
     my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
@@ -387,7 +393,8 @@ subtest 'symlink testrepo, logging behavior' => sub {
     };
 
     my @custom_casedir_settings = (
-        CASEDIR => 'https://github.com/foo/os-autoinst-distri-example.git#master',
+        CASEDIR_DOMAIN => 'github.com',
+        CASEDIR => 'https://%CASEDIR_DOMAIN%/foo/os-autoinst-distri-example.git#master',
         NEEDLES_DIR => 'fedora/needles',
         DISTRI => 'fedora',
         JOBTOKEN => 'token99916',
@@ -530,6 +537,13 @@ subtest 'link asset' => sub {
     is $vars_data->{ISO}, 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso',
       'the value of ISO is basename when doing link';
     is $vars_data->{HDD_1}, 'foo.qcow2', 'the value of HDD_1 is basename when doing link';
+};
+
+subtest 'using cgroupv2' => sub {
+    my $file_mock = Test::MockModule->new('Mojo::File');
+    $file_mock->noop('make_path');
+    combined_like { OpenQA::Worker::Engines::isotovideo::_configure_cgroupv2({id => 42}) }
+    qr|Using cgroup /sys/fs/cgroup/.*/42|, 'use of cgroup logged';
 };
 
 done_testing();

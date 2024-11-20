@@ -22,6 +22,7 @@ BEGIN {
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Mojo::Base -signatures;
+use OpenQA::Test::TimeLimit '60';
 use Test::Mojo;
 use IO::Socket::INET;
 use Mojo::File 'path';
@@ -36,7 +37,6 @@ use OpenQA::Test::Utils qw(
   start_worker stop_service
 );
 use OpenQA::Test::FullstackUtils;
-use OpenQA::Test::TimeLimit '60';
 use OpenQA::SeleniumTest;
 
 plan skip_all => 'set FULLSTACK=1 (be careful)' unless $ENV{FULLSTACK};
@@ -76,7 +76,7 @@ ok(Mojolicious::Commands->start_app('OpenQA::WebAPI', 'eval', '1+0'));
 # start Selenium test driver and other daemons
 my $port = service_port 'webui';
 my $driver = call_driver({mojoport => $port});
-$ws = create_websocket_server(undef, 0, 0);
+$ws = create_websocket_server(undef, 0);
 $scheduler = create_scheduler;
 $livehandler = create_live_view_handler;
 

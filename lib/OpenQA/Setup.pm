@@ -67,7 +67,9 @@ sub read_config ($app) {
             update_branch => '',
             do_push => 'no',
             do_cleanup => 'no',
-            git_auto_clone => 'no',
+            git_auto_clone => 'yes',
+            git_auto_update => 'no',
+            git_auto_update_method => 'best-effort',
         },
         scheduler => {
             max_job_scheduled_time => 7,
@@ -181,6 +183,8 @@ sub read_config ($app) {
             job_settings_max_recent_jobs => 20000,
             assets_default_limit => 100000,
             assets_max_limit => 200000,
+            max_online_workers => 1000,
+            worker_limit_retry_delay => ONE_HOUR / 4,
         },
         archiving => {
             archive_preserved_important_jobs => 0,
@@ -198,8 +202,15 @@ sub read_config ($app) {
         influxdb => {
             ignored_failed_minion_jobs => '',
         },
-        carry_over => \%CARRY_OVER_DEFAULTS
-    );
+        carry_over => \%CARRY_OVER_DEFAULTS,
+        'test_preset example' => {
+            title => 'Create example test',
+            info => 'Parameters to create an example test have been pre-filled in the following form. '
+              . 'You can simply submit the form as-is to test your openQA setup.',
+            casedir => 'https://github.com/os-autoinst/os-autoinst-distri-example.git',
+            distri => 'example',
+            build => 'openqa',
+        });
 
     # in development mode we use fake auth and log to stderr
     my %mode_defaults = (
@@ -247,10 +258,7 @@ sub read_config ($app) {
         }
         for my $k (@known_keys) {
             my $v = $cfg && $cfg->val($section, $k);
-            $v
-              //= exists $mode_defaults{$app->mode}{$section}->{$k}
-              ? $mode_defaults{$app->mode}{$section}->{$k}
-              : $defaults{$section}->{$k};
+            $v //= $mode_defaults{$app->mode}{$section}->{$k} // $defaults{$section}->{$k};
             $config->{$section}->{$k} = trim $v if defined $v;
         }
     }
@@ -358,7 +366,7 @@ sub setup_mojo_tmpdir () {
 
 sub load_plugins ($server, $monitoring_root_route = undef, %options) {
     push @{$server->plugins->namespaces}, 'OpenQA::WebAPI::Plugin';
-    $server->plugin($_) for qw(Helpers MIMETypes CSRF REST HashedParams Gru YAML);
+    $server->plugin($_) for qw(Helpers MIMETypes CSRF REST Gru YAML);
     $server->plugin('AuditLog') if $server->config->{global}{audit_enabled};
     # Load arbitrary plugins defined in config: 'plugins' in section
     # '[global]' can be a space-separated list of plugins to load, by

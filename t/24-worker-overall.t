@@ -9,6 +9,7 @@ use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Mojo::Base -signatures;
 use OpenQA::Test::TimeLimit '10';
+use OpenQA::Test::Utils qw(simulate_load);
 use Data::Dumper;
 use Mojo::File qw(tempdir tempfile path);
 use Mojo::Util 'scope_guard';
@@ -20,6 +21,7 @@ use OpenQA::Constants qw(WORKER_COMMAND_QUIT WORKER_SR_API_FAILURE WORKER_SR_DIE
 use OpenQA::Worker;
 use OpenQA::Worker::Job;
 use OpenQA::Worker::WebUIConnection;
+use Socket qw(getaddrinfo);
 
 $ENV{OPENQA_CONFIG} = "$FindBin::Bin/data/24-worker-overall";
 
@@ -27,12 +29,6 @@ $ENV{OPENQA_CONFIG} = "$FindBin::Bin/data/24-worker-overall";
 # note: The worker instantiates OpenQA::Setup which would configure logging to use the output
 #       file specified via OPENQA_LOGFILE instead of stdout/stderr.
 $ENV{OPENQA_LOGFILE} = undef;
-
-# fake "/proc/loadavg"
-my $load_avg_file = tempfile('worker-overall-load-avg-XXXXX');
-my $load_avg_file_realpath = $load_avg_file->realpath;
-$load_avg_file->spew('0.93 0.95 10.25 2/2207 1212');
-$ENV{OPENQA_LOAD_AVG_FILE} = $load_avg_file_realpath;
 
 # define fake isotovideo
 {
@@ -81,9 +77,18 @@ $ENV{OPENQA_LOAD_AVG_FILE} = $load_avg_file_realpath;
     use Mojo::Base -base;
     has availability_error => 'Cache service info error: Connection refused';
 }
+{
+    package Test::FakeDBus;    # uncoverable statement count:2
+    use Mojo::Base -base, -signatures;
+    has mock_service_value => 1;
+    sub get_service ($self, $service_name) { $self->mock_service_value }
+}
 
+my $dbus_mock = Test::MockModule->new('Net::DBus', no_auto => 1);
+$dbus_mock->define(system => sub (@) { Test::FakeDBus->new });
 my $cache_service_client_mock = Test::MockModule->new('OpenQA::CacheService::Client');
 $cache_service_client_mock->redefine(info => sub { Test::FakeCacheServiceClientInfo->new });
+my $load_avg_file = simulate_load('10.93 10.91 10.25 2/2207 1212', 'worker-overall-load-avg');
 
 like(
     exception {
@@ -113,6 +118,21 @@ push(@{$worker->settings->parse_errors}, 'foo', 'bar');
 combined_like { $worker->log_setup_info }
 qr/.*http:\/\/localhost:9527,https:\/\/remotehost.*qemu_i386,qemu_x86_64.*Errors occurred.*foo.*bar.*/s,
   'setup info with parse errors';
+
+subtest 'worker load' => sub {
+    my $load = OpenQA::Worker::_load_avg();
+    is scalar @$load, 3, 'expected number of load values';
+    is $load->[0], 10.93, 'expected load';
+    is_deeply $load, [10.93, 10.91, 10.25], 'expected computed system load, rising flank';
+    is_deeply OpenQA::Worker::_load_avg(path($ENV{OPENQA_CONFIG}, 'invalid_loadavg')), [], 'error on invalid load';
+    ok !$worker->_check_system_utilization, 'default threshold not exceeded';
+    ok $worker->_check_system_utilization(10), 'stricter threshold exceeded by load';
+    ok !$worker->_check_system_utilization(10, [3, 9, 11]), 'load ok on falling flank';
+    ok $worker->_check_system_utilization(10, [12, 9, 3]), 'load exceeded on rising flank';
+    ok $worker->_check_system_utilization(10, [12, 3, 9]), 'load exceeded on rising flank and old load';
+    ok $worker->_check_system_utilization(10, [11, 13, 12]), 'load still exceeded on short load dip';
+    ok $worker->_check_system_utilization(10, [11, 12, 13]), 'load still exceeded on falling flank but high';
+};
 
 subtest 'delay and exec' => sub {
     my $worker_mock = Test::MockModule->new('OpenQA::Worker');
@@ -410,7 +430,8 @@ subtest 'stopping' => sub {
         my $fake_job = OpenQA::Worker::Job->new($worker, undef, {some => 'info'});
         $worker->current_job($fake_job);
         $worker->stop_current_job;
-        is($fake_job->status, 'stopped', 'job stopped');
+        is $fake_job->status, 'stopped', 'job stopped';
+        ok !$worker->is_stopping, 'worker is not considered stopping as job has already stopped';
     };
 
     subtest 'stop worker gracefully' => sub {
@@ -473,7 +494,10 @@ subtest 'stopping' => sub {
     $worker->{_shall_terminate} = 0;
 };
 
-subtest 'check negative cases for is_qemu_running' => sub {
+subtest 'is_qemu_running' => sub {
+    ok OpenQA::Worker::is_qemu('/usr/bin/qemu-system-x86_64'), 'QEMU executable considered to be QEMU';
+    ok !OpenQA::Worker::is_qemu('/usr/bin/true'), 'other executable not considered to be QEMU';
+
     my $pool_directory = tempdir('poolXXXX');
     $worker->pool_directory($pool_directory);
 
@@ -486,6 +510,12 @@ subtest 'check negative cases for is_qemu_running' => sub {
     $pool_directory->child('qemu.pid')->spew($$);
     is($worker->is_qemu_running, undef, 'QEMU not considered running if PID is not a qemu process');
     ok(-f $pool_directory->child('qemu.pid'), 'PID file is not cleaned up when --no-cleanup is enabled');
+
+    my $worker_mock = Test::MockModule->new('OpenQA::Worker');
+    $worker_mock->redefine(is_qemu => 1);    # pretend our PID is QEMU
+    $worker->no_cleanup(0);
+    is $worker->is_qemu_running, $$, 'PID returned if QEMU is considered running';
+    ok -f $pool_directory->child('qemu.pid'), 'PID file is not cleaned up if QEMU is still running';
 };
 
 subtest 'checking and cleaning pool directory' => sub {
@@ -501,7 +531,7 @@ subtest 'checking and cleaning pool directory' => sub {
 
     # pretend QEMU is still running
     my $worker_mock = Test::MockModule->new('OpenQA::Worker');
-    $worker_mock->redefine(is_qemu_running => sub { return 1; });
+    $worker_mock->redefine(is_qemu_running => 1);
 
     my $pid_file = $pool_directory->child('qemu.pid')->spew($$);
     my $other_file = $pool_directory->child('other-file')->spew('foo');
@@ -538,6 +568,20 @@ subtest 'checking worker address' => sub {
     $settings->{_local} = 1;    # and that it is a local worker
     is $worker->check_availability, undef, 'a local worker does not require auto-detection to work';
     is $global_settings->{WORKER_HOSTNAME}, 'localhost', '"localhost" assumed as WORKER_HOSTNAME for local worker';
+};
+
+subtest 'check availability of Open vSwitch related D-Bus service' => sub {
+    delete $worker->settings->{_worker_classes};
+    $worker->settings->global_settings->{WORKER_CLASS} = 'foo,tap,bar';
+    ok $worker->settings->has_class('tap'), 'worker has tap class';
+    is $worker->check_availability, undef, 'worker considered available if D-Bus service available';
+
+    $worker->{_system_dbus}->mock_service_value(undef);
+    like $worker->check_availability, qr/D-Bus/, 'worker considered broken if D-Bus service not available';
+
+    delete $worker->settings->{_worker_classes};
+    $worker->settings->global_settings->{WORKER_CLASS} = 'foo,bar';
+    is $worker->check_availability, undef, 'worker considered always available if not a tap worker';
 };
 
 subtest 'handle client status changes' => sub {
@@ -698,6 +742,7 @@ subtest 'handle job status changes' => sub {
         $worker->current_webui_host('some-host');
         $worker->settings->global_settings->{TERMINATE_AFTER_JOBS_DONE} = 1;
         $worker->_init_queue([$fake_job]);    # assume there's another job in the queue
+        is $worker->find_current_or_pending_job(42), $fake_job, 'queued job can be found';
         combined_like {
             $worker->_handle_job_status_changed($fake_job, {status => 'stopped', reason => 'another test'});
         }
@@ -710,6 +755,7 @@ subtest 'handle job status changes' => sub {
         }
         qr/Job 42 from some-host finished - reason: yet another/, 'status of 2nd job logged';
         is($stop_called, WORKER_COMMAND_QUIT, 'worker stopped after no more jobs left in the queue');
+        is $worker->find_current_or_pending_job(42), undef, 'queued job no longer pending';
 
         $worker->settings->global_settings->{TERMINATE_AFTER_JOBS_DONE} = 0;
 
@@ -822,10 +868,10 @@ qr/Job 42 from some-host finished - reason: done.*A QEMU instance using.*Skippin
             $worker_mock->unmock('is_qemu_running');
             $worker->settings->global_settings->{CRITICAL_LOAD_AVG_THRESHOLD} = '10';
             is $worker->status->{status}, 'broken', 'worker considered broken when average load exceeds threshold';
-            like $worker->current_error, qr/load 10\.25.*exceeding.*10/, 'error shows current load and threshold';
+            like $worker->current_error, qr/load \(.*10\.25.*exceeding.*10/, 'error shows current load and threshold';
 
             # assume the error is gone
-            $load_avg_file_realpath->remove;
+            $load_avg_file->remove;
             combined_like { is $worker->status->{status}, 'free', 'worker is free to take another job' }
             qr/unable to determine average load/i, 'warning about not being able to detect average load logged';
             is $worker->current_error, undef, 'current error is cleared by the querying the status';
@@ -869,6 +915,28 @@ subtest 'handle critical error' => sub {
       'log for initial critical error and forcefull kill after second error';
     is $stop_called, 1, 'worker tried to stop the job';
     is $kill_called, 1, 'worker tried to kill itself in the end';
+};
+
+subtest 'resolving 127.0.0.1 without relying on getaddrinfo()' => sub {
+    combined_like {
+        is_deeply [sort keys %{getaddrinfo('127.0.0.1', 1)}],
+        [qw(addr canonname family protocol socktype)],
+        'got expected fields'
+      } qr/Running patched getaddrinfo/s,
+      'using patched getaddrinfo()';
+};
+
+subtest 'storing package list' => sub {
+    $worker->pool_directory(tempdir('pool-dir-XXXXX'));
+    combined_like { $worker->_store_package_list('echo foo') }
+    qr/Gathering package information/, 'log message about command invocation';
+    is $worker->pool_directory->child('worker_packages.txt')->slurp('UTF-8'), "foo\n", 'package list written';
+
+    combined_like { $worker->_store_package_list('false') }
+    qr/could not be executed/, 'log message about error';
+
+    combined_like { $worker->_store_package_list('true') }
+    qr/doesn't return any data/, 'log message about no data';
 };
 
 done_testing();

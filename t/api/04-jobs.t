@@ -61,11 +61,14 @@ sub calculate_file_md5 ($file) {
 $ENV{MOJO_MAX_MESSAGE_SIZE} = 207741824;
 
 my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
-is($t->app->config->{audit}->{blocklist}, 'job_grab', 'blocklist updated');
+my $cfg = $t->app->config;
+$cfg->{'scm git'}->{git_auto_update} = 'no';
+is $cfg->{audit}->{blocklist}, 'job_grab', 'blocklist updated';
 
 my $schema = $t->app->schema;
 my $assets = $schema->resultset('Assets');
 my $jobs = $schema->resultset('Jobs');
+my $comments = $schema->resultset('Comments');
 my $products = $schema->resultset('Products');
 my $testsuites = $schema->resultset('TestSuites');
 
@@ -121,6 +124,21 @@ subtest 'check job group' => sub {
     is($t->tx->res->json->{jobs}->[0]->{id}, 99961);
     $t->get_ok('/api/v1/jobs' => form => {scope => 'current', group => 'foo bar'});
     is(scalar(@{$t->tx->res->json->{jobs}}), 0);
+};
+
+subtest 'exclude groupless jobs' => sub {
+    my %jobs = map { $_->{id} => $_ } @jobs;
+    is($jobs{99928}->{state}, 'scheduled', 'groupless job is listed');
+    $t->get_ok('/api/v1/jobs?not_groupid=0')->status_is(200);
+    @jobs = @{$t->tx->res->json->{jobs}};
+    is scalar @jobs, 15, 'groupless jobs are excluded';
+};
+
+subtest 'exclude specific group' => sub {
+    my %jobs = map { $_->{id} => $_ } @jobs;
+    $t->get_ok('/api/v1/jobs?not_groupid=1001')->status_is(200);
+    @jobs = @{$t->tx->res->json->{jobs}};
+    is scalar @jobs, 4, 'jobs of specified groups are excluded';
 };
 
 subtest 'restricted query' => sub {
@@ -350,6 +368,7 @@ subtest 'prevent restarting parents' => sub {
 };
 
 $schema->txn_rollback;
+$schema->txn_begin;
 
 subtest 'restart jobs (forced)' => sub {
     $t->post_ok('/api/v1/jobs/restart?force=1', form => {jobs => [99981, 99963, 99946, 99945, 99927, 99939]})
@@ -375,6 +394,32 @@ subtest 'restart jobs (forced)' => sub {
 
     $t->get_ok('/api/v1/jobs' => form => {scope => 'current'});
     is(scalar(@{$t->tx->res->json->{jobs}}), 15, 'job count stay the same');
+};
+
+$schema->txn_rollback;
+
+sub _count_restart_comments ($job_id) { $comments->search({job_id => $job_id, text => 'via restart'})->count }
+
+subtest 'restart jobs with commenting' => sub {
+    my @args = (form => {jobs => [99981, 99963, 99946, 99945, 99927, 99939]});
+    $t->post_ok('/api/v1/jobs/restart?comment=label%3Aforce_result%3Afoo%3Abar', @args)->status_is(200);
+    my $res = $t->tx->res->json;
+    is_deeply $res->{result}, [], 'no jobs restarted when commenting fails' or diag explain $res->{result};
+    like join("\n", @{$res->{errors}}), qr/Invalid result 'foo' for force_result/, 'error about comment creation';
+
+    $t->post_ok('/api/v1/jobs/restart?comment=via restart', @args)->status_is(200);
+    $res = $t->tx->res->json;
+    my @unexpected_jobs = (99939, 99945);
+    my @expected_jobs = (99946, 99963, 99981);
+    my @restarted_jobs = sort map { keys %$_ } @{$res->{result}};
+    is_deeply \@restarted_jobs, \@expected_jobs, 'expected set of jobs has been restarted' or diag explain $res;
+    is _count_restart_comments($_), 0, "job $_ was not restarted and thus also not commented on" for @unexpected_jobs;
+    is _count_restart_comments($_), 1, "job $_ was commented on" for @expected_jobs;
+
+    my $restart_event = OpenQA::Test::Case::find_most_recent_event($schema, 'job_restart');
+    my $comment_create_event = OpenQA::Test::Case::find_most_recent_event($schema, 'comment_create');
+    is $restart_event->{comment}, 'via restart', 'restart event contains comment text';
+    is $comment_create_event->{job_id}, [keys %{$res->{result}->[-1]}]->[0], 'comment event contains job ID';
 };
 
 subtest 'restart single job passing settings' => sub {
@@ -911,24 +956,39 @@ subtest 'WORKER_CLASS correctly assigned when posting job' => sub {
     is $jobs->find($id)->settings_hash->{WORKER_CLASS}, 'svirt', 'specified WORKER_CLASS assigned';
 };
 
-subtest 'default priority correctly assigned when posting job' => sub {
+subtest 'priority correctly assigned when posting job' => sub {
     # post new job and check default priority
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
     $t->get_ok('/api/v1/jobs/' . $t->tx->res->json->{id})->status_is(200);
-    $t->json_is('/job/group', 'opensuse');
-    $t->json_is('/job/priority', 50);
+    $t->json_is('/job/group', 'opensuse', 'group assigned (1)');
+    $t->json_is('/job/priority', 50, 'global default priority assigned');
 
     # post new job in job group with customized default priority
     $schema->resultset('JobGroups')->find({name => 'opensuse test'})->update({default_priority => 42});
     $jobs_post_params{_GROUP} = 'opensuse test';
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
     $t->get_ok('/api/v1/jobs/' . $t->tx->res->json->{id})->status_is(200);
-    $t->json_is('/job/group', 'opensuse test');
-    $t->json_is('/job/priority', 42);
+    $t->json_is('/job/group', 'opensuse test', 'group assigned (2)');
+    $t->json_is('/job/priority', 42, 'default priority from group assigned');
+
+    # post new job with explicitely specified _PRIORITY setting
+    $jobs_post_params{_PRIORITY} = 43;
+    $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
+    $t->get_ok('/api/v1/jobs/' . $t->tx->res->json->{id})->status_is(200);
+    $t->json_is('/job/group', 'opensuse test', 'group assigned (3)');
+    $t->json_is('/job/priority', 43, 'explicitely specified priority assigned');
+    $t->json_is('/job/settings/_PRIORITY', undef, 'priority not added as setting');
+
+    # post new job with invalid explicitely specified _PRIORITY setting
+    $jobs_post_params{_PRIORITY} = 43.5;
+    $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(400);
+    $t->json_like('/error', qr/settings.*invalid.*_PRIORITY/, 'error returned');
+    $t->json_is('/id', undef, 'no job ID returned');
 };
 
 subtest 'specifying group by ID' => sub {
     delete $jobs_post_params{_GROUP};
+    delete $jobs_post_params{_PRIORITY};
     $jobs_post_params{_GROUP_ID} = 1002;
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
     $t->get_ok('/api/v1/jobs/' . $t->tx->res->json->{id})->status_is(200);
@@ -1516,6 +1576,7 @@ subtest 'marking job as done' => sub {
 };
 
 subtest 'handle FOO_URL' => sub {
+    OpenQA::App->singleton->config->{'scm git'}->{git_auto_clone} = 'no';
     $testsuites->create(
         {
             name => 'handle_foo_url',
@@ -1552,7 +1613,8 @@ subtest 'handle FOO_URL' => sub {
       'the download gru tasks were created correctly';
 };
 
-subtest 'handle git CASEDIR' => sub {
+subtest 'handle git_clone with CASEDIR' => sub {
+    OpenQA::App->singleton->config->{'scm git'}->{git_auto_clone} = 'yes';
     $testsuites->create(
         {
             name => 'handle_foo_casedir',
@@ -1564,10 +1626,9 @@ subtest 'handle git CASEDIR' => sub {
             ],
         });
     my $params = {TEST => 'handle_foo_casedir',};
-    OpenQA::App->singleton->config->{'scm git'}->{git_auto_clone} = 'yes';
     $t->post_ok('/api/v1/jobs', form => $params)->status_is(200);
 
-    my $job_id = $t->tx->res->json->{id};
+    my $job_id = $t->tx->res->json->{id} or explain $t->tx->res->json;
     my $result = $jobs->find($job_id)->settings_hash;
 
     my $gru_dep = $schema->resultset('GruDependencies')->find({job_id => $job_id});
@@ -1577,10 +1638,57 @@ subtest 'handle git CASEDIR' => sub {
     my $gru_task_values = shift @gru_args;
     is_deeply $gru_task_values,
       {
-        't/data/openqa/share/tests/foobar' => 'http://localhost/foo.git',
+        path('t/data/openqa/share/tests/foobar')->realpath => 'http://localhost/foo.git',
         't/data/openqa/share/tests/foobar/needles' => 'http://localhost/bar.git'
       },
       'the git clone gru tasks were created correctly';
+};
+
+subtest 'handle git_clone without CASEDIR' => sub {
+    OpenQA::App->singleton->config->{'scm git'}->{git_auto_update} = 'yes';
+    $testsuites->create(
+        {
+            name => 'handle_git_clone',
+            description => '',
+            settings => [],
+        });
+    my $params = {
+        TEST => 'handle_git_clone',
+        MACHINE => '64bit',
+    };
+    $t->post_ok('/api/v1/jobs', form => $params)->status_is(200);
+
+    my $job_id = $t->tx->res->json->{id};
+    my $job = $jobs->find($job_id);
+    my $result = $job->settings_hash;
+
+    my @gru_task_values;
+    foreach my $gru_dep ($schema->resultset('GruDependencies')->search({job_id => $job_id})) {
+        my $gru_task = $gru_dep->gru_task;
+        my $task = $gru_task->taskname;
+        is $task, 'git_clone', 'git_clone task was scheduled';
+        push @gru_task_values, $gru_task->args;
+    }
+    is_deeply \@gru_task_values,
+      [
+        [
+            {
+                path('t/data/openqa/share/tests')->realpath => undef,
+                path('t/data/openqa/share/tests/needles')->realpath => undef,
+            }]
+      ],
+      'the git_clone gru tasks was created correctly';
+
+    subtest 'enqueue git_clone for job restarts' => sub {
+        $job->update({state => 'done'});
+        $params = {jobid => $job_id};
+        $t->post_ok('/api/v1/jobs/restart', form => $params)->status_is(200)->json_has('/result/0');
+        my $new_job_id = $t->tx->res->json->{result}->[0]->{$job_id};
+        ok $new_job_id > $job_id, 'got a new job id';
+        my $gru_dep = $schema->resultset('GruDependencies')->find({job_id => $new_job_id});
+        my $gru_task = $gru_dep->gru_task;
+        is $gru_task->taskname, 'git_clone', 'the git clone job was created for the restarted job';
+    };
 };
 
 subtest 'show parent group name and id when getting job details' => sub {

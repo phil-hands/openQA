@@ -168,7 +168,7 @@ sub _send_livestream_command_to_worker ($client, $command, $verb, $worker_id, $j
         return $cb ? $cb->(undef) : 1 unless my $err = $tx->error;
         my $msg = $err->{code} ? "$err->{code} response: $err->{message}" : $err->{message};
         $msg = "Unable to ask worker $worker_id to $verb providing livestream for $job_id: $msg";
-        log_error $msg;
+        log_debug $msg;
         $cb->($msg) if $cb;
     };
     $client->send_msg($worker_id, $command, $job_id, undef, $txn_cb);
@@ -251,7 +251,7 @@ sub streaming ($self) {
             # skip if the worker is not present anymore or already working on a different job
             # note: This is of course not entirely race-free. The worker will ignore messages which
             #       are not relevant anymore. This is merely to keep those messages to a minimum.
-            my $worker = OpenQA::Schema->singleton->resultset('Workers')->find($worker_id);
+            my $worker = $self->app->schema->resultset('Workers')->find($worker_id);
             return undef unless $worker;
             return undef unless defined $worker->job_id && $worker->job_id == $job_id;
 

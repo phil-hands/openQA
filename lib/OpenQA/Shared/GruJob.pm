@@ -6,10 +6,14 @@ use Mojo::Base 'Minion::Job', -signatures;
 
 use Mojo::Util qw(dumper);
 
-sub execute {
-    my $self = shift;
-
+sub execute ($self) {
     my $gru_id = $self->info->{notes}{gru_id};
+    if ($gru_id and not $self->info->{finished}) {
+        # We have a gru_id and this is the first run of the job
+        my $gru = $self->minion->app->schema->resultset('GruTasks')->find($gru_id);
+        # GruTask might not yet have landed in database due to open transaction
+        return $self->retry({delay => 2}) unless $gru;
+    }
     my $err = $self->SUPER::execute;
 
     # Non-Gru tasks
@@ -26,7 +30,7 @@ sub execute {
             $self->app->log->error("Gru job error: $err");
             $self->fail($err);
         }
-        $self->_fail_gru($gru_id => $err);
+        $self->_fail_gru($gru_id, $err);
     }
 
     # Avoid a possible race condition where the task retries the job and it gets
@@ -39,14 +43,11 @@ sub execute {
     return undef;
 }
 
-sub _delete_gru {
-    my ($self, $id) = @_;
-    my $gru = $self->minion->app->schema->resultset('GruTasks')->find($id);
-    $gru->delete() if $gru;
+sub _delete_gru ($self, $id) {
+    $self->minion->app->schema->resultset('GruTasks')->search({id => $id})->delete;
 }
 
-sub _fail_gru {
-    my ($self, $id, $reason) = @_;
+sub _fail_gru ($self, $id, $reason) {
     my $gru = $self->minion->app->schema->resultset('GruTasks')->find($id);
     $gru->fail($reason) if $gru;
 }

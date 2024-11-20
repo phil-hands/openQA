@@ -29,9 +29,16 @@ use Mojo::JSON;
 my $schema = OpenQA::Test::Database->new->create(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
 my $t = Test::Mojo->new('OpenQA::WebSockets');
 my $t2 = client(Test::Mojo->new('OpenQA::WebSockets'));
+my $misc_limits = $t->app->config->{misc_limits} //= {};
+my $workers = $schema->resultset('Workers');
+my $jobs = $schema->resultset('Jobs');
+my $worker = $workers->find({host => 'localhost', instance => 1});
+my $worker_id = $worker->id;
+my $status = OpenQA::WebSockets::Model::Status->singleton->workers;
+my $app = $t->app;
+my $worker_by_txn = $app->status->worker_by_transaction;
 
 subtest 'Authentication' => sub {
-    my $app = $t->app;
 
     combined_like {
         $t->get_ok('/test')->status_is(404)->content_like(qr/Not found/);
@@ -59,14 +66,21 @@ subtest 'Exception' => sub {
 };
 
 subtest 'API' => sub {
-    $t->tx($t->ua->start($t->ua->build_websocket_tx('/ws/23')))->status_is(400)->content_like(qr/Unknown worker/);
+    $t->tx($t->ua->start($t->ua->build_websocket_tx('/ws/23')));
+    $t->status_is(400, 'no ws connection for unregistered worker');
+    $t->content_like(qr/Unknown worker/, 'error about unknown worker');
+
+    $worker->update({job_id => undef});
+    $misc_limits->{max_online_workers} = 0;
+    $misc_limits->{worker_limit_retry_delay} = 42;
+    $t->tx($t->ua->start($t->ua->build_websocket_tx('/ws/1')));
+    $t->status_is(429, 'no ws connection for limited worker')->content_like(qr/Limit.*exceeded/, 'error about limit');
+    $worker->discard_changes;
+    like $worker->error, qr/^limited at .*/, 'worker flagged as limited via error field excluding it from assignments';
+    is keys %$worker_by_txn, 0, 'no transaction added for limited worker';
 };
 
-my $workers = $schema->resultset('Workers');
-my $jobs = $schema->resultset('Jobs');
-my $worker = $workers->find({host => 'localhost', instance => 1});
-my $worker_id = $worker->id;
-my $status = OpenQA::WebSockets::Model::Status->singleton->workers;
+$misc_limits->{max_online_workers} = undef;
 $status->{$worker_id} = {id => $worker_id, db => $worker};
 
 subtest 'web socket message handling' => sub {
@@ -108,8 +122,10 @@ subtest 'web socket message handling' => sub {
     subtest 'accepted' => sub {
         combined_like {
             $t->websocket_ok('/ws/1', 'establish ws connection');
+            is keys %$worker_by_txn, 1, 'transaction added for online worker';
             $t->send_ok('{"type":"accepted","jobid":42}');
             $t->finish_ok(1000, 'finished ws connection');
+            is keys %$worker_by_txn, 0, 'transaction removed if worker no longer online';
         }
         qr/Worker 1 accepted job 42.*never assigned/s, 'warning logged when job has never been assigned';
 
@@ -127,9 +143,12 @@ subtest 'web socket message handling' => sub {
     subtest 'multiple ws connections handled gracefully' => sub {
         combined_like {
             $t->websocket_ok('/ws/1', 'establish first ws connection');
+            is keys %$worker_by_txn, 1, 'transaction added for online worker';
             $t2->websocket_ok('/ws/1', 'establish second ws connection');
             $t->finished_ok(1008, 'first ws connection finished due to second connection');
+            is keys %$worker_by_txn, 1, 'first transaction removed, so still only one txn';
             $t2->finish_ok(1000, 'finished second ws connection');
+            is keys %$worker_by_txn, 0, 'all transactions removed';
         }
         qr/only one connection per worker allowed/s, '2nd connection attempt logged';
     };

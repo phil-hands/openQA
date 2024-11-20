@@ -12,23 +12,22 @@
   },
   "homepage": "https://github.com/os-autoinst/openQA#readme",
   "devDependencies": {
-    "eslint": "^9.8.0",
+    "eslint": "^9.15.0",
     "eslint-config-prettier": "^9.1.0",
     "eslint-plugin-prettier": "^5.2.1",
     "prettier": "3.3.3"
   },
   "dependencies": {
-    "ace-builds": "^1.35.4",
-    "anser": "^2.1.1",
+    "ace-builds": "^1.36.5",
+    "anser": "^2.3.0",
     "bootstrap": "^5.3.3",
     "chosen-js": "^1.8.7",
     "d3": "^7.9.0",
     "dagre-d3": "^0.6.4",
-    "datatables.net-bs5": "^2.1.2",
+    "datatables.net-bs5": "^2.1.8",
     "fork-awesome": "^1.2.0",
     "jquery": "^3.7.1",
     "jquery-ujs": "^1.2.3",
-    "shepherd.js": "^11.2.0",
     "timeago": "^1.6.7"
   },
   "overrides": {

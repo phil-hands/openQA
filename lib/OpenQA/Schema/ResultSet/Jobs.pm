@@ -6,6 +6,7 @@ package OpenQA::Schema::ResultSet::Jobs;
 use Mojo::Base 'DBIx::Class::ResultSet', -signatures;
 use DBIx::Class::Timestamps 'now';
 use Date::Format 'time2str';
+use Encode qw(decode_utf8);
 use File::Basename 'basename';
 use IPC::Run;
 use OpenQA::App;
@@ -16,6 +17,8 @@ use OpenQA::Utils 'testcasedir';
 use Mojo::File 'path';
 use Mojo::JSON 'encode_json';
 use Mojo::URL;
+use Mojolicious::Validator;
+use Mojolicious::Validator::Validation;
 use Time::HiRes 'time';
 use DateTime;
 
@@ -110,7 +113,7 @@ sub create_from_settings {
     my ($self, $settings, $scheduled_product_id) = @_;
 
     my %settings = %$settings;
-    my %new_job_args = (TEST => $settings{TEST});
+    my %new_job_args;
 
     my $result_source = $self->result_source;
     my $schema = $result_source->schema;
@@ -119,13 +122,21 @@ sub create_from_settings {
 
     my @invalid_keys = grep { $_ =~ /^(PUBLISH_HDD|FORCE_PUBLISH_HDD|STORE_HDD)\S+(\d+)$/ && $settings{$_} =~ /\// }
       keys %settings;
-    die 'The ' . join(',', @invalid_keys) . ' cannot include / in value' if @invalid_keys;
+    die 'The ' . join(',', @invalid_keys) . " cannot include / in value\n" if @invalid_keys;
+
+    # validate special settings
+    my %special_settings = (_PRIORITY => delete $settings{_PRIORITY});
+    my $validator = Mojolicious::Validator->new;
+    my $v = Mojolicious::Validator::Validation->new(validator => $validator, input => \%special_settings);
+    my $prio = $v->optional('_PRIORITY')->num->param;
+    die 'The following settings are invalid: ' . join(', ', @{$v->failed}) . "\n" if $v->has_error;
 
     # assign group ID and priority
     my ($group_args, $group) = OpenQA::Schema::Result::Jobs::extract_group_args_from_settings(\%settings);
+    $new_job_args{priority} = $prio if defined $prio;
     if ($group) {
         $new_job_args{group_id} = $group->id;
-        $new_job_args{priority} = $group->default_priority;
+        $new_job_args{priority} //= $group->default_priority;
     }
 
     # handle dependencies
@@ -154,12 +165,18 @@ sub create_from_settings {
         my $dependency_type = $dependency_definition->{dependency_type};
         for my $id (@$ids) {
             if ($dependency_type eq OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED) {
-                my $parent_worker_class = $job_settings->find({job_id => $id, key => 'WORKER_CLASS'});
-                _handle_directly_chained_dep($parent_worker_class, $id, \%settings);
+                my $parent_worker_classes = join(',', @{$job_settings->all_values_sorted($id, 'WORKER_CLASS')});
+                _handle_directly_chained_dep($parent_worker_classes, $id, \%settings);
             }
             push(@{$new_job_args{parents}}, {parent_job_id => $id, dependency => $dependency_type});
         }
     }
+
+    for my $key (keys %settings) {
+        my $value = $settings{$key};
+        $settings{$key} = decode_utf8 encode_json $value if (ref $value eq 'ARRAY' || ref $value eq 'HASH');
+    }
+    $new_job_args{TEST} = $settings{TEST};
 
     # move important keys from the settings directly to the job
     for my $key (OpenQA::Schema::Result::Jobs::MAIN_SETTINGS) {
@@ -193,18 +210,13 @@ sub create_from_settings {
     return $job;
 }
 
-sub _handle_directly_chained_dep ($parent_worker_class, $id, $settings) {
-    if ($parent_worker_class = $parent_worker_class ? $parent_worker_class->value : '') {
-        if (!$settings->{WORKER_CLASS}) {
-            # assume we want to use the worker class from the parent here (and not the default which
-            # is otherwise assumed)
-            $settings->{WORKER_CLASS} = $parent_worker_class;
-        }
-        elsif ($settings->{WORKER_CLASS} ne $parent_worker_class) {
-            die "Specified WORKER_CLASS ($settings->{WORKER_CLASS}) does not match the one from"
-              . " directly chained parent $id ($parent_worker_class)";
-        }
-    }
+sub _handle_directly_chained_dep ($parent_classes, $id, $settings) {
+    # assume we want to use the worker class from the parent here (and not the default which is otherwise assumed)
+    return $settings->{WORKER_CLASS} = $parent_classes unless defined(my $classes = $settings->{WORKER_CLASS});
+
+    # raise error if the directly chained child has a different set of worker classes assigned than its parent
+    die "Specified WORKER_CLASS ($classes) does not match the one from directly chained parent $id ($parent_classes)"
+      unless $parent_classes eq join(',', sort split(m/,/, $classes));
 }
 
 sub _search_modules ($self, $module_re) {
@@ -274,6 +286,15 @@ sub _prepare_complex_query_search_args ($self, $args) {
         push @conds, {'me.group_id' => {-in => $subquery}};
     }
 
+    if (defined $args->{not_groupid}) {
+        my $id = $args->{not_groupid};
+        if ($id) {
+            push @conds, {-or => [{'me.group_id' => {-not_in => $id}}, {'me.group_id' => undef},]};
+        }
+        else {
+            push @conds, {'me.group_id' => {-not => undef}};
+        }
+    }
     if ($args->{ids}) {
         push @conds, {'me.id' => {-in => $args->{ids}}};
     }

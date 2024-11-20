@@ -54,9 +54,6 @@ $driver->find_element_by_link_text('Login')->click();
 # we're back on the main page
 $driver->title_is("openQA", "back on main page");
 
-# disable tour
-$driver->find_element_by_class_name('shepherd-cancel-icon')->click();
-
 sub goto_admin_needle_table {
     my $login_link = $driver->find_element('#user-action > a');
     is($login_link->get_text(), 'Logged in as Demo', 'logged in as demo');
@@ -66,10 +63,11 @@ sub goto_admin_needle_table {
     # see https://github.com/os-autoinst/openQA/pull/1619#issuecomment-381554863
     # so navigate to admin needles page by using the URL directly
     $driver->get('/admin/needles');
-    wait_for_ajax(with_minion => $minion);
+    $driver->find_element('#needles') or BAIL_OUT('unable to find needles table');
 }
-goto_admin_needle_table();
 
+my $needles_table = goto_admin_needle_table;
+wait_for_data_table($needles_table, 2);
 my @trs = $driver->find_elements('#needles tr', 'css');
 # skip header
 my @tds = $driver->find_child_elements($trs[1], 'td', 'css');
@@ -89,8 +87,8 @@ like(
     "redirected to right module"
 );
 
-goto_admin_needle_table();
-
+$needles_table = goto_admin_needle_table;
+wait_for_data_table($needles_table, 2);
 $driver->find_element_by_link_text('about 14 hours ago')->click();
 like(
     $driver->execute_script("return window.location.href"),
@@ -147,12 +145,12 @@ subtest 'dereference symlink when displaying needles info' => sub {
             dir_id => $real_needle_dir_id,
             filename => 'bootloader.json',
             last_seen_module_id => 10,
-            last_seen_time => time2str('%Y-%m-%d %H:%M:%S', time - 100000),
+            last_seen_time => time2str('%Y-%m-%d %H:%M:%S', time - 100000, 'UTC'),
             last_matched_module_id => 9,
-            last_matched_time => time2str('%Y-%m-%d %H:%M:%S', time - 50000),
+            last_matched_time => time2str('%Y-%m-%d %H:%M:%S', time - 50000, 'UTC'),
             file_present => 1,
-            t_created => time2str('%Y-%m-%d %H:%M:%S', time - 200000),
-            t_updated => time2str('%Y-%m-%d %H:%M:%S', time - 200000),
+            t_created => time2str('%Y-%m-%d %H:%M:%S', time - 200000, 'UTC'),
+            t_updated => time2str('%Y-%m-%d %H:%M:%S', time - 200000, 'UTC'),
         });
     push @need_deleted_needles, $real_needle;
 
@@ -160,14 +158,19 @@ subtest 'dereference symlink when displaying needles info' => sub {
     my $last_seen_module_id = $real_needle->last_seen_module_id;
     my $last_matched_module_id = $real_needle->last_matched_module_id;
 
-    goto_admin_needle_table();
+    $needles_table = goto_admin_needle_table;
+    wait_for_data_table($needles_table, 10);
     my @needle_trs = $driver->find_elements('#needles tbody tr');
-    is(scalar(@needle_trs), 10, '10 added needles shown');
     my @symlink_needle_tds = $driver->find_child_elements($needle_trs[9], 'td', 'css');
     is((shift @symlink_needle_tds)->get_text(), '1symlink_needle_dir', 'symlink needle dir is displayed correctly');
     is((shift @symlink_needle_tds)->get_text(), 'bootloader.json', 'symlink needle file name is displayed correctly');
     my $last_used_td = shift @symlink_needle_tds;
     is($last_used_td->get_text(), 'a day ago', 'symlink needle last use is displayed correctly');
+    is(
+        $last_used_td->child('a')->get_attribute('title'),
+        $real_needle->last_seen_time . '+0000Z',
+        'symlink needle last use tooltip is displayed correctly'
+    );
     like(
         $driver->find_child_element($last_used_td, 'a')->get_attribute('href'),
         qr/admin\/needles\/$last_seen_module_id\/$real_needle_id/,
@@ -184,12 +187,11 @@ subtest 'dereference symlink when displaying needles info' => sub {
     $_->delete for @need_deleted_needles;
     unlink($symlink_needle_dir);
 };
-goto_admin_needle_table();
+
+$needles_table = goto_admin_needle_table;
+wait_for_data_table($needles_table, 2);
 
 subtest 'delete needle' => sub {
-    # disable animations to speed up test
-    $driver->execute_script('$(\'#confirm_delete\').removeClass(\'fade\');');
-
     # select first needle and open modal dialog for deletion
     $driver->find_element('td input')->click();
     wait_for_ajax(with_minion => $minion);
@@ -301,9 +303,8 @@ subtest 'custom needles search' => sub {
             });
     }
 
-    goto_admin_needle_table();
-    my @needle_trs = $driver->find_elements('#needles tbody tr');
-    is(scalar(@needle_trs), 4, '4 added needles shown');
+    $needles_table = goto_admin_needle_table;
+    wait_for_data_table($needles_table, 4);
     is($driver->find_element_by_id('custom_last_seen')->is_displayed(), 0, 'do not show last seen custom area');
     is($driver->find_element_by_id('custom_last_match')->is_displayed(), 0, 'do not show last match custom area');
 
@@ -315,8 +316,8 @@ subtest 'custom needles search' => sub {
     $driver->find_element_by_id('btn_custom_last_seen')->click();
     wait_for_ajax(msg => 'custom needle seen "last" range (default 6 months ago)', with_minion => $minion);
 
-    @needle_trs = $driver->find_elements('#needles tbody tr');
-    is(scalar(@needle_trs), 2, 'only show five_month and five_month-undef needles');
+    wait_for_data_table($needles_table, 2);
+    my @needle_trs = $driver->find_elements('#needles tbody tr');
     my @needle_tds = $driver->find_child_elements($needle_trs[1], 'td', 'css');
     is($needle_tds[1]->get_text(), 'five_month.json', 'search five_month needle correctly');
     @needle_tds = $driver->find_child_elements($needle_trs[0], 'td', 'css');
@@ -325,10 +326,7 @@ subtest 'custom needles search' => sub {
     $last_match_options[7]->click();
     is($driver->find_element_by_id('custom_last_match')->is_displayed(), 1, 'show last match custom area');
     $driver->find_element_by_id('btn_custom_last_match')->click();
-    wait_for_ajax(
-        msg => 'custom needle seen "last" and match "last" range (default 6 months ago)',
-        with_minion => $minion
-    );
+    wait_for_data_table($needles_table, 1);
     @needle_trs = $driver->find_elements('#needles tbody tr');
     is(scalar(@needle_trs), 1, 'only show five_month needle');
     @needle_tds = $driver->find_child_elements($needle_trs[0], 'td', 'css');
@@ -338,16 +336,15 @@ subtest 'custom needles search' => sub {
     my @sel_custom_last_match = $driver->find_elements('#sel_custom_last_match option');
     $sel_custom_last_seen[1]->click();
     $driver->find_element_by_id('btn_custom_last_seen')->click();
-    wait_for_ajax(msg => 'custom needle seen "not last" and match "last" range', with_minion => $minion);
+    wait_for_data_table($needles_table, 1);
     @needle_trs = $driver->find_elements('#needles tbody tr');
     @needle_tds = $driver->find_child_elements($needle_trs[0], 'td', 'css');
     is($needle_tds[0]->get_text(), 'No matching records found', 'There is no match needle');
 
     $sel_custom_last_match[1]->click();
     $driver->find_element_by_id('btn_custom_last_match')->click();
-    wait_for_ajax(msg => 'custom needle seen "not last" and match "not last" range', with_minion => $minion);
+    wait_for_data_table($needles_table, 2);
     @needle_trs = $driver->find_elements('#needles tbody tr');
-    is(scalar(@needle_trs), 2, 'show seven_month and seven_month-undef');
     @needle_tds = $driver->find_child_elements($needle_trs[1], 'td', 'css');
     is($needle_tds[1]->get_text(), 'seven_month.json', 'search seven_month needle correctly');
     @needle_tds = $driver->find_child_elements($needle_trs[0], 'td', 'css');
@@ -355,9 +352,8 @@ subtest 'custom needles search' => sub {
 
     $last_seen_options[0]->click();
     $last_match_options[6]->click();
-    wait_for_ajax(msg => '"all time" seen and "not last two months" match', with_minion => $minion);
+    wait_for_data_table($needles_table, 4);
     @needle_trs = $driver->find_elements('#needles tbody tr');
-    is(scalar(@needle_trs), 4, 'show all needles');
     @needle_tds = $driver->find_child_elements($needle_trs[1], 'td', 'css');
     is($needle_tds[1]->get_text(), 'five_month.json', 'search five_month needle correctly');
     @needle_tds = $driver->find_child_elements($needle_trs[0], 'td', 'css');

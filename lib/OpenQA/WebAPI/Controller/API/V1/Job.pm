@@ -85,6 +85,7 @@ sub list ($self) {
     $validation->optional('limit')->num;
     $validation->optional('offset')->num;
     $validation->optional('groupid')->num;
+    $validation->optional('not_groupid')->num;
 
     my $limits = OpenQA::App->singleton->config->{misc_limits};
     my $limit = min($limits->{generic_max_limit}, $validation->param('limit') // $limits->{generic_default_limit});
@@ -99,7 +100,7 @@ sub list ($self) {
     $args{limit} = $limit + 1;
     $args{offset} = $offset;
     my @args = qw(build iso distri version flavor scope group groupid
-      before after arch hdd_1 test machine worker_class
+      not_groupid before after arch hdd_1 test machine worker_class
       modules modules_result);
     for my $arg (@args) {
         next unless defined(my $value = $self->param($arg));
@@ -487,11 +488,12 @@ Sets priority for a given job.
 
 sub prio ($self) {
     return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
-    my $res = $job->set_prio($self->param('prio'));
+    my $v = $self->validation;
+    my $prio = $v->required('prio')->num->param;
+    return $self->reply->validation_error({format => 'json'}) if $v->has_error;
 
-    # Referencing the scalar will result in true or false
-    # (see http://mojolicio.us/perldoc/Mojo/JSON)
-    $self->render(json => {result => \$res});
+    # Referencing the scalar will result in true or false (see http://mojolicio.us/perldoc/Mojo/JSON)
+    $self->render(json => {result => \$job->set_prio($prio)});
 }
 
 =over 4
@@ -815,6 +817,7 @@ sub _restart ($self, %args) {
     $validation->optional('jobid')->num(0);
     $validation->optional('jobs');
     $validation->optional('set')->like(qr/.+=.*/);
+    $validation->optional('comment')->like(qr/^(?!\s*$).+/);
     $validation->optional($_)->num(0) for @flags;
     return $self->reply->validation_error({format => 'json'}) if $validation->has_error;
 
@@ -831,6 +834,7 @@ sub _restart ($self, %args) {
     }
 
     my $auto = defined $validation->param('dup_type_auto') ? int($validation->param('dup_type_auto')) : 0;
+    my $comment = $validation->param('comment');
     my %settings = map { split('=', $_, 2) } @{$validation->every_param('set')};
     my @params = map { $validation->param($_) ? ($_ => 1) : () } @flags;
     push @params, clone => !defined $validation->param('clone') || $validation->param('clone');
@@ -838,6 +842,10 @@ sub _restart ($self, %args) {
     push @params, skip_aborting_jobs => 1 if $dup_route && !defined $validation->param('skip_aborting_jobs');
     push @params, force => 1 if $dup_route && !defined $validation->param('force');
     push @params, settings => \%settings;
+    if (defined $comment) {
+        push @params, comment => $comment;
+        push @params, comment_user_id => $self->current_user->id;
+    }
 
     my $res = OpenQA::Resource::Jobs::job_restart($jobs, @params);
     OpenQA::Scheduler::Client->singleton->wakeup;
@@ -846,9 +854,12 @@ sub _restart ($self, %args) {
     my @urls;
     for (my $i = 0; $i < @$duplicates; $i++) {
         my $result = $duplicates->[$i];
-        $self->emit_event(openqa_job_restart => {id => $jobs->[$i], result => $result, auto => $auto});
+        my %event_data = (id => $jobs->[$i], result => $result, auto => $auto);
+        $event_data{comment} = $comment if defined $comment;
+        $self->emit_event(openqa_job_restart => \%event_data);
         push @urls, {map { $_ => $self->url_for('test', testid => $result->{$_}) } keys %$result};
     }
+    $self->emit_event(openqa_comment_create => $_) for @{$res->{comments}};
 
     my $clone_id = ($dup_route && $single_job_id) ? ($duplicates->[0] // {})->{$single_job_id} : undef;
     $self->render(

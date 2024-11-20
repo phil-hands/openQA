@@ -51,11 +51,6 @@ sub disconnect_db () {
     $SINGLETON = undef;
 }
 
-sub dsn {
-    my $self = shift;
-    return $self->storage->connect_info->[0]->{dsn};
-}
-
 sub deploy ($self, $force_overwrite = 0) {
     # lock config file to ensure only one thing will deploy/upgrade DB at once
     # we use a file in prjdir/db as the lock file as the install process and
@@ -64,8 +59,8 @@ sub deploy ($self, $force_overwrite = 0) {
     my $dblock;
 
     # LOCK_EX works most reliably if the file is open with write intent
-    open($dblock, '>>', $dblockfile) or die "Can't open database lock file ${dblockfile}!";
-    flock($dblock, LOCK_EX) or die "Can't lock database lock file ${dblockfile}!";
+    open($dblock, '>>', $dblockfile) or die "Cannot open database lock file ${dblockfile}: $!";
+    flock($dblock, LOCK_EX) or die "Cannot lock database lock file ${dblockfile}: $!";
     my $dir = $FindBin::Bin;
     while (abs_path($dir) ne '/') {
         last if (-d "$dir/dbicdh");

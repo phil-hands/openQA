@@ -12,7 +12,6 @@ use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
 use OpenQA::JobGroupDefaults;
 use OpenQA::Schema::Result::Jobs;
-use OpenQA::Task::Git::Clone;
 use File::Copy;
 require OpenQA::Test::Database;
 use OpenQA::Test::Utils qw(run_gru_job perform_minion_jobs);
@@ -24,7 +23,7 @@ use Test::Output qw(combined_like combined_unlike);
 use OpenQA::Test::Case;
 use File::Which 'which';
 use File::Path ();
-use Mojo::Util qw(dumper);
+use Mojo::Util qw(dumper scope_guard);
 use Date::Format 'time2str';
 use Fcntl ':mode';
 use Mojo::File qw(path tempdir);
@@ -33,15 +32,23 @@ use Mojo::Message::Response;
 use Storable qw(store retrieve);
 use Mojo::IOLoop;
 use Cwd qw(getcwd);
+use File::Copy::Recursive qw(dircopy);
 use utf8;
 use Time::Seconds;
 
 plan skip_all => 'set HEAVY=1 to execute (takes longer)' unless $ENV{HEAVY};
 
+# Avoid tampering with git checkout
+my $workdir = tempdir("$FindBin::Script-XXXX", TMPDIR => 1);
+my $guard = scope_guard sub { chdir $FindBin::Bin };
+chdir $workdir;
+mkdir 't';
+dircopy "$FindBin::Bin/$_", "$workdir/t/$_" or BAIL_OUT($!) for qw(data testresults fixtures);
+
 # mock asset deletion
 # * prevent removing assets from database and file system
 # * keep track of calls to OpenQA::Schema::Result::Assets::delete and OpenQA::Schema::Result::Assets::remove_from_disk
-my $tempdir = tempdir;
+my $tempdir = tempdir("assets-XXXX", TMPDIR => 1);
 my $deleted = $tempdir->child('deleted');
 my $removed = $tempdir->child('removed');
 sub mock_deleted { -e $deleted ? retrieve($deleted) : [] }
@@ -119,6 +126,7 @@ $t->app->minion->add_task(
         return $job->retry({delay => 30})
           unless my $guard = $job->minion->guard('limit_gru_retry_task', ONE_HOUR);
     });
+$t->app->minion->add_task(wait_for_grutask => sub (@) { undef });
 
 # Gru task that reached failed/finished manually
 # uncoverable statement
@@ -241,8 +249,8 @@ is(
 $assets->update({size => 26 * $gib});
 run_gru_job($t->app, 'limit_assets');
 
-is(scalar @{mock_removed()}, 1, "one asset should have been 'removed' at size 26GiB");
-is(scalar @{mock_deleted()}, 1, "one asset should have been 'deleted' at size 26GiB");
+is(scalar @{mock_removed()}, 1, "asset is 'removed' at size 26GiB");
+is(scalar @{mock_deleted()}, 1, "asset is 'deleted' at size 26GiB");
 
 is_deeply(
     find_kept_assets_with_last_jobs,
@@ -275,8 +283,8 @@ reset_mocked_asset_deletions;
 $assets->update({size => 34 * $gib});
 run_gru_job($t->app, 'limit_assets');
 
-is(scalar @{mock_removed()}, 1, "two assets should have been 'removed' at size 34GiB");
-is(scalar @{mock_deleted()}, 1, "two assets should have been 'deleted' at size 34GiB");
+is(scalar @{mock_removed()}, 1, "asset is 'removed' at size 34GiB");
+is(scalar @{mock_deleted()}, 1, "asset is 'deleted' at size 34GiB");
 
 is_deeply(
     find_kept_assets_with_last_jobs,
@@ -411,16 +419,6 @@ subtest 'limit audit events' => sub {
     $startup_events->first->update({t_created => '2019-01-01'});
     run_gru_job($t->app, 'limit_audit_events');
     is($audit_events->search({event => 'startup'})->count, 1, 'old startup event deleted');
-};
-
-subtest 'human readable size' => sub {
-    is(human_readable_size(0), '0 Byte', 'zero');
-    is(human_readable_size(1), '1 Byte', 'one');
-    is(human_readable_size(13443399680), '13 GiB', 'two digits GB');
-    is(human_readable_size(8007188480), '7.5 GiB', 'smaller GB');
-    is(human_readable_size(-8007188480), '-7.5 GiB', 'negative smaller GB');
-    is(human_readable_size(717946880), '685 MiB', 'large MB');
-    is(human_readable_size(245760), '240 KiB', 'less than a MB');
 };
 
 subtest 'labeled jobs considered important' => sub {
@@ -566,6 +564,18 @@ subtest 'Gru tasks retry' => sub {
     is $t->app->minion->job($ids->{minion_id})->info->{state}, 'finished', 'minion job is finished';
 };
 
+subtest 'waiting gru job' => sub {
+    my $enq = $app->gru->enqueue(wait_for_grutask => {});
+    # Simulate that the gru task is not yet visible for the minion server
+    $schema->resultset('GruTasks')->find($enq->{gru_id})->delete;
+    my $worker = $app->minion->worker->register;
+    my $job = $worker->dequeue(0, {id => $enq->{minion_id}});
+    $job->execute;
+    is $job->info->{retries}, 1, 'job retried because there is no GruTasks entry';
+    is $job->info->{state}, 'inactive', 'state inactive because there is no GruTasks entry';
+    is $job->info->{finished}, undef, 'finished is not defined';
+};
+
 # prevent writing to a log file to enable use of combined_like in the following tests
 $t->app->log(Mojo::Log->new(level => 'debug'));
 
@@ -634,52 +644,6 @@ subtest 'handling dying GRU task' => sub {
     $associated_job->discard_changes;
     is $associated_job->result, INCOMPLETE, 'associated job is incomplete';
     like $associated_job->reason, qr/^preparation failed: Thrown fail at/, 'reason of associated job set';
-};
-
-subtest 'git clone' => sub {
-    my $openqa_utils = Test::MockModule->new('OpenQA::Task::Git::Clone');
-    my @mocked_git_calls;
-    $openqa_utils->redefine(
-        run_cmd_with_log_return_error => sub ($cmd) {
-            my $stdout = '';
-            $stdout = 'ref: refs/heads/master	HEAD' if $cmd->[3] eq 'ls-remote';
-            $stdout = 'http://localhost/foo.git' if $cmd->[4] eq 'get-url';
-            $stdout = 'master' if $cmd->[3] eq 'branch';
-            my $git_call = join(' ', @$cmd);
-            push @mocked_git_calls, $git_call;
-            return {
-                status => 1,
-                return_code => 0,
-                stderr => '',
-                stdout => $stdout,
-            };
-        });
-    my $clone_dirs = {
-        '/etc/' => 'http://localhost/foo.git',
-        '/root/' => 'http://localhost/foo.git#foobranch',
-        '/this_directory_does_not_exist/' => 'http://localhost/bar.git',
-    };
-    my $res = run_gru_job($t->app, 'git_clone', $clone_dirs, {priority => 10});
-    is $res->{result}, 'Job successfully executed', 'minion job result indicates success';
-    like $mocked_git_calls[3], qr'git -C /etc/ fetch origin master', 'fetch origin master for /etc/';
-    like $mocked_git_calls[4], qr'reset --hard origin/master', 'reset origin/master for /etc/';
-    like $mocked_git_calls[8], qr'git -C /root/ fetch origin foobranch:foobranch', 'fetch non-default branch';
-    like $mocked_git_calls[10], qr'git clone http://localhost/bar.git /this_directory_does_not_exist/',
-      'clone to /this_directory_does_not_exist/';
-
-    subtest 'git clone retried on failure' => sub {
-        $ENV{OPENQA_GIT_CLONE_RETRIES} = 1;
-        $openqa_utils->redefine(_git_clone => sub (@) { die "fake error\n" });
-        $res = run_gru_job($t->app, 'git_clone', $clone_dirs, {priority => 10});
-        is $res->{retries}, 1, 'job retries incremented';
-        is $res->{state}, 'inactive', 'job set back to inactive';
-    };
-    subtest 'git clone fails when all retry attempts exhausted' => sub {
-        $ENV{OPENQA_GIT_CLONE_RETRIES} = 0;
-        $res = run_gru_job($t->app, 'git_clone', $clone_dirs, {priority => 10});
-        is $res->{retries}, 0, 'job retries not incremented';
-        is $res->{state}, 'failed', 'job considered failed';
-    };
 };
 
 subtest 'download assets with correct permissions' => sub {
@@ -843,8 +807,6 @@ subtest 'finalize job results' => sub {
     };
 };
 
-$webapi->signal('TERM');
-$webapi->finish;
 
 done_testing();
 
@@ -852,5 +814,7 @@ done_testing();
 # break subsequent tests; can happen if a subtest creates a task but
 # does not execute it, or we crash partway through a subtest...
 END {
+    $webapi and $webapi->signal('TERM');
+    $webapi and $webapi->finish;
     $t && $t->app->minion->reset;
 }

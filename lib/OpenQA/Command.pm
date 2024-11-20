@@ -101,8 +101,8 @@ sub run ($self, @args) {
       'apikey=s' => sub { $self->apikey($_[1]) },
       'apisecret=s' => sub { $self->apisecret($_[1]) },
       'host=s' => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
-      'o3' => sub { $self->host('https://openqa.opensuse.org') },
-      'osd' => sub { $self->host('http://openqa.suse.de') },
+      o3 => sub { $self->host('https://openqa.opensuse.org') },
+      osd => sub { $self->host('http://openqa.suse.de') },
       'L|links' => \$options{links},
       'name=s' => sub { $self->name($_[1]) },
       'p|pretty' => \$options{pretty},
@@ -131,7 +131,7 @@ sub retry_tx ($self, $client, $tx, $retries = undef, $delay = undef) {
         my $res_code = $new_tx->res->code // 0;
         return $self->handle_result($new_tx, $tx) unless $res_code =~ /^(50[23]|0)$/ && $retries > 0;
         my $waited = time - $start;
-        print encode('UTF-8',
+        print STDERR encode('UTF-8',
 "Request failed, hit error $res_code, retrying up to $retries more times after waiting … (delay: $delay; waited ${waited}s)\n"
         );
         sleep $delay;

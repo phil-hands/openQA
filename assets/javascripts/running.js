@@ -70,8 +70,12 @@ function updateTestStatus(newStatus) {
   }
 
   // redraw module list if a new module have been started
-  $.ajax(detailsTab.panelElement.dataset.src)
-    .done(function (data) {
+  fetch(detailsTab.panelElement.dataset.src)
+    .then(response => {
+      if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
+      return response.json();
+    })
+    .then(data => {
       if (typeof data !== 'object') {
         console.log('No details for current job available.');
         return;
@@ -171,8 +175,9 @@ function updateTestStatus(newStatus) {
         reloadBrokenThumbnails(true);
       }
     })
-    .fail(function () {
+    .catch(error => {
       console.log('ERROR: modlist fail');
+      console.error(error);
     });
 }
 
@@ -182,15 +187,20 @@ function updateStatus() {
     return;
   }
 
-  $.ajax(testStatus.status_url)
-    .done(function (status) {
+  fetch(testStatus.status_url)
+    .then(response => {
+      if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
+      return response.json();
+    })
+    .then(status => {
       updateTestStatus(status);
       // continue polling for job state updates until the job state is done
       if (testStatus.state !== 'done') {
         setTimeout(updateStatus, 5000);
       }
     })
-    .fail(function () {
+    .catch(error => {
+      console.error(error);
       setTimeout(reloadPage, 5000);
     });
 }
@@ -311,13 +321,16 @@ var last_event;
 function loadCanvas(canvas, dataURL) {
   var context = canvas.getContext('2d');
 
-  // load image from data url
+  // load image from data URL
   var scrn = new Image();
   scrn.onload = function () {
     canvas.width = this.width;
     canvas.height = this.height;
     context.clearRect(0, 0, this.width, this.width);
     context.drawImage(this, 0, 0);
+
+    // hide loading animation after the first image is loaded
+    document.getElementById('liveview-loading').style.display = 'none';
   };
   scrn.src = dataURL;
 }
@@ -355,10 +368,12 @@ function setupRunning(jobid, status_url) {
 
 function refreshInfoPanel() {
   const infoPanel = document.getElementById('info_box');
-  $.ajax({
-    url: infoPanel.dataset.src,
-    method: 'GET',
-    success: function (response) {
+  fetch(infoPanel.dataset.src)
+    .then(response => {
+      if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
+      return response.text();
+    })
+    .then(response => {
       infoPanel.innerHTML = response;
       const infoBoxContent = document.getElementById('info-box-content');
       if (!infoBoxContent) {
@@ -372,15 +387,15 @@ function refreshInfoPanel() {
       infoBoxJQuery.find('.timeago').timeago();
       infoBoxJQuery.find('[data-bs-toggle="popover"]').popover({html: true});
       setupResultButtons();
-    },
-    error: function (xhr, ajaxOptions, thrownError) {
+    })
+    .catch(error => {
+      console.error(error);
       addFlash(
         'danger',
-        'Unable to update the info panel.' +
+        `Unable to update the info panel: ${error}` +
           ' <a class="btn btn-primary" href="javascript: refreshInfoPanel();">Retry</a>'
       );
-    }
-  });
+    });
 }
 
 function handleJobStateTransition(oldJobState, newJobState, newJobResult) {

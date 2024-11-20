@@ -1083,9 +1083,10 @@ subtest 'WORKER_CLASS validated when creating directly chained dependencies' => 
         'bar', 'job B has different class bar (ok for regularly chained dependencies)');
     $jobC = _job_create({%default_job_settings, TEST => 'chained-C'}, undef, [], [$jobB->id]);
     is($jobC->settings->find({key => 'WORKER_CLASS'})->value, 'bar', 'job C inherits worker class from B');
+    $job_settings->create({job_id => $jobC->id, key => 'WORKER_CLASS', value => 'baz'});
     throws_ok(
         sub { _job_create({%default_job_settings, TEST => 'chained-D', WORKER_CLASS => 'foo'}, [], [], [$jobC->id]) },
-        qr/Specified WORKER_CLASS \(foo\) does not match the one from directly chained parent .* \(bar\)/,
+        qr/Specified WORKER_CLASS \(foo\) does not match the one from directly chained parent .* \(bar,baz\)/,
         'creation of job with mismatching worker class prevented'
     );
 };
@@ -1275,6 +1276,20 @@ subtest 'starvation of parallel jobs prevented' => sub {
       'holding 2 workers (for 2 of our parallel jobs while 3rd worker is unavailable)';
     is_deeply [sort keys %$allocated_workers], [map { $_->id } @mocked_free_workers], 'both free workers "held"';
     ok $_ >= 1 && $_ <= 3, "worker held for expected job ($_)" for values %$allocated_workers;
+};
+
+subtest 'partially blocked clusters are not scheduled' => sub {
+    # assume parallel child with ID 2 is blocked by removing it from the set of mocked jobs
+    delete $mocked_jobs{2};
+
+    my ($allocated_workers, $allocated_jobs);
+    my $free_workers = OpenQA::Scheduler::Model::Jobs::determine_free_workers();
+    combined_like {
+        ($allocated_workers, $allocated_jobs) = OpenQA::Scheduler::Model::Jobs->singleton->_allocate_jobs($free_workers)
+    }
+    qr/Skipping job .* because dependent jobs are not ready/, 'skipping job if dependent jobs not ready';
+    is_deeply $allocated_jobs, {}, 'no jobs allocated' or diag explain $allocated_jobs;
+    is_deeply $allocated_workers, {}, 'no workers allocated' or diag explain $allocated_workers;
 };
 
 done_testing();

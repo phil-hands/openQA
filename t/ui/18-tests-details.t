@@ -13,6 +13,7 @@ use Test::Warnings qw(:all :report_warnings);
 use Mojo::JSON qw(decode_json encode_json);
 use Mojo::File qw(path);
 use Mojo::IOLoop;
+use Mojo::URL;
 use OpenQA::Test::TimeLimit '40';
 use OpenQA::Test::Case;
 use OpenQA::Test::Utils qw(prepare_clean_needles_dir prepare_default_needle);
@@ -76,13 +77,13 @@ sub current_tab { $driver->find_element('.nav.nav-tabs .active')->get_text }
 # returns the contents of the candidates combo box as hash (key: tag, value: array of needle names)
 sub find_candidate_needles {
     # ensure the candidates menu is visible
-    my @candidates_menus = $driver->find_elements('#candidatesMenu');
-    is(scalar @candidates_menus, 1, 'exactly one candidates menu present at a time');
+    my $candidates_menu = wait_for_element(selector => '#candidatesMenu', is_displayed => 1) or return {};
+    return {} unless $candidates_menu->is_enabled;
+
     # save implicit waiting time as long as we are only looking for elements
     # that should be visible already
     disable_timeout;
-    return {} unless $candidates_menus[0]->is_enabled;
-    $candidates_menus[0]->click();
+    $candidates_menu->click;
 
     # read the tags/needles from the HTML structure
     my @section_elements = $driver->find_elements('#needlediff_selector ul table');
@@ -151,7 +152,6 @@ subtest 'show job modules execution time' => sub {
 
 subtest 'displaying image result with candidates' => sub {
     $driver->find_element('[href="#step/bootloader/1"]')->click();
-    wait_for_ajax;
     my $needles = find_candidate_needles;
     is_deeply($needles, {'inst-bootmenu' => []}, 'correct tags displayed') or diag explain $needles;
 };
@@ -277,7 +277,8 @@ subtest 'reason and log details on incomplete jobs' => sub {
     is(current_tab, 'Details', 'starting on Details tab also for incomplete jobs');
     like($driver->find_element('#info_box')->get_text(), qr/Reason: just a test/, 'reason shown');
     wait_for_ajax(msg => 'test details tab for job 99926 loaded');
-    my $log_element = $driver->find_element_by_xpath('//*[@id="details"]//pre[string-length(text()) > 0]');
+    my $log_element_path = '//*[@id="details"]//*[contains(@class, "embedded-logfile")][table]';
+    my $log_element = $driver->find_element_by_xpath($log_element_path);
     like($log_element->get_attribute('data-src'), qr/autoinst-log.txt/, 'log file embedded');
     like($log_element->get_text(), qr/Crashed\?/, 'log contents loaded');
     $driver->find_element_by_link_text('Investigation')->click;
@@ -310,6 +311,40 @@ subtest 'running job' => sub {
     # avoid elements being replaced in the background, we later call updateStatus() manually to avoid wasting time
     # waiting for the periodic call anyways
     $driver->execute_script('window.enableStatusUpdates = false');
+
+    subtest 'liveview loading animation is displayed' => sub {
+        $driver->find_element_by_link_text('Details')->click();
+        like current_tab, qr/details/i, 'switched to details tab';
+        $driver->find_element_by_link_text('Live View')->click();
+        like current_tab, qr/live/i, 'switched back to live tab';
+        my $loading_element = $driver->find_element('#liveview-loading');
+        ok $loading_element, 'liveview-loading element exists after tab switch';
+        ok $loading_element->is_displayed(), 'liveview-loading is visible after tab switch';
+    };
+    subtest 'liveview loading animation hides after live view starts' => sub {
+        my $loading_element = $driver->find_element('#liveview-loading');
+        ok $loading_element->is_displayed(), 'liveview-loading is initially visible';
+        # simulate the live view starting
+        $driver->execute_script(
+            q{
+            var canvas = document.getElementById('livestream');
+            var dataURL = 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR4nGNgYAAAAAMAAWgmWQ0AAAAASUVORK5CYII=';
+            loadCanvas(canvas, dataURL);
+        }
+        );
+        wait_until sub {
+            !$loading_element->is_displayed();
+        }, 'liveview-loading is hidden after live view starts', 5;
+        my $canvas = $driver->find_element('#livestream');
+        ok $canvas->is_displayed(), 'livestream canvas is displayed';
+        $driver->find_element_by_link_text('Details')->click();
+        like current_tab, qr/details/i, 'switched to details tab';
+        $driver->find_element_by_link_text('Live View')->click();
+        like current_tab, qr/live/i, 'switched back to live tab';
+        $loading_element = $driver->find_element('#liveview-loading');
+        ok $loading_element, 'liveview-loading element exists after tab switch';
+        ok !$loading_element->is_displayed(), 'liveview-loading is still hidden after tab switch';
+    };
 
     subtest 'info panel contents' => sub {
         like(
@@ -483,6 +518,40 @@ subtest 'misc details: title, favicon, go back, go to source view, go to log vie
 
     wait_for_ajax msg => 'log contents';
     like $driver->find_element('.embedded-logfile .ansi-blue-fg')->get_text, qr/send(autotype|key)/, 'log is colorful';
+    like $driver->find_element('.embedded-logfile')->get_text, qr{/usr/bin/qemu-kvm}, 'qemu-kvm is shown in log viewer';
+
+    $driver->find_element('#filter-log-file')->send_keys('kate');
+    like $driver->find_element('#filter-info')->get_text, qr{Showing 3 / 1292 lines},
+      'Showing filter result info for substring';
+    unlike $driver->find_element('.embedded-logfile')->get_text, qr{/usr/bin/qemu-kvm},
+      'qemu-kvm is not shown when filtering for something else';
+    $driver->find_element('#filter-log-file')->clear;
+    like $driver->find_element('#filter-info')->get_text, qr{^$}, 'Filter result info cleared';
+    $driver->find_element('#filter-log-file')->send_keys('/kate-[12]/');
+    like $driver->find_element('#filter-info')->get_text, qr{Showing 2 / 1292 lines},
+      'Showing filter result info for regex';
+
+    my $url = Mojo::URL->new($driver->execute_script('return document.location.toString()'));
+    is $url->query->param('filename'), 'autoinst-log.txt', 'URL still contains filename after filtering';
+    is $url->query->param('filter'), '/kate-[12]/', 'URL contains filter';
+    is $url->fragment, undef, 'URL contains no fragment';
+    wait_for_element
+      selector => '#line-68 .line-current',
+      is_displayed => 1,
+      description => 'clicked line highlighted',
+      trigger_function => sub () { $driver->find_element('#line-68 a')->click };
+    $url = Mojo::URL->new($driver->execute_script('return document.location.toString()'));
+    is $url->query->param('filename'), 'autoinst-log.txt', 'URL still contains filename after clicking on line number';
+    is $url->query->param('filter'), '/kate-[12]/', 'URL still contains filter after clicking on line number';
+    is $url->fragment, 'line-68', 'URL fragment points to clicked line';
+};
+
+subtest ansiToHtml => sub {
+    my @links = ('https://bar/?x=%20&y=@;z=!#ab(c)', 'https://bar/', "https://bar/with'quote");
+    my $text = qq{\e[34mfoo "$links[0]" <$links[1]> $links[2]\e[0m} =~ s/'/\\'/gr;
+    my $html = $driver->execute_script(qq{return ansiToHtml('$text')});
+    my @matched = $html =~ m/href="(.*?)"/g;
+    is $matched[$_], $links[$_] =~ s/&/&amp;/gr, "linkify $_: $links[$_]" for (0 .. $#links);
 };
 
 my $t = Test::Mojo->new('OpenQA::WebAPI');
@@ -575,7 +644,7 @@ sub test_with_error {
     # check whether candidates are displayed as expected
     my $random_number = int(rand(100000));
     $driver->get("/tests/99946?prevent_caching=$random_number#step/yast2_lan/1");
-    wait_for_ajax_and_animations;
+    wait_for_ajax(msg => 'step of yast2_lan test module loaded');
     is_deeply(find_candidate_needles, $expect, $test_name // 'candidates displayed as expected');
 }
 
@@ -610,16 +679,25 @@ subtest 'test candidate list' => sub {
         \%expected_candidates, 'needles appear twice, each time under different tag');
 
     $driver->get('/tests/99946#step/installer_timezone/1');
-    wait_for_ajax_and_animations(msg => 'step preview');
-    $driver->find_element_by_id('candidatesMenu')->click();
-    wait_for_element(selector => '#needlediff_selector .show-needle-info', is_displayed => 1)->click();
+    wait_for_ajax(msg => 'step of installer_timezone test module loaded');
+    my $clicks = 0;
+    wait_for_element(
+        selector => '#needlediff_selector .show-needle-info',
+        is_displayed => 1,
+        trigger_function => sub () {
+            # open the candidates menu at the beginning and try again before every second check
+            return if $clicks != 0 && ($clicks % 2) == 1;
+            wait_for_element(selector => '#candidatesMenu', is_displayed => 1)->click;
+            ++$clicks;
+        })->click;
     like(
         $driver->find_element('.needle-info-table')->get_text(),
         qr/Last match.*T.*Last seen.*T.*/s,
         'last match and last seen shown',
     );
-    $driver->find_element_by_id('candidatesMenu')->click();
+    $driver->find_element('#needlediff_selector .show-needle-info')->click();
     wait_until_element_gone('.needle-info-table');
+    $driver->find_element('#candidatesMenu')->click();
 };
 
 # set job 99963 to done via API to tests whether worker is still displayed then
@@ -712,7 +790,7 @@ subtest 'additional investigation notes provided on new failed' => sub {
     wait_for_ajax(msg => 'details tab for job 99947 loaded to test investigation');
     $driver->find_element('#clones a')->click;    # navigates to 99982
     $driver->find_element_by_link_text('Investigation')->click;
-    $driver->find_element('table#investigation_status_entry')
+    $driver->find_element('#investigation_status_entry')
       ->text_like(qr/No result dir/, 'investigation status content shown as table');
 };
 
@@ -729,7 +807,7 @@ subtest 'alert box shown if not already on first bad' => sub {
 
     $driver->find_element_by_xpath("//div[\@class='alert alert-info']/a[\@class='alert-link']")->click;
     wait_for_ajax(msg => 'details tab for job 99938 loaded to test investigation');
-    $driver->find_element('table#investigation_status_entry')
+    $driver->find_element('#investigation_status_entry')
       ->text_like(qr/error\nNo previous job in this scenario, cannot provide hints/,
         'linked to investigation tab directly');
     $driver->find_element_by_xpath("//div[\@class='tab-content']")

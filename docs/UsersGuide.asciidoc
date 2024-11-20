@@ -193,28 +193,36 @@ by different means:
 
 
 === Variable expansion
+Any job setting can refer to another variable using this syntax: `%NAME%`. When
+the test job is created, the string will be substituted with the value of the
+specified variable at that time.
 
-Any variable defined in Test Suite, Machine, Product or Job Template table can
-refer to another variable using this syntax: `%NAME%`. When the test job is created,
-the string will be substituted with the value of the specified variable at that time.
+The variable expansion applies to job settings defined in test suites, machines,
+products and job templates. It also applies to job settings specified when
+creating a single set of jobs and to variables specified in the worker config.
 
-For example this variable defined for Test Suite:
+Consider this example where a variable is defined within a test suite:
 
 [source,sh]
 --------------------------------------------------------------------------------
 PUBLISH_HDD_1 = %DISTRI%-%VERSION%-%ARCH%-%DESKTOP%.qcow2
 --------------------------------------------------------------------------------
 
-may be expanded to this job variable:
+It may expanded to this job setting:
 
 [source,sh]
 --------------------------------------------------------------------------------
 PUBLISH_HDD_1 = opensuse-13.1-i586-kde.qcow2
 --------------------------------------------------------------------------------
 
-=== Variable precedence
+NOTE: Variables from the worker config are not considered if such a variable is
+also present in any of the other mentioned places. To give variable values from
+the worker config precedence, use double percentage signs. Expansions by the
+worker will *not* be shown in the "Settings" tab on the web UI. They are only
+present in `vars.json` and `worker-log.txt`.
 
-It's possible to define the same variable in multiple places that would all be
+=== Variable precedence
+It is possible to define the same variable in multiple places that would all be
 used for a single job - for instance, you may have a variable defined in both
 a test suite and a product that appear in the same job template. The precedence
 order for variables is as follows (from lowest to highest):
@@ -1179,24 +1187,35 @@ instance.
 
 If the YAML document already exists on the openQA host, you can also use
 `SCENARIO_DEFINITIONS_YAML_FILE` which expects the file path of the YAML document
-on the openQA host.
+on the openQA host. One can also specify an HTTP/HTTPs URL via that variable
+when `async=1` is used (see
+<<UsersGuide.asciidoc#_spawning_multiple_jobs_based_on_templates_isos_post>>
+for details). Then this file is downloaded by the openQA host.
 
-The YAML document itself should define at least one product, machine and job
-template like this:
+The YAML document itself should define at least one or more job templates:
 
 [source,sh]
 --------------------------------------------------------------------------------
 job_templates:
   create_hdd:
+    machine: 64bit
     settings:
       PUBLISH_HDD_1: 'example-%VERSION%-%ARCH%-%BUILD%@%MACHINE%.qcow2'
   boot_from_hdd:
+    machine: 64bit
     settings:
       HDD_1: 'example-%VERSION%-%ARCH%-%BUILD%@%MACHINE%.qcow2'
       START_AFTER_TEST: 'create_hdd'
       WORKER_CLASS: 'job-specific-class'
 
 --------------------------------------------------------------------------------
+
+This example would create two jobs. They will run in sequence. The first job
+will upload an HDD image that will then be consumed by the second job.
+
+Note that you can also specify products and machine settings. An example showing
+the full structure can be found in the
+https://github.com/os-autoinst/os-autoinst-distri-example/blob/master/scenario-definitions.yaml[example distribution].
 
 These definitions are used like their openQA-instance-wide counterparts (so continue
 reading the next section for more details on job templates).

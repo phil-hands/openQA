@@ -191,16 +191,15 @@ function changeJobPrio(jobId, delta, linkElement) {
   }
 
   var newPrio = currentPrio + delta;
-  $.ajax({
-    url: urlWithBase('/api/v1/jobs/' + jobId + '/prio?prio=' + newPrio),
-    method: 'POST',
-    success: function (result) {
+
+  fetchWithCSRF(urlWithBase(`/api/v1/jobs/${jobId}/prio?prio=${newPrio}`), {method: 'POST'})
+    .then(response => {
+      if (!response.ok) throw `Server returned ${response.status}: ${response.statusText}`;
       prioValueElement.text(newPrio);
-    },
-    error: function (xhr, ajaxOptions, thrownError) {
-      addFlash('danger', 'Unable to set the priority value of job ' + jobId + '.');
-    }
-  });
+    })
+    .catch(error => {
+      addFlash('danger', `Unable to set the priority value of job ${jobId}: ${error}`);
+    });
 }
 
 function renderTestSummary(data) {
@@ -403,6 +402,10 @@ function renderTestLists() {
 
   // add a handler for the actual filtering
   $.fn.dataTable.ext.search.push(function (settings, data, dataIndex) {
+    if (settings.nTable.getAttribute('id') !== 'results') {
+      return true; // Do not filter other tables
+    }
+
     var selectedResults = finishedJobsResultFilter.find('option:selected');
     // don't apply filter if no result is selected
     if (!selectedResults.length) {

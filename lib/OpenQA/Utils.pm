@@ -603,6 +603,11 @@ sub create_downloads_list ($job_settings) {
 
 sub create_git_clone_list ($job_settings, $clones = {}) {
     my $distri = $job_settings->{DISTRI};
+    if (OpenQA::App->singleton->config->{'scm git'}->{git_auto_update} eq 'yes') {
+        # Potential existing git clones to update without having CASEDIR or NEEDLES_DIR
+        not $job_settings->{CASEDIR} and $clones->{testcasedir($distri)} = undef;
+        not $job_settings->{NEEDLES_DIR} and $clones->{needledir($distri)} = undef;
+    }
     my $case_url = Mojo::URL->new($job_settings->{CASEDIR} // '');
     my $needles_url = Mojo::URL->new($job_settings->{NEEDLES_DIR} // '');
     if ($case_url->scheme) {
@@ -840,10 +845,10 @@ sub set_listen_address {
     my $port = shift;
 
     return if $ENV{MOJO_LISTEN};
-    my @listen_addresses = ("http://127.0.0.1:$port");
+    my @listen_addresses = ("http://127.0.0.1:$port?reuse=1");
 
     # Check for IPv6
-    push @listen_addresses, "http://[::1]:$port" if IO::Socket::IP->new(Listen => 5, LocalAddr => '::1');
+    push @listen_addresses, "http://[::1]:$port?reuse=1" if IO::Socket::IP->new(Listen => 5, LocalAddr => '::1');
 
     $ENV{MOJO_LISTEN} = join ',', @listen_addresses;
 }

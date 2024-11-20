@@ -9,7 +9,7 @@ use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common
 use Date::Format 'time2str';
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
-use OpenQA::Test::TimeLimit '20';
+use OpenQA::Test::TimeLimit '25';
 use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 use OpenQA::Jobs::Constants;
@@ -156,7 +156,6 @@ like($driver->find_elements('.failedmodule', 'css')->[1]->get_attribute('href'),
 
 my @descriptions = $driver->find_elements('td.name a', 'css');
 is(scalar @descriptions, 2, 'only test suites with description content are shown as links');
-disable_bootstrap_animations;
 $descriptions[0]->click();
 is($driver->find_element('.popover-header')->get_text, 'kde', 'description popover shows content');
 
@@ -170,10 +169,10 @@ is(scalar @open_bugs, 1, 'open bug correctly shown, and only once despite the 2 
 is(scalar @closed_bugs, 0, 'open bug not shown as closed bug');
 
 sub check_build_0091_defaults {
-    element_visible('#flavor_DVD_arch_i586', qr/i586/);
-    element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
-    element_visible('#flavor_GNOME-Live_arch_i686', qr/i686/);
-    element_visible('#flavor_NET_arch_x86_64', qr/x86_64/);
+    wait_for_element selector => '#flavor_DVD_arch_i586', is_displayed => 1, like => qr/i586/;
+    wait_for_element selector => '#flavor_DVD_arch_x86_64', is_displayed => 1, like => qr/x86_64/;
+    wait_for_element selector => '#flavor_GNOME-Live_arch_i686', is_displayed => 1, like => qr/i686/;
+    wait_for_element selector => '#flavor_NET_arch_x86_64', is_displayed => 1, like => qr/x86_64/;
 }
 
 subtest 'stacking of parallel children' => sub {
@@ -278,14 +277,17 @@ subtest 'filtering by flavor' => sub {
     };
 };
 
+sub check_textmode_test ($test_row) {
+    wait_for_element selector => '#flavor_DVD_arch_i586', like => qr/i586/;
+    my @job_rows = map { $_->get_text } @{$driver->find_elements('#content tbody tr')};
+    is_deeply \@job_rows, [$test_row], 'only the textmode job is present' or diag explain \@job_rows;
+}
+
 subtest 'filtering by test' => sub {
 
     subtest 'request for specific test' => sub {
         $driver->get('/tests/overview?test=textmode');
-
-        my @rows = $driver->find_elements('#content tbody tr');
-        is(scalar @rows, 1, 'exactly one row present');
-        like($rows[0]->get_text(), qr/textmode/, 'test is textmode');
+        check_textmode_test 'textmode';
         like(
             OpenQA::Test::Case::trim_whitespace($driver->find_element('#summary .card-header')->get_text()),
             qr/Overall Summary of opensuse 13\.1 build 0092/,
@@ -294,19 +296,12 @@ subtest 'filtering by test' => sub {
     };
 
     $driver->get('/tests/overview?distri=opensuse&version=13.1&build=0091');
-
-    subtest 'by default, all tests present' => sub {
-        check_build_0091_defaults;
-    };
-
+    subtest 'by default, all tests present' => sub { check_build_0091_defaults };
     subtest 'filter for specific test' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-test')->send_keys('textmode');
         $driver->find_element('#filter-panel button[type="submit"]')->click();
-
-        my @rows = $driver->find_elements('#content tbody tr');
-        is(scalar @rows, 1, 'exactly one row present');
-        like($rows[0]->get_text(), qr/textmode/, 'test is textmode');
+        check_textmode_test 'textmode zypper_up';
     };
 };
 
@@ -450,27 +445,21 @@ subtest "filtering by machine" => sub {
         $driver->find_element('#filter-machine')->send_keys('uefi');
         $driver->find_element('#filter-panel button[type="submit"]')->click();
 
-        element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
-        element_not_present('#flavor_DVD_arch_i586');
-        element_not_present('#flavor_GNOME-Live_arch_i686');
-        element_not_present('#flavor_NET_arch_x86_64');
+        like wait_for_element(selector => '#flavor_DVD_arch_x86_64')->get_text, qr/x86_64/, 'DVD/x86_64 present';
+        element_not_present("#$_") for qw(flavor_DVD_arch_i586 flavor_GNOME-Live_arch_i686 flavor_NET_arch_x86_64);
+        is element_prop('filter-machine'), 'uefi', 'machine filter still visible in form';
 
-        my @row = $driver->find_element('#content tbody tr');
-        is(scalar @row, 1, 'The job its machine is uefi is shown');
+        my @job_rows = map { $_->get_text } @{$driver->find_elements('#content tbody tr')};
+        is_deeply \@job_rows, ['kde@uefi'], 'only the job with machine uefi is shown' or diag explain \@job_rows;
 
-        is($driver->find_element('#content tbody .name span')->get_text(), 'kde@uefi', 'Test suite name is shown');
         $driver->find_element('#filter-panel .card-header')->click();
-        is(element_prop('filter-machine'), 'uefi', 'machine text is correct');
-
         $driver->find_element('#filter-machine')->clear();
         $driver->find_element('#filter-machine')->send_keys('64bit,uefi');
         $driver->find_element('#filter-panel button[type="submit"]')->click();
 
-        element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
-        element_visible('#flavor_NET_arch_x86_64', qr/x86_64/);
-        element_not_present('#flavor_GONME-Live_arch_i686');
-        element_not_present('#flavor_DVD_arch_i586');
-
+        like wait_for_element(selector => '#flavor_DVD_arch_x86_64')->get_text, qr/x86_64/, 'DVD/x86_64 still present';
+        like wait_for_element(selector => '#flavor_NET_arch_x86_64')->get_text, qr/x86_64/, 'NET/x86_64 present';
+        element_not_present("#$_") for qw(flavor_DVD_arch_i586 flavor_GNOME-Live_arch_i686);
     };
 };
 
@@ -553,19 +542,32 @@ subtest 'filter by result and state' => sub {
     ok !$driver->find_element_by_id('filter-failed')->is_selected, 'other checkbox not checked';
 };
 
+subtest "job template names displayed on 'Test result overview' page" => sub {
+    $driver->get('/group_overview/1002');
+    is($driver->find_element('.progress-bar-unfinished')->get_text(),
+        '1 unfinished', 'expected number of unfinished jobs');
+
+    $driver->get('/tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1002');
+    my @tds = $driver->find_elements('#results_DVD tbody tr .name');
+    is($tds[0]->get_text(), 'kde_variant', 'job template name kde_variant displayed correctly');
+
+    my @descriptions = $driver->find_elements('td.name a', 'css');
+    is(scalar @descriptions, 2, 'only test suites with description content are shown as links');
+    $descriptions[0]->click();
+    is(wait_for_element(selector => '.popover-header')->get_text, 'kde_variant', 'description popover shows content');
+};
+
 subtest 'add comments' => sub {
-    my @buttons = $driver->find_elements('button[title="Add comments"]');
+    my @buttons = $driver->find_elements('button[title="Restart or comment jobs"]');
     is @buttons, 0, 'button for adding comments not present if not logged-in';
 
     $driver->find_element_by_link_text('Login')->click;
     $driver->get('/tests/overview?state=done&result=failed');
-    $driver->find_element_by_class_name('shepherd-cancel-icon')->click;
-    disable_bootstrap_animations;
-    $driver->find_element('button[title="Add comments"]')->click;
+    $driver->find_element('button[title="Restart or comment jobs"]')->click;
     my $comment_text = 'comment via add-comments';
-    my $submit_button = $driver->find_element('#add-comments-controls button[type="submit"]');
+    my $submit_button = $driver->find_element('#add-comments-controls button[id="commentJobsBtn"]');
     $driver->find_element_by_id('text')->send_keys($comment_text);
-    is $submit_button->get_text, 'Submit comment on all 2 jobs', 'submit button displayed with number of jobs';
+    is $submit_button->get_text, 'Comment on all 2 jobs', 'submit button displayed with number of jobs';
     $submit_button->click;
     wait_for_ajax msg => 'comments created';
     like $driver->find_element_by_id('flash-messages')->get_text, qr/The comments have been created. Reload/,
@@ -576,23 +578,26 @@ subtest 'add comments' => sub {
       'comments created on all relevant jobs';
     is $comments->search({job_id => {-not_in => \@failed_job_ids}, text => $comment_text})->count, 0,
       'comments not created on other jobs';
-};
 
-subtest "job template names displayed on 'Test result overview' page" => sub {
-    $driver->get('/group_overview/1002');
-    is($driver->find_element('.progress-bar-failed')->get_text(), '1 failed', 'The number of failed jobs is right');
-    is($driver->find_element('.progress-bar-unfinished')->get_text(),
-        '1 unfinished', 'The number of unfinished jobs is right');
-
-    $driver->get('/tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1002');
-    my @tds = $driver->find_elements('#results_DVD tbody tr .name');
-    is($tds[0]->get_text(), 'kde_variant', 'job template name kde_variant displayed correctly');
-
-    my @descriptions = $driver->find_elements('td.name a', 'css');
-    is(scalar @descriptions, 2, 'only test suites with description content are shown as links');
-    disable_bootstrap_animations;
-    $descriptions[0]->click();
-    is(wait_for_element(selector => '.popover-header')->get_text, 'kde_variant', 'description popover shows content');
+    subtest 'restart jobs with comment' => sub {
+        $driver->get('/tests/overview?state=done&result=failed');
+        $driver->find_element('button[title="Restart or comment jobs"]')->click;
+        my $comment_text = 'comment current jobs and restart';
+        my $submit_button = $driver->find_element('#restartAndCommentJobsBtn');
+        $driver->find_element_by_id('text')->send_keys($comment_text);
+        is $submit_button->get_text, 'Restart and comment on 2 jobs', 'submit button displayed with number of jobs';
+        $submit_button->click;
+        wait_for_ajax msg => 'comments created';
+        like $driver->find_element_by_id('flash-messages')->get_text, qr/Reload the page to show changes/,
+          'info about successful restart shown';
+        my @failed_job_ids = map { $_->id } $jobs->search({result => FAILED})->all;
+        is $comments->search({job_id => {-in => \@failed_job_ids}, text => $comment_text})->count, 2,
+          'comments created on all relevant jobs';
+        is $comments->search({job_id => {-not_in => \@failed_job_ids}, text => $comment_text})->count, 0,
+          'comments not created on other jobs';
+        my $running_job_ids = map { $_->id } $jobs->search({state => RUNNING})->all;
+        is $running_job_ids, 2, 'all relevant jobs restarted';
+    };
 };
 
 subtest "job dependencies displayed on 'Test result overview' page" => sub {

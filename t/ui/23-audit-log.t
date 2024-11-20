@@ -12,7 +12,6 @@ use Test::Warnings ':report_warnings';
 
 use OpenQA::Test::TimeLimit '30';
 use OpenQA::Test::Case;
-use OpenQA::Test::Utils 'wait_for';
 use OpenQA::Client;
 
 use OpenQA::SeleniumTest;
@@ -24,20 +23,9 @@ my $events = $schema->resultset('AuditEvents');
 my %comments_create_event = (event => 'comments_create', event_data => '{"created":[{"id": 20},{"id": 67}]}');
 $events->create(\%comments_create_event);
 
-sub wait_for_data_table_entries ($table, $expected_entry_count) {
-    my @entries;
-    wait_for_ajax msg => 'DataTable query';
-    wait_for {
-        @entries = $driver->find_child_elements($table, 'tbody/tr', 'xpath');
-        scalar @entries == $expected_entry_count;
-    }
-    "$expected_entry_count entries present", {timeout => OpenQA::Test::TimeLimit::scale_timeout 10};
-    return \@entries;
-}
-
 sub check_data_table_entries ($expected_entry_count, $test_name) {
     my $table = $driver->find_element_by_id('audit_log_table') or BAIL_OUT 'unable to find DataTable';
-    my $entries = wait_for_data_table_entries $table, $expected_entry_count;
+    my $entries = wait_for_data_table $table, $expected_entry_count;
     is scalar @$entries, $expected_entry_count, $test_name;
     return $entries;
 }
@@ -51,13 +39,11 @@ $t->get_ok($url . '/admin/auditlog')->status_is(302);
 $t->get_ok($url . '/login')->status_is(302);
 $t->get_ok($url . '/admin/auditlog')->status_is(200);
 
-# login-in as Demo and disable tour
+# login-in as Demo
 $driver->title_is('openQA', 'on main page');
 $driver->find_element_by_link_text('Login')->click();
 $driver->title_is('openQA', 'back on main page');
 is $driver->find_element('#user-action a')->get_text(), 'Logged in as Demo', 'logged in as demo';
-$driver->find_element_by_id('dont-notify')->click;
-$driver->find_element_by_class_name('shepherd-cancel-icon')->click;
 
 $driver->find_element('#user-action a')->click();
 $driver->find_element_by_link_text('Audit log')->click();
@@ -99,11 +85,11 @@ subtest 'audit log entries' => sub {
 subtest 'clickable events' => sub {
     # Populate database via the API to add events without hard-coding the format here
     my $auth = {'X-CSRF-Token' => $t->ua->get($url . '/tests')->res->dom->at('meta[name=csrf-token]')->attr('content')};
-    $t->post_ok($url . '/api/v1/machines', $auth => form => {name => 'foo', backend => 'qemu'})->status_is(200);
-    $t->post_ok($url . '/api/v1/test_suites', $auth => form => {name => 'testsuite'})->status_is(200);
+    $t->post_ok($url . '/api/v1/machines', $auth, json => {name => 'foo', backend => 'qemu'})->status_is(200);
+    $t->post_ok($url . '/api/v1/test_suites', $auth, json => {name => 'testsuite'})->status_is(200);
     $t->post_ok(
         $url . '/api/v1/products',
-        $auth => form => {
+        $auth => json => {
             arch => 'x86_64',
             distri => 'opensuse',
             flavor => 'DVD',

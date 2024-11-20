@@ -26,7 +26,7 @@ start-database() {
 start-worker() {
     if [[ -z $running_systemd ]]; then
         /usr/bin/install -d -m 0755 -o _openqa-worker /var/lib/openqa/pool/1
-        su _openqa-worker -c '/usr/share/openqa/script/worker --instance 1'
+        su _openqa-worker -c '/usr/share/openqa/script/worker --instance 1' &
     else
         systemctl enable --now openqa-worker@1
     fi
@@ -76,6 +76,9 @@ if [[ $NAME = "openSUSE Leap" ]]; then
     zypper -n --gpg-auto-import-keys refresh
 fi
 
+# Ensure we have retry available to handle temporary package issues later
+command -v retry > /dev/null || zypper -n --gpg-auto-import-keys in retry
+
 # install packages
 pkgs=(qemu-arm qemu-ppc qemu-x86 qemu-tools sudo iputils os-autoinst-distri-opensuse-deps)
 
@@ -92,7 +95,8 @@ fi
 if zypper -n search -x qemu-hw-display-virtio-gpu-pci; then
     pkgs+=(qemu-hw-display-virtio-gpu qemu-hw-display-virtio-gpu-pci)
 fi
-zypper -n install --no-recommends "${pkgs[@]}"
+packages="${pkgs[*]}"
+retry -e -s 30 -r 7 -- sh -c "zypper -n --gpg-auto-import-keys ref && zypper -n in --no-recommends $packages"
 
 # setup database
 chown -R postgres: /var/lib/pgsql/ # fix broken postgres working dir permissions in the nspawn container
@@ -108,7 +112,7 @@ if command -v $setup; then
 else
     curl -s https://raw.githubusercontent.com/os-autoinst/openQA/master/script/configure-web-proxy | bash -ex -s -- "$proxy_args"
 fi
-sed -i -e 's/#*.*method.*=.*$/method = Fake/' -e 's/#\[scm git\]/[scm git]/' -e 's/#git_auto_clone =.*$/git_auto_clone = yes/' /etc/openqa/openqa.ini
+sed -i -e 's/#*.*method.*=.*$/method = Fake/' /etc/openqa/openqa.ini
 
 if [[ -z $skip_suse_specifics ]] && ping -c1 download.suse.de. && (! rpm -q ca-certificates-suse); then
     # add internal CA if executed within suse network
@@ -182,3 +186,7 @@ start-worker
 if [[ $# -ne 0 ]]; then
     openqa-clone-job "$@"
 fi
+
+# wait forever without systemd (assuming we are running as container entrypoint)
+# see https://progress.opensuse.org/issues/164595?#note-5
+[[ -n $running_systemd ]] || wait

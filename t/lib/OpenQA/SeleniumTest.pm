@@ -11,7 +11,7 @@ our @EXPORT = qw(driver_missing check_driver_modules enable_timeout
   wait_for_ajax_and_animations
   open_new_tab mock_js_functions element_visible element_hidden
   element_not_present javascript_console_has_no_warnings_or_errors
-  wait_until wait_until_element_gone wait_for_element
+  wait_until wait_until_element_gone wait_for_element wait_for_data_table
   element_prop element_prop_by_selector map_elements);
 
 use Carp;
@@ -24,7 +24,7 @@ use Time::HiRes qw(time sleep);
 use OpenQA::WebAPI;
 use OpenQA::Log 'log_info';
 use OpenQA::Utils;
-use OpenQA::Test::Utils;
+use OpenQA::Test::Utils qw(wait_for);
 use POSIX '_exit';
 
 our $_driver;
@@ -144,9 +144,13 @@ sub wait_for_ajax (%args) {
     my $slept = 0;
     my $msg = $args{msg} ? (': ' . $args{msg}) : '';
 
-    while (!$_driver->execute_script('return window.jQuery && jQuery.active === 0')) {
+    while (!$_driver->execute_script('return window.jQuery && jQuery.active === 0 && !window.runningFetchRequests')) {
         if ($timeout <= 0) {
-            fail("Wait for jQuery timed out$msg");    # uncoverable statement
+            #<<< no perltidy
+            my $s = '`(jQuery: ${window.jQuery && jQuery.active}, fetch: ${window.runningFetchRequests})`'; # uncoverable statement
+            #>>> no perltidy
+            $msg .= $_driver->execute_script($s);    # uncoverable statement
+            fail("Wait for AJAX timed out $msg");    # uncoverable statement
             return undef;    # uncoverable statement
         }
 
@@ -156,7 +160,7 @@ sub wait_for_ajax (%args) {
         sleep $check_interval;
         $slept = 1;
     }
-    note "Wait for jQuery successful$msg";
+    note "Wait for AJAX successful$msg";
     return $slept;
 }
 
@@ -212,10 +216,10 @@ sub javascript_console_has_no_warnings_or_errors ($test_name_suffix = '') {
             # WebSocket connection
         next if ($msg =~ qr/Data frame received after close/);    # uncoverable statement
 
-        # ignore when server replied with 400 response; this may be provoked when testing error cases and if it is
+        # ignore when server replied with 4xx response; this may be provoked when testing error cases and if it is
         # not expected tests would fail anyways
-        next if ($msg =~ qr/server responded with a status of 400/);    # uncoverable statement
-        push(@errors, $log_entry);
+        next if ($msg =~ qr/server responded with a status of 4\d\d/);    # uncoverable statement
+        push(@errors, $log_entry);    # uncoverable statement
     }
 
     diag "Unexpected Javascript console errors$test_name_suffix: " . pp(\@errors) if @errors;
@@ -337,7 +341,20 @@ sub wait_for_element (%args) {
         $args{timeout},
         $args{check_interval},
     );
+    like $element->get_text, $args{like}, "$selector text" if $element && $args{like};
     return $element;
+}
+
+sub wait_for_data_table ($table, $expected_row_count) {
+    my @entries;
+    wait_for_ajax msg => 'DataTable query';
+    wait_for {
+        @entries = $_driver->find_child_elements($table, 'tbody/tr', 'xpath');
+        scalar @entries == $expected_row_count;
+    }
+    "$expected_row_count rows present", {timeout => OpenQA::Test::TimeLimit::scale_timeout(10)};
+    is scalar @entries, $expected_row_count, 'DataTable shows expected number of rows';
+    return \@entries;
 }
 
 sub kill_driver () {

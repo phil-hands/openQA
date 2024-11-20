@@ -9,9 +9,12 @@ use Minion;
 use DBIx::Class::Timestamps 'now';
 use OpenQA::Schema;
 use OpenQA::Shared::GruJob;
-use OpenQA::Log 'log_info';
+use OpenQA::Log qw(log_debug log_info);
+use OpenQA::Utils qw(sharedir);
 use Mojo::Pg;
 use Mojo::Promise;
+use Mojo::File qw(path);
+use Mojo::JSON qw(decode_json);
 
 has app => undef, weak => 1;
 has 'dsn';
@@ -23,21 +26,32 @@ sub new ($class, $app = undef) {
 
 sub register_tasks ($self) {
     my $app = $self->app;
-    $app->plugin($_)
-      for (
-        qw(OpenQA::Task::AuditEvents::Limit),
-        qw(OpenQA::Task::Asset::Download),
-        qw(OpenQA::Task::Asset::Limit),
-        qw(OpenQA::Task::Git::Clone),
-        qw(OpenQA::Task::Needle::Scan OpenQA::Task::Needle::Save OpenQA::Task::Needle::Delete),
-        qw(OpenQA::Task::Job::Limit),
-        qw(OpenQA::Task::Job::ArchiveResults),
-        qw(OpenQA::Task::Job::FinalizeResults),
-        qw(OpenQA::Task::Job::HookScript),
-        qw(OpenQA::Task::Job::Restart),
-        qw(OpenQA::Task::Iso::Schedule),
-        qw(OpenQA::Task::Bug::Limit),
-      );
+    $app->plugin($_) for qw(
+      OpenQA::Task::AuditEvents::Limit
+      OpenQA::Task::Asset::Download
+      OpenQA::Task::Asset::Limit
+      OpenQA::Task::Git::Clone
+      OpenQA::Task::Needle::Scan OpenQA::Task::Needle::Save OpenQA::Task::Needle::Delete
+      OpenQA::Task::Job::Limit
+      OpenQA::Task::Job::ArchiveResults
+      OpenQA::Task::Job::FinalizeResults
+      OpenQA::Task::Job::HookScript
+      OpenQA::Task::Job::Restart
+      OpenQA::Task::Iso::Schedule
+      OpenQA::Task::Bug::Limit
+    );
+}
+
+# allow the continuously polled stats to be available on an
+# unauthenticated route to prevent recurring broken requests to the login
+# provider if not logged in
+#
+# hard/impossible to mock due to name collision of "remove" method on
+# Test::MockObject, hence marking as
+# uncoverable statement
+sub _allow_unauthenticated_minion_stats ($app) {
+    my $route = $app->routes->find('minion_stats')->remove;    # uncoverable statement
+    $app->routes->any('/minion')->add_child($route);    # uncoverable statement
 }
 
 sub register ($self, $app, $config) {
@@ -45,13 +59,14 @@ sub register ($self, $app, $config) {
     my $schema = $app->schema;
 
     my $conn = Mojo::Pg->new;
-    if (ref $schema->storage->connect_info->[0] eq 'HASH') {
-        $self->dsn($schema->dsn);
-        $conn->username($schema->storage->connect_info->[0]->{user});
-        $conn->password($schema->storage->connect_info->[0]->{password});
+    my $connect_info = $schema->storage->connect_info->[0];
+    if (ref $connect_info eq 'HASH') {
+        $self->dsn($connect_info->{dsn});
+        $conn->username($connect_info->{user});
+        $conn->password($connect_info->{password});
     }
     else {
-        $self->dsn($schema->storage->connect_info->[0]);
+        $self->dsn($connect_info);
     }
     $conn->dsn($self->dsn());
 
@@ -82,12 +97,7 @@ sub register ($self, $app, $config) {
     # Enable the Minion Admin interface under /minion
     my $auth = $app->routes->under('/minion')->to('session#ensure_admin');
     $app->plugin('Minion::Admin' => {route => $auth});
-    # allow the continuously polled stats to be available on an
-    # unauthenticated route to prevent recurring broken requests to the login
-    # provider if not logged in
-    my $route = $app->routes->find('minion_stats')->remove;
-    $app->routes->any('/minion')->add_child($route);
-
+    _allow_unauthenticated_minion_stats($app);
     my $gru = OpenQA::Shared::Plugin::Gru->new($app);
     $app->helper(gru => sub ($c) { $gru });
 }
@@ -105,6 +115,59 @@ sub is_task_active ($self, $task) {
 
 # checks if there are worker registered
 sub has_workers ($self) { !!$self->app->minion->backend->list_workers(0, 1)->{total} }
+
+# For some tasks with the same args we don't need to repeat them if they were
+# enqueued less than a minute ago, like 'git fetch'
+sub _find_existing_minion_job ($self, $task, $args, $job_ids) {
+    my $schema = OpenQA::Schema->singleton;
+    $args = [$args] if ref $args eq 'HASH';
+    my $dtf = $schema->storage->datetime_parser;
+    my $dbh = $schema->storage->dbh;
+    my $sql = q{SELECT id, args, created, state, retries, notes, result FROM minion_jobs
+                WHERE state IN ('inactive', 'active', 'finished')
+                AND created >= ? AND task = ? AND args = ?
+                ORDER BY array_position(array['finished'::varchar, 'inactive'::varchar, 'active'::varchar], state::varchar)
+                LIMIT 1};
+    my $sth = $dbh->prepare($sql);
+    my @args = (
+        $dtf->format_datetime(DateTime->now()->subtract(minutes => 1)),
+        'git_clone', OpenQA::Schema::Result::GruTasks->encode_json_to_db($args));
+    $sth->execute(@args);
+    return 0 unless my $job = $sth->fetchrow_hashref;
+    # same task was run less than 1 minute ago and finished, nothing to do
+    return 1 if $job->{state} eq 'finished';
+
+    my $notes = decode_json $job->{notes};
+    $self->_add_jobs_to_gru_task($notes->{gru_id}, $job_ids);
+    return 1;
+}
+
+sub _add_jobs_to_gru_task ($self, $gru_id, $job_ids) {
+    my $schema = OpenQA::Schema->singleton;
+    # Wrap in txn_do so we can use savepoints in the method. Necessary for cases
+    # where we are not in a transaction. Otherwise it's a noop
+    $schema->txn_do(
+        sub {
+            $schema->svp_begin('try_gru_dependencies');
+            for my $id (@$job_ids) {
+                # Add job to existing gru task with the same args
+                my $gru_dep
+                  = eval { $schema->resultset('GruDependencies')->create({job_id => $id, gru_task_id => $gru_id}); };
+                unless ($gru_dep) {
+                    my $error = $@;
+                    $schema->svp_rollback('try_gru_dependencies');
+                    die $error
+                      unless $error
+                      =~ m/insert or update on table "gru_dependencies" violates foreign key constraint "gru_dependencies_fk_gru_task_id"/i;
+                    # if the GruTask was already deleted meanwhile, we can skip
+                    # the rest of the jobs, since the wanted task was done
+                    log_debug("GruTask $gru_id already gone, skip assigning jobs (message: $error)");
+                    last;
+                }
+            }
+            $schema->svp_release('try_gru_dependencies');
+        });
+}
 
 sub enqueue ($self, $task, $args = [], $options = {}, $jobs = []) {
     my $ttl = $options->{ttl};
@@ -158,12 +221,48 @@ sub enqueue_download_jobs ($self, $downloads) {
     }
 }
 
+sub enqueue_git_update_all ($self) {
+    my $conf = OpenQA::App->singleton->config->{'scm git'};
+    return if $conf->{git_auto_clone} ne 'yes' || $conf->{git_auto_update} ne 'yes';
+    my %clones;
+    my $testdir = path(sharedir() . '/tests');
+    for my $distri ($testdir->list({dir => 1})->each) {
+        next if -l $distri;    # no symlinks
+        next unless -e $distri->child('.git');
+        $clones{$distri} = undef;
+        if (-e $distri->child('products')) {
+            for my $product ($distri->child('products')->list({dir => 1})->each) {
+                next if -l $product;    # no symlinks
+                my $needle = $product->child('needles');
+                next if -l $needle;    # no symlinks
+                next unless -e $needle->child('.git');
+                $clones{$needle} = undef;
+            }
+        }
+        else {
+            my $needle = $distri->child('needles');
+            next unless -e $needle->child('.git');
+            $clones{$needle} = undef;
+        }
+    }
+    $self->enqueue('git_clone', \%clones, {priority => 10});
+}
+
 sub enqueue_git_clones ($self, $clones, $job_ids) {
     return unless %$clones;
     return unless OpenQA::App->singleton->config->{'scm git'}->{git_auto_clone} eq 'yes';
     # $clones is a hashref with paths as keys and git urls as values
     # $job_id is used to create entries in a related table (gru_dependencies)
-    $self->enqueue('git_clone', $clones, {priority => 10}, $job_ids);
+
+    # resolve all symlinks in keys of $clones to allow _find_existing_minion_job find and skip identical jobs
+    my $clones_sr = {};
+    for my $path (keys %$clones) {
+        my $path_sr = eval { path($path)->realpath } // $path;
+        $clones_sr->{$path_sr} = $clones->{$path};
+    }
+
+    my $found = $self->_find_existing_minion_job('git_clone', $clones_sr, $job_ids);
+    $self->enqueue('git_clone', $clones_sr, {priority => 10}, $job_ids) unless $found;
 }
 
 sub enqueue_and_keep_track {

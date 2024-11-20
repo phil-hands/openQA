@@ -114,6 +114,7 @@
 < ../node_modules/ace-builds/src-min/mode-perl.js
 < ../node_modules/ace-builds/src-min/mode-yaml.js
 < ../node_modules/ace-builds/src-min/mode-diff.js
+< ../node_modules/ace-builds/src-min/mode-ini.js
 
 ! step_edit.js
 < javascripts/needleeditor.js
@@ -141,7 +142,6 @@
 < javascripts/filter_form.js
 < javascripts/comments.js
 < javascripts/keyevent.js
-< javascripts/feature.js
 < javascripts/fullscreen.js
 < javascripts/obs_rsync.js
 < javascripts/parent_group_overview.js
@@ -150,7 +150,7 @@
 < ../node_modules/chosen-js/chosen.jquery.js
 < ../node_modules/jquery-ujs/src/rails.js
 < javascripts/disable_animations.js [mode==test]
-< ../node_modules/shepherd.js/dist/js/shepherd.min.js
+< javascripts/fetch_status.js [mode==test]
 
 ! anser.js
 < javascripts/anser-import.js
@@ -162,6 +162,9 @@
 < javascripts/needlediff.js
 < javascripts/running.js
 < javascripts/disable_status_updates.js [mode==test]
+
+! create_tests.js
+< javascripts/create_tests.js
 
 ! job_next_previous.js
 < javascripts/job_next_previous.js

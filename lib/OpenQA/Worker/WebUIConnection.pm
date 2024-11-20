@@ -67,6 +67,8 @@ sub _set_status ($self, $status, $event_data) {
     $event_data->{client} = $self;
     $event_data->{status} = $status;
     $self->status($status);
+    # set the error message from the event data as last error so it can added to the reason when setting the job done
+    if (my $event_error_message = $event_data->{error_message}) { $self->{_last_error} = $event_error_message }
     $self->emit(status_changed => $event_data);
 }
 
@@ -108,7 +110,6 @@ sub register ($self) {
         $status = 'failed'
           if $error_message
           =~ /timestamp mismatch - check whether clocks on the local host and the web UI host are in sync/;
-        $self->{_last_error} = $error_message;
         $self->_set_status($status => {error_message => $error_message});
         return undef;
     }
@@ -139,6 +140,7 @@ sub _setup_websocket_connection ($self, $websocket_url = undef) {
                 disabled => {
                     error_message => "Unable to establish ws connection to $webui_host without worker ID"
                 });
+            return undef;
         }
         $websocket_url = $self->url->clone;
         my %ws_scheme = (http => 'ws', https => 'wss');
@@ -163,9 +165,10 @@ sub _setup_websocket_connection ($self, $websocket_url = undef) {
                 $self->websocket_connection(undef);
 
                 my $error = $tx->error;
+                my $retry_after = $tx->res->headers->header('Retry-After');
                 my $error_message = "Unable to upgrade to ws connection via $websocket_url";
                 $error_message .= ", code $error->{code}" if ($error && $error->{code});
-                $self->_set_status(failed => {error_message => $error_message});
+                $self->_set_status(failed => {error_message => $error_message, retry_after => $retry_after});
                 return undef;
             }
 
@@ -286,7 +289,7 @@ sub send ($self, $method, $path, %args) {
             $ua_url->port($webui_port + $service_port_delta);
         }
     }
-    log_debug("REST-API call: $method $ua_url");
+    log_debug(qq{REST-API call: $method "$ua_url"});
 
     my @args = ($method, $ua_url);
     push(@args, 'json', $json_data) if $json_data;
@@ -304,7 +307,7 @@ sub send ($self, $method, $path, %args) {
         return $callback->($tx->res->json) if !$error_msg && $tx->res->json;
         return $callback->() if $ignore_errors;
         $self->{_last_error} = $error_msg;
-        log_error("REST-API error ($method $ua_url): $error_msg (remaining tries: $tries)");
+        log_error(qq{REST-API error ($method "$ua_url"): $error_msg (remaining tries: $tries)});
 
         # handle critical error when no more attempts remain
         if ($tries <= 0 && !$non_critical) {

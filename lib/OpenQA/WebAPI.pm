@@ -119,6 +119,8 @@ sub startup ($self) {
     $r->get('/search')->name('search')->to(template => 'search/search');
 
     $r->get('/tests')->name('tests')->to('test#list');
+    $r->get('/tests/create')->name('tests_create')->to('test#create');
+    $op_auth->post('/tests/clone')->name('tests_clone')->to('test#clone');
     # we have to set this and some later routes up differently on Mojo
     # < 9 and Mojo >= 9.11
     if ($Mojolicious::VERSION > 9.10) {
@@ -243,7 +245,8 @@ sub startup ($self) {
     my $pub_admin_r = $admin->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::Admin');
 
     # operators accessible tables
-    $admin_r->get('/activity_view')->name('activity_view')->to('activity_view#user');
+    $pub_admin_r->get('/activity_view')->name('activity_view')->to('activity_view#user');
+    $pub_admin_r->get('/activity_view/ajax')->name('activity_view_ajax')->to('audit_log#ajax_current_user');
     $pub_admin_r->get('/products')->name('admin_products')->to('product#index');
     $pub_admin_r->get('/machines')->name('admin_machines')->to('machine#index');
     $pub_admin_r->get('/test_suites')->name('admin_test_suites')->to('test_suite#index');
@@ -375,7 +378,7 @@ sub startup ($self) {
 
     # api/v1/workers
     $api_public_r->get('/workers')->name('apiv1_workers')->to('worker#list');
-    $api_description{'apiv1_worker'}
+    $api_description{apiv1_worker}
       = 'Each entry contains the "hostname", the boolean flag "connected" which can be 0 or 1 depending on the connection to the websockets server and the field "status" which can be "dead", "idle", "running". A worker can be considered "up" when "connected=1" and "status!=dead"';
     $api_ro->post('/workers')->name('apiv1_create_worker')->to('worker#create');
     $api_public_r->any('/workers/<workerid:num>')->get('/')->name('apiv1_worker')->to('worker#show');

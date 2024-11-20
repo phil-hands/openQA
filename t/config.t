@@ -65,7 +65,9 @@ subtest 'Test configuration default modes' => sub {
             update_branch => '',
             do_push => 'no',
             do_cleanup => 'no',
-            git_auto_clone => 'no',
+            git_auto_clone => 'yes',
+            git_auto_update => 'no',
+            git_auto_update_method => 'best-effort',
         },
         'scheduler' => {
             max_job_scheduled_time => 7,
@@ -161,6 +163,8 @@ subtest 'Test configuration default modes' => sub {
             job_settings_max_recent_jobs => 20000,
             assets_default_limit => 100000,
             assets_max_limit => 200000,
+            max_online_workers => 1000,
+            worker_limit_retry_delay => ONE_HOUR / 4,
         },
         archiving => {
             archive_preserved_important_jobs => 0,
@@ -184,6 +188,7 @@ subtest 'Test configuration default modes' => sub {
     $test_config->{logging}->{level} = "debug";
     $test_config->{global}->{service_port_delta} = 2;
     is ref delete $config->{global}->{auto_clone_regex}, 'Regexp', 'auto_clone_regex parsed as regex';
+    ok delete $config->{'test_preset example'}, 'default values for example tests assigned';
     is_deeply $config, $test_config, '"test" configuration';
 
     # Test configuration generation with "development" mode
@@ -193,6 +198,7 @@ subtest 'Test configuration default modes' => sub {
     $test_config->{_openid_secret} = $config->{_openid_secret};
     $test_config->{global}->{service_port_delta} = 2;
     delete $config->{global}->{auto_clone_regex};
+    delete $config->{'test_preset example'};
     is_deeply $config, $test_config, 'right "development" configuration';
 
     # Test configuration generation with an unknown mode (should fallback to default)
@@ -203,6 +209,7 @@ subtest 'Test configuration default modes' => sub {
     $test_config->{auth}->{method} = "OpenID";
     $test_config->{global}->{service_port_delta} = 2;
     delete $config->{global}->{auto_clone_regex};
+    delete $config->{'test_preset example'};
     delete $test_config->{logging};
     is_deeply $config, $test_config, 'right default configuration';
 };

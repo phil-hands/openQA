@@ -36,6 +36,7 @@ use Mojo::IOLoop::ReadWriteProcess::Session 'session';
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
+use OpenQA::Test::TimeLimit '200';
 
 use OpenQA::CacheService::Client;
 use OpenQA::Jobs::Constants qw(INCOMPLETE);
@@ -48,9 +49,8 @@ use File::Path qw(make_path remove_tree);
 use Module::Load::Conditional 'can_load';
 use OpenQA::Test::Utils
   qw(create_websocket_server create_live_view_handler setup_share_dir),
-  qw(cache_minion_worker cache_worker_service mock_service_ports setup_fullstack_temp_dir),
+  qw(cache_minion_worker cache_worker_service setup_fullstack_temp_dir),
   qw(start_worker stop_service wait_for_or_bail_out);
-use OpenQA::Test::TimeLimit '200';
 use OpenQA::Test::FullstackUtils;
 
 plan skip_all => 'set FULLSTACK=1 (be careful)' unless $ENV{FULLSTACK};
@@ -73,9 +73,8 @@ my $sharedir = setup_share_dir($ENV{OPENQA_BASEDIR});
 # initialize database, start daemons
 my $schema = OpenQA::Test::Database->new->create(schema_name => 'public', drop_schema => 1);
 ok(Mojolicious::Commands->start_app('OpenQA::WebAPI', 'eval', '1+0'), 'assets are prefetched');
-mock_service_ports;
 my $mojoport = service_port 'websocket';
-$ws = create_websocket_server($mojoport, 0, 0);
+$ws = create_websocket_server($mojoport, 0);
 my $driver = call_driver({mojoport => service_port 'webui'});
 $livehandler = create_live_view_handler;
 
@@ -87,10 +86,6 @@ is($driver->find_element('#user-action a')->get_text(), 'Login', 'no one logged 
 $driver->click_element_ok('Login', 'link_text', 'Login clicked');
 # we're back on the main page
 $driver->title_is('openQA', 'back on main page');
-
-# click away the tour
-$driver->click_element_ok('dont-notify', 'id', 'disable tour permanently');
-$driver->click_element_ok('shepherd-cancel-icon', 'class_name', 'confirm dismissing tour');
 
 schedule_one_job_over_api_and_verify($driver, OpenQA::Test::FullstackUtils::job_setup(PAUSE_AT => 'shutdown'));
 
