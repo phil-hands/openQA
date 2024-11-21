@@ -22,7 +22,14 @@ override_dh_auto_install:
 	mkdir -p node_modules
 	ln -s ../node_modules t/
 	ln -s /usr/share node_modules/_usr_share
-	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
+#	this lets us test what upstream would build -- never use 'x-with-npm' profile for a real build
+ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
+	HOME=/tmp/fake_npm_home npm install
+	mv node_modules node_modules_npm
+	-ls -lR node_modules_npm
+endif
+	dh_auto_install -- SHELL="/bin/bash"
+#	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 execute_after_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant

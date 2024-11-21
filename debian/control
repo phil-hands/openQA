@@ -124,6 +124,9 @@ Build-Depends: debhelper-compat (= 13),
                libjs-popper.js (>= 1.16.1),
                node-jquery-ujs,
                libcode-tidyall-perl,
+# The following is just for testing behaviour relative to new upstream versions.
+# Never define profiles 'x-with-npm' or 'x-npm-only' for real package builds.
+               npm <x-with-npm>,
 Standards-Version: 4.7.0
 Rules-Requires-Root: no
 Homepage: https://open.qa
