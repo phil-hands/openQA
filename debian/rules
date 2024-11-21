@@ -7,29 +7,19 @@ include /usr/share/dpkg/pkg-info.mk
 	dh $@
 
 override_dh_auto_build:
-	# forget shepherd until it is packaged:
-	-rm assets/stylesheets/shepherd.scss t/ui/24-feature-tour.t
-	# install files from debian/missing-sources
-	mkdir -p node_modules/anser/lib node_modules/d3js_4.13.0
-	cp debian/missing-sources/d3js_4.13.0/d3.v4.js node_modules/d3js_4.13.0
-	tar -xvzf debian/missing-sources/dagre-d3_0.5.0/v0.5.0.tar.gz -C node_modules dagre-d3-0.5.0/dist/dagre-d3.js
-	cp debian/missing-sources/anser_2.0.1/index.js node_modules/anser/lib
-	( cd node_modules ; ln -s ../ace-builds-* ace-builds )
 	# ensure that there are no remote references left
 	! grep http assets/assetpack.def
 
 override_dh_auto_install:
-	mkdir -p node_modules
-	ln -s ../node_modules t/
-	ln -s /usr/share node_modules/_usr_share
-#	this lets us test what upstream would build -- never use 'x-with-npm' profile for a real build
 ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
+#	this is here to enable test builds to compare with the way upstream would build it
+#	NEVER use 'x-with-npm' profile for a real build!
 	HOME=/tmp/fake_npm_home npm install
 	mv node_modules node_modules_npm
 	-ls -lR node_modules_npm
 endif
-	dh_auto_install -- SHELL="/bin/bash"
-#	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
+	mkdir -p node_modules
+	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 execute_after_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant
@@ -56,6 +46,7 @@ override_dh_auto_test:
 	# Not enough permission for unshare use
 	-rm ./t/32-openqa_client-script.t
 
+	ln -s ../node_modules t/
 	-export CI=1; \
 		export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
 		export CONTAINER_TEST=0 ; \
