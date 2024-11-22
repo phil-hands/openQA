@@ -26,12 +26,15 @@ usr/lib/systemd/system/openqa-enqueue-result-cleanup.service
 usr/lib/systemd/system/openqa-enqueue-result-cleanup.timer
 usr/lib/systemd/system/openqa-enqueue-bug-cleanup.service
 usr/lib/systemd/system/openqa-enqueue-bug-cleanup.timer
+usr/lib/systemd/system/openqa-minion-restart.path
+usr/lib/systemd/system/openqa-minion-restart.service
 usr/lib/systemd/system/openqa-setup-db.service
 usr/lib/systemd/system/openqa-reload-worker-auto-restart@.path
 usr/lib/systemd/system/openqa-reload-worker-auto-restart@.service
 debian/tmp/usr/lib/sysusers.d/geekotest.conf
 usr/lib/tmpfiles.d/openqa-webui.conf
 usr/share/openqa/lib/DBIx/
+usr/share/openqa/lib/OpenQA/Assets.pm
 usr/share/openqa/lib/OpenQA/LiveHandler.pm
 usr/share/openqa/lib/OpenQA/Resource/
 usr/share/openqa/lib/OpenQA/Scheduler/
