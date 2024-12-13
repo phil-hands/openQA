@@ -102,7 +102,7 @@ install-generic:
 		mkdir -p "$(DESTDIR)"/usr/share/openqa/$$i ;\
 		cp -a $$i/* "$(DESTDIR)"/usr/share/openqa/$$i ;\
 	done
-	for f in $(shell perl -Ilib -mOpenQA::Assets -e OpenQA::Assets::list); do \
+	for f in $(shell sed -nE 's%<+ \.\./(node_modules/[^_].*)%\1%p' assets/assetpack.def); do \
 		install -m 644 -D --target-directory="$(DESTDIR)/usr/share/openqa/$${f%/*}" "$$f";\
 	done
 
