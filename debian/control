@@ -248,7 +248,7 @@ Depends: ${misc:Depends},
          libconfig-inifiles-perl,
          libdata-dump-perl,
          libmojolicious-perl (>= 9.34),
-         openqa-common (= ${source:Version}),
+         openqa-common (= ${binary:Version}),
 Suggests: python3,
 Description: automatic Operating System testing framework (utilities)
  This package includes scripts such as 'openqa-cli' and 'openqa-clone-job' to
