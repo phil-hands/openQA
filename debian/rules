@@ -6,6 +6,11 @@ include /usr/share/dpkg/pkg-info.mk
 %:
 	dh $@
 
+ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
+override_dh_gencontrol:
+	dh_gencontrol -- -v$(shell dpkg-parsechangelog -SVersion | sed -E 's/^([^-]*-[0-9]*)/\1~~~NPM~~/')
+endif
+
 override_dh_auto_build:
 	# ensure that there are no remote references left
 	! grep http assets/assetpack.def
