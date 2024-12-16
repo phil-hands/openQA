@@ -2,8 +2,11 @@
 // include themes: these set variables for common values
 @import "openqa_theme.scss";
 
-// include Roboto font
-@import url($web-font-path);
+// use Roboto font from linked build dependency on Debian
+@font-face {
+  font-family: 'Roboto';
+  src: url('../../node_modules/_u_s_fonts/truetype/roboto-fontface/roboto/Roboto-Regular.ttf') format('truetype');
+}
 
 // prevent bom from disturbing rest of the CSS
 dummy { font-size: 42px; }
