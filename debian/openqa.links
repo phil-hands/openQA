@@ -1,3 +1,7 @@
 etc/openqa /usr/share/openqa/etc/openqa
 
-usr/share                                  usr/share/openqa/node_modules/_usr_share
+usr/share/nodejs             usr/share/openqa/node_modules/_u_s_nodejs
+usr/share/javascript         usr/share/openqa/node_modules/_u_s_javascript
+usr/share/sass               usr/share/openqa/node_modules/_u_s_sass
+usr/share/fonts              usr/share/openqa/node_modules/_u_s_fonts
+usr/share/fonts-fork-awesome usr/share/openqa/node_modules/_u_s_ffa

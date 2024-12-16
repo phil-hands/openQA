@@ -24,6 +24,8 @@ ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
 	-ls -lR node_modules_npm
 endif
 	mkdir -p node_modules
+	for d in javascript nodejs sass; do ln -s /usr/share/$$d node_modules/_u_s_$$d; done
+	ln -s /usr/share/fonts-fork-awesome node_modules/_u_s_ffa
 	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 execute_after_dh_install:
