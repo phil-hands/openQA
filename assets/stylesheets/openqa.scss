@@ -9,7 +9,7 @@
 dummy { font-size: 42px; }
 
 // include Bootstrap
-@import "../node_modules/bootstrap/scss/bootstrap.scss";
+@import "../node_modules/_u_s_sass/bootstrap/bootstrap.scss";
 
 // include custom css for various aspects of the pages
 @import "overall.scss";
