@@ -46,7 +46,7 @@ override_dh_auto_test:
 	# revert the change that introduced this comment if those tests start failing again.
 
 	# FIXME: upstream depends upon a version of perltidy that's not yet in Debian
-	-rm ./t/00-tidy.t
+	-rm ./t/00-tidy.t ./t/external/os-autoinst-common/xt/00-tidy.t
 	# On debian we can't run test connecting to internet
 	-rm ./t/40-script_openqa-clone-custom-git-refspec.t \
 		./t/40-openqa-clone-job.t
