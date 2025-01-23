@@ -1,0 +1,4 @@
+# `x-with-npm` is a locally defined profile that is used solely for
+# doing test builds while allowing the use of npm to obtain missing dependencies.
+# NEVER DISTRIBUTE THE RESULTS OF BUILDING WITH THIS SET
+openqa source: invalid-profile-name-in-source-relation x-with-npm [Build-Depends: npm <x-with-npm>]
