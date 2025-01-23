@@ -1,8 +1,19 @@
-openqa (4.6.1732034221.ae34b08ff-1) UNRELEASED; urgency=medium
+openqa (4.6.1732034221.ae34b08ff-1) unstable; urgency=medium
 
+  [ Philip Hands ]
   * Update to new upstream version 4.6.1732034221.ae34b08ff.
+  * ensure node-bootstrap provides libjs-bootstrap5 (closes: 1091155, 1091141)
+  * install openqa-enqueue-git-auto-update
+  * bootstrap now depends on popper2
+  * add node-ace-builds depends
+  * use the binary package version for the depends
+  * switch to node_modules/_u_s_{nodejs,javascript} symlinks
+  * apparmor updates
 
- -- Philip Hands <phil@hands.com>  Wed, 20 Nov 2024 11:44:47 +0100
+  [ Roland Clobus ]
+  * Debian specific documentation
+
+ -- Philip Hands <phil@hands.com>  Thu, 23 Jan 2025 11:47:03 +0100
 
 openqa (4.6.1712926289.b0d689b52-2) unstable; urgency=medium
 
