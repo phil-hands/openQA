@@ -11,10 +11,6 @@ Files: script/openqa-clone-job
 Copyright: 2013, SUSE Linux Products GmbH
 License: MIT
 
-Files: lib/OpenQA/WebAPI/Plugin/HashedParams.pm
-Copyright: 2013, Grishkovelli
-License: Artistic or GPL-1+
-
 Files: container/openqa_data/scripts/client-conf
 Copyright: 2015, Red Hat
 License: GPL-3+
