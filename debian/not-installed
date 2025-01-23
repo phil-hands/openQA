@@ -17,3 +17,7 @@ usr/share/openqa/script/openqa-bootstrap-container
 usr/share/openqa/script/openqa-check-devel-repo
 usr/share/openqa/script/openqa-rollback
 usr/share/openqa/script/openqa-continuous-update
+
+# don't include git stuff (lintian complains)
+usr/share/doc/openqa/asciinema/.gitignore
+usr/share/doc/openqa/images/.gitignore
