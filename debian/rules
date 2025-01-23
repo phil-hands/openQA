@@ -28,6 +28,9 @@ endif
 	ln -s /usr/share/fonts-fork-awesome node_modules/_u_s_ffa
 	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
+override_dh_installdocs:
+	dh_installdocs -X .gitignore
+
 execute_after_dh_install:
 	# make #! lines Debian Perl/Python Policy compliant
 	find $(CURDIR)/debian/openqa*/usr/share/openqa -type f -print0 | \
