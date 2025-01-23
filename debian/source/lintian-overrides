@@ -2,3 +2,7 @@
 # doing test builds while allowing the use of npm to obtain missing dependencies.
 # NEVER DISTRIBUTE THE RESULTS OF BUILDING WITH THIS SET
 openqa source: invalid-profile-name-in-source-relation x-with-npm [Build-Depends: npm <x-with-npm>]
+
+# This isn't really a javascript package, so there are not tests upsteam.
+# They just use the package.json as a way of tracking dependencies
+openqa source: pkg-js-tools-test-is-missing
