@@ -43,6 +43,7 @@ usr/share/openqa/lib/OpenQA/WebAPI/
 usr/share/openqa/lib/OpenQA/WebSockets/
 usr/share/openqa/templates
 usr/share/openqa/public
+debian/changelog => usr/share/openqa/public/Changelog
 usr/share/openqa/assets
 usr/share/openqa/dbicdh
 usr/share/openqa/script/configure-web-proxy
