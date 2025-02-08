@@ -664,7 +664,11 @@ sub detect_current_version ($path) {
 
     if (-e $changelog_file) {
         my $changelog = $changelog_file->slurp;
-        if ($changelog && $changelog =~ /Update to version (\d+\.\d+\.(\b[0-9a-f]{5,40}\b))\:/mi) {
+        if (
+            $changelog
+            && (   $changelog =~ /Update to version (\d+\.\d+\.(\b[0-9a-f]{5,40}\b))\:/mi
+                || $changelog =~ /^openqa \(([^)]+)/mi))
+        {
             $current_version = $1;
         }
     }
