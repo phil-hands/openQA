@@ -80,6 +80,8 @@ execute_before_dh_auto_clean:
 	-rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
 	-rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
 	-rm -rf $(CURDIR)/debian/DB
+	# FIXME: no idea why I need to remove this file, as I'm also removing it via a patch, but salsa hates me otherwise
+	-rm assets/stylesheets/cropper.css
 
 pod2man_opts := --errors=stderr --section=1 --center "openQA Documentation" --release 'openQA $(DEB_VERSION_UPSTREAM)'
 execute_before_dh_installman:
