@@ -3,7 +3,7 @@
     tr.parallel-child td.name {
         padding-left: 1em;
         &:first-child:before {
-            content: "•";
+            content: "\2022";
         }
     }
     a.fa, span > a {
