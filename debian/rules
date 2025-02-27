@@ -11,11 +11,7 @@ override_dh_gencontrol:
 	dh_gencontrol -- -v$(shell dpkg-parsechangelog -SVersion | sed -E 's/^([^-]*-[0-9]*)/\1~~~NPM~~/')
 endif
 
-override_dh_auto_build:
-	# ensure that there are no remote references left
-	! grep http assets/assetpack.def
-
-override_dh_auto_install:
+setup_node_modules:
 ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
 #	this is here to enable test builds to compare with the way upstream would build it
 #	NEVER use 'x-with-npm' profile for a real build!
@@ -24,8 +20,14 @@ ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
 	-ls -lR node_modules_npm
 endif
 	mkdir -p node_modules
-	for d in javascript nodejs sass; do ln -s /usr/share/$$d node_modules/_u_s_$$d; done
-	ln -s /usr/share/fonts-fork-awesome node_modules/_u_s_ffa
+	for d in javascript nodejs sass; do [ -e "node_modules/_u_s_$$d" ] || ln -s /usr/share/$$d node_modules/_u_s_$$d; done
+	[ -e node_modules/_u_s_ffa ] || ln -s /usr/share/fonts-fork-awesome node_modules/_u_s_ffa
+
+override_dh_auto_build:
+	# ensure that there are no remote references left
+	! grep http assets/assetpack.def
+
+override_dh_auto_install: setup_node_modules
 	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 override_dh_installdocs:
@@ -44,18 +46,7 @@ execute_after_dh_fixperms:
 	chmod -x debian/openqa/etc/logrotate.d/openqa
 	chmod +x debian/openqa/usr/share/openqa/dbicdh/*/upgrade/*-*/0*-*.pl
 
-override_dh_auto_test:
-	# remeber, there used to be more disabled tests here, inspired by the RPM spec file.
-	# revert the change that introduced this comment if those tests start failing again.
-
-	# FIXME: upstream depends upon a version of perltidy that's not yet in Debian
-	-rm ./t/00-tidy.t ./t/external/os-autoinst-common/xt/00-tidy.t
-	# On debian we can't run test connecting to internet
-	-rm ./t/40-script_openqa-clone-custom-git-refspec.t \
-		./t/40-openqa-clone-job.t
-	# Not enough permission for unshare use
-	-rm ./t/32-openqa_client-script.t
-
+override_dh_auto_test: setup_node_modules
 	ln -s ../node_modules t/
 	-export CI=1; \
 		export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
