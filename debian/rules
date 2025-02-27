@@ -6,6 +6,8 @@ include /usr/share/dpkg/pkg-info.mk
 %:
 	dh $@
 
+SCRATCH_DIR := $(shell mktemp -d $${TMPDIR:-/tmp}/openqa_build.XXXXXX)
+
 ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
 override_dh_gencontrol:
 	dh_gencontrol -- -v$(shell dpkg-parsechangelog -SVersion | sed -E 's/^([^-]*-[0-9]*)/\1~~~NPM~~/')
@@ -15,7 +17,7 @@ setup_node_modules:
 ifneq (,$(filter x-with-npm,$(DEB_BUILD_PROFILES)))
 #	this is here to enable test builds to compare with the way upstream would build it
 #	NEVER use 'x-with-npm' profile for a real build!
-	HOME=/tmp/fake_npm_home npm install
+	HOME=$${TMPDIR:-/tmp}/fake_npm_home npm install
 	mv node_modules node_modules_npm
 	-ls -lR node_modules_npm
 endif
@@ -48,12 +50,10 @@ execute_after_dh_fixperms:
 
 override_dh_auto_test: setup_node_modules
 	ln -s ../node_modules t/
-	-export CI=1; \
-		export OPENQA_TEST_TIMEOUT_SCALE_CI=10 ; \
-		export CONTAINER_TEST=0 ; \
-		PATH=$$PATH:$$(ls -d /usr/lib/postgresql/*/bin) FULLSTACK=1 \
-		dh_auto_test -- \
-		SHELL="bash -x" PROVE_ARGS='-r -v' CHECKSTYLE=0 TEST_PG_PATH=$(CURDIR)/debian/DB
+	-export CONTAINER_TEST=0 ; \
+		PATH=$$PATH:$$(ls -d /usr/lib/postgresql/*/bin) \
+		PROVE_ARGS='-v' \
+		make test-t test-ui test-api SHELL="bash -x" CI=1 OPENQA_TEST_TIMEOUT_SCALE_CI=10 TEST_PG_PATH=${SCRATCH_DIR}/DB
 
 execute_before_dh_auto_clean:
 	rm -rf node_modules/
@@ -70,7 +70,7 @@ execute_before_dh_auto_clean:
 	rm -rf t/data/openqa/testresults/ .sass-cache/ assets/cache
 	rm -f assets/assetpack.db job.json t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/.locked t/data/openqa/pool/1/t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/pool/1/t/data/openqa/pool/1/worker-log.txt t/data/openqa/share/factory/iso/Core-7.2.iso t/data/openqa/share/tests/opensuse/needles/inst-timezone-text.json t/data/openqa/webui/cache/asset-status.json
 	rm -f t/data/openqa/share/factory/hdd/00099963-hdd_image3.qcow2 t/data/openqa/share/factory/hdd/00099963-hdd_image7.qcow2 t/data/openqa/share/factory/hdd/hdd_image2.qcow2 t/data/openqa/share/factory/hdd/hdd_image5.qcow2 t/data/openqa/share/factory/other/00099963-hdd_image3.xml t/data/openqa/share/factory/other/00099963-hdd_image4.xml
-	rm -rf $(CURDIR)/debian/DB
+	rm -rf ${SCRATCH_DIR}
 	# FIXME: no idea why I need to remove this file, as I'm also removing it via a patch, but salsa hates me otherwise
 	rm -f assets/stylesheets/cropper.css
 
