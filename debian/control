@@ -130,7 +130,6 @@ Build-Depends: debhelper-compat (= 13),
                node-popper2,
                node-jquery-ujs,
                node-ace-builds,
-               libcode-tidyall-perl,
 # The following is just for testing behaviour relative to new upstream versions.
 # Never define profiles 'x-with-npm' or 'x-npm-only' for real package builds.
                npm <x-with-npm>,
