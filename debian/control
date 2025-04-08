@@ -116,7 +116,6 @@ Build-Depends: debhelper-compat (= 13),
                libfile-map-perl <!nocheck>,
                libtext-glob-perl <!nocheck>,
                libaliased-perl <!nocheck>,
-               libmodule-cpanfile-perl <!nocheck>,
                libarchive-tools <!nocheck>,
 #              for avoiding assetpack downloads
                fonts-fork-awesome,
