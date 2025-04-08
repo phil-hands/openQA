@@ -48,12 +48,24 @@ execute_after_dh_fixperms:
 	chmod -x debian/openqa/etc/logrotate.d/openqa
 	chmod +x debian/openqa/usr/share/openqa/dbicdh/*/upgrade/*-*/0*-*.pl
 
+# add some tests that fail on Debian to the unstables list
+EXTRA_UNSTABLES := t/03-auth.t t/09-job_clone.t t/24-worker-engine.t t/37-limit_assets.t t/40-script_load_dump_templates.t t/ui/27-plugin_obs_rsync.t t/ui/27-plugin_obs_rsync_gru.t t/ui/27-plugin_obs_rsync_obs_status.t t/api/02-iso-yaml.t t/api/08-jobtemplates.t t/api/14-plugin_obs_rsync.t t/api/14-plugin_obs_rsync_async.t t/api/16-webhooks.t
+# this seems not to access the database properly
+#EXTRA_UNSTABLES += t/42-screenshots.t
+# when building with unshare, these attempts to nest unshare fail
+EXTRA_UNSTABLES += t/32-openqa_client-script.t t/40-openqa-clone-job.t t/40-script_openqa-clone-custom-git-refspec.t
+
+
+
 override_dh_auto_test: setup_node_modules
 	ln -s ../node_modules t/
-	-export CONTAINER_TEST=0 ; \
+	cp tools/unstable_tests.txt tools/unstable_tests.txt.bak
+	for i in $(EXTRA_UNSTABLES); do echo $$i >> tools/unstable_tests.txt; done
+	export CONTAINER_TEST=0 ; \
 		PATH=$$PATH:$$(ls -d /usr/lib/postgresql/*/bin) \
 		PROVE_ARGS='-v' \
 		make test-t test-ui test-api SHELL="bash -x" CI=1 OPENQA_TEST_TIMEOUT_SCALE_CI=10 TEST_PG_PATH=${SCRATCH_DIR}/DB
+	mv tools/unstable_tests.txt.bak tools/unstable_tests.txt
 
 execute_before_dh_auto_clean:
 	rm -rf node_modules/
