@@ -13,7 +13,7 @@ use OpenQA::Setup;
 use OpenQA::WebAPI::Description qw(get_pod_from_controllers set_api_desc);
 use Mojo::File 'path';
 use Mojo::Util 'trim';
-use Try::Tiny;
+use Feature::Compat::Try;
 
 has secrets => sub ($self) { $self->schema->read_application_secrets };
 
@@ -27,14 +27,16 @@ sub startup ($self) {
     # Provide help to users early to prevent failing later on misconfigurations
     # note: Loading plugins for the current configuration so the help of commands provided by plugins is
     #       available as well.
-    return try {
-        OpenQA::Setup::read_config($self);
-        OpenQA::Setup::load_plugins($self);
+    if ($ENV{MOJO_HELP}) {
+        try {
+            OpenQA::Setup::read_config($self);
+            OpenQA::Setup::load_plugins($self);
+        }
+        catch ($e) {
+            print("The help might be incomplete because an error occurred when loading plugins:\n$e\n");
+        }
+        return;
     }
-    catch {
-        print("The help might be incomplete because an error occurred when loading plugins:\n$_\n");
-    }
-    if $ENV{MOJO_HELP};
 
     # "templates/webapi" prefix
     $self->renderer->paths->[0] = path($self->renderer->paths->[0])->child('webapi')->to_string;
@@ -53,6 +55,7 @@ sub startup ($self) {
 
     # register basic routes
     my $logged_in = $r->under('/')->to('session#ensure_user');
+    my $auth_any_user = $r->under('/')->to('Auth#auth');
     my $auth = $r->under('/')->to('session#ensure_operator');
 
     # Routes used by plugins (UI and API)
@@ -121,18 +124,8 @@ sub startup ($self) {
     $r->get('/tests')->name('tests')->to('test#list');
     $r->get('/tests/create')->name('tests_create')->to('test#create');
     $op_auth->post('/tests/clone')->name('tests_clone')->to('test#clone');
-    # we have to set this and some later routes up differently on Mojo
-    # < 9 and Mojo >= 9.11
-    if ($Mojolicious::VERSION > 9.10) {
-        $r->get('/tests/overview' => [format => ['json', 'html']])->name('tests_overview')
-          ->to('test#overview', format => undef);
-    }
-    elsif ($Mojolicious::VERSION < 9) {
-        $r->get('/tests/overview')->name('tests_overview')->to('test#overview');
-    }
-    else {
-        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
-    }
+    $r->get('/tests/overview' => [format => ['json', 'html']])->name('tests_overview')
+      ->to('test#overview', format => undef);
     $r->get('/tests/latest')->name('latest')->to('test#latest');
     $r->get('/tests/latest/badge')->name('latest_test_result_badge')->to('test#latest_badge');
 
@@ -141,11 +134,15 @@ sub startup ($self) {
     $r->get('/tests/list_scheduled_ajax')->name('tests_ajax')->to('test#list_scheduled_ajax');
 
     # only provide a URL helper - this is overtaken by apache
-    $r->get('/assets/*assetpath')->name('download_asset')->to('file#download_asset');
+    my $config = $app->config;
+    my $require_auth_for_assets = $config->{auth}->{require_for_assets};
+    my $assets_r = $require_auth_for_assets ? $auth_any_user : $r;
+    $assets_r->get('/assets/*assetpath')->name('download_asset')->to('file#download_asset');
 
-    my $test_r = $r->any('/tests/<testid:num>');
+    my $test_path = '/tests/<testid:num>';
+    my $test_r = $r->any($test_path);
     $test_r = $test_r->under('/')->to('test#referer_check');
-    my $test_auth = $auth->any('/tests/<testid:num>' => {format => 0});
+    my $test_auth = $auth->any($test_path => {format => 0});
     $test_r->get('/')->name('test')->to('test#show');
     $test_r->get('/ajax')->name('job_next_previous_ajax')->to('test#job_next_previous_ajax');
     $test_r->get('/modules/:moduleid/fails')->name('test_module_fails')->to('test#module_fails');
@@ -194,35 +191,16 @@ sub startup ($self) {
     # but this route is actually matched (in case apache is not catching this earlier)
     # due to the split md5_dirname having a /
     $r->get('/image/:md5_1/:md5_2/.thumbs/#md5_basename')->to('file#thumb_image');
-
-    if ($Mojolicious::VERSION > 9.10) {
-        $r->get('/group_overview/<groupid:num>' => [format => ['json', 'html']])->name('group_overview')
-          ->to('main#job_group_overview', format => undef);
-        $r->get('/parent_group_overview/<groupid:num>' => [format => ['json', 'html']])->name('parent_group_overview')
-          ->to('main#parent_group_overview', format => undef);
-    }
-    elsif ($Mojolicious::VERSION < 9) {
-        $r->get('/group_overview/<groupid:num>')->name('group_overview')->to('main#job_group_overview');
-        $r->get('/parent_group_overview/<groupid:num>')->name('parent_group_overview')
-          ->to('main#parent_group_overview');
-    }
-    else {
-        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
-    }
+    $r->get('/group_overview/<groupid:num>' => [format => ['json', 'html']])->name('group_overview')
+      ->to('main#job_group_overview', format => undef);
+    $r->get('/parent_group_overview/<groupid:num>' => [format => ['json', 'html']])->name('parent_group_overview')
+      ->to('main#parent_group_overview', format => undef);
 
     # Favicon
     $r->get('/favicon.ico' => sub ($c) { $c->render_static('favicon.ico') });
     $r->get('/index' => sub ($c) { $c->render('main/index') });
-    if ($Mojolicious::VERSION > 9.10) {
-        $r->get('/dashboard_build_results' => [format => ['json', 'html']])->name('dashboard_build_results')
-          ->to('main#dashboard_build_results', format => undef);
-    }
-    elsif ($Mojolicious::VERSION < 9) {
-        $r->get('/dashboard_build_results')->name('dashboard_build_results')->to('main#dashboard_build_results');
-    }
-    else {
-        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
-    }
+    $r->get('/dashboard_build_results' => [format => ['json', 'html']])->name('dashboard_build_results')
+      ->to('main#dashboard_build_results', format => undef);
     $r->get('/api_help' => sub ($c) { $c->render('admin/api_help') })->name('api_help');
 
     # Default route
@@ -262,17 +240,8 @@ sub startup ($self) {
 
     $pub_admin_r->get('/assets')->name('admin_assets')->to('asset#index');
     $pub_admin_r->get('/assets/status')->name('admin_asset_status_json')->to('asset#status_json');
-
-    if ($Mojolicious::VERSION > 9.10) {
-        $pub_admin_r->get('/workers' => [format => ['json', 'html']])->name('admin_workers')
-          ->to('workers#index', format => undef);
-    }
-    elsif ($Mojolicious::VERSION < 9) {
-        $pub_admin_r->get('/workers')->name('admin_workers')->to('workers#index');
-    }
-    else {
-        die "Unsupported Mojolicious version $Mojolicious::VERSION!";
-    }
+    $pub_admin_r->get('/workers' => [format => ['json', 'html']])->name('admin_workers')
+      ->to('workers#index', format => undef);
     $pub_admin_r->get('/workers/<worker_id:num>')->name('admin_worker_show')->to('workers#show');
     $pub_admin_r->get('/workers/<worker_id:num>/ajax')->name('admin_worker_previous_jobs_ajax')
       ->to('workers#previous_jobs_ajax');
@@ -310,6 +279,8 @@ sub startup ($self) {
     my $api_ro = $api_auth_operator->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
     my $api_ra = $api_auth_admin->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
     my $api_public_r = $api_public->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
+
+    $api_public_r->get('/routes')->name('api_v1_list_routes')->to('routes#list');
     push @api_routes, $api_ru, $api_ro, $api_ra, $api_public_r;
     # this is fallback redirect if one does not use apache
     $api_public_r->websocket(
@@ -322,6 +293,7 @@ sub startup ($self) {
     my $api_r_job = $api_job_auth->any('/')->to(namespace => 'OpenQA::WebAPI::Controller::API::V1');
     push @api_routes, $api_job_auth, $api_r_job;
     $api_r_job->get('/whoami')->name('apiv1_jobauth_whoami')->to('job#whoami');    # primarily for tests
+    $api_ru->get('/auth' => sub ($c) { $c->render(text => 'ok') })->name('apiv1_jobauth_whoami');
 
     # api/v1/job_groups
     $api_public_r->get('/job_groups')->name('apiv1_list_job_groups')->to('job_group#list');
@@ -411,11 +383,13 @@ sub startup ($self) {
     $api_ro->post('/webhooks/product')->name('apiv1_evaluate_webhook_product')->to('webhook#product');
 
     # api/v1/assets
+
+    my $api_assets_readonly = $require_auth_for_assets ? $api_ru : $api_public_r;
     $api_ro->post('/assets')->name('apiv1_post_asset')->to('asset#register');
-    $api_public_r->get('/assets')->name('apiv1_get_asset')->to('asset#list');
+    $api_assets_readonly->get('/assets')->name('apiv1_get_asset')->to('asset#list');
     $api_ra->post('/assets/cleanup')->name('apiv1_trigger_asset_cleanup')->to('asset#trigger_cleanup');
-    $api_public_r->get('/assets/<id:num>')->name('apiv1_get_asset_id')->to('asset#get');
-    $api_public_r->get('/assets/#type/#name')->name('apiv1_get_asset_name')->to('asset#get');
+    $api_assets_readonly->get('/assets/<id:num>')->name('apiv1_get_asset_id')->to('asset#get');
+    $api_assets_readonly->get('/assets/#type/#name')->name('apiv1_get_asset_name')->to('asset#get');
     $api_ra->delete('/assets/<id:num>')->name('apiv1_delete_asset')->to('asset#delete');
     $api_ra->delete('/assets/#type/#name')->name('apiv1_delete_asset_name')->to('asset#delete');
 
@@ -527,7 +501,7 @@ sub startup ($self) {
         });
 
     # allow configuring Cross-Origin Resource Sharing (CORS)
-    if (my $access_control_allow_origin = $app->config->{global}->{access_control_allow_origin_header}) {
+    if (my $access_control_allow_origin = $config->{global}->{access_control_allow_origin_header}) {
         my %allowed_origins = map { trim($_) => 1 } split ',', $access_control_allow_origin;
         my $fallback_origin = delete $allowed_origins{'*'} ? '*' : undef;
         $app->hook(

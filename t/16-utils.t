@@ -25,6 +25,7 @@ use OpenQA::Task::SignalGuard;
 use OpenQA::Test::TimeLimit '10';
 use Scalar::Util 'reftype';
 use Test::MockObject;
+use Test::MockModule;
 use Mojo::File qw(path tempdir tempfile);
 
 subtest 'service ports' => sub {
@@ -40,8 +41,7 @@ subtest 'service ports' => sub {
     is service_port('livehandler'), 9532, 'livehandler port';
     is service_port('scheduler'), 9533, 'scheduler port';
     is service_port('cache_service'), 9534, 'cache service port';
-    eval { service_port('unknown') };
-    like $@, qr/Unknown service: unknown/, 'unknown port';
+    throws_ok { service_port('unknown') } qr/Unknown service: unknown/, 'unknown port';
 };
 
 subtest 'set listen address' => sub {
@@ -128,8 +128,8 @@ like bugref_to_href('bsc#2345 poo#3456 and more'),
 like bugref_to_href('boo#2345,poo#3456'),
   qr{a href="https://bugzilla.opensuse.org/show_bug.cgi\?id=2345">boo\#2345</a>,<a href=.*3456.*},
   'interpunctation is not consumed by href';
-is bugref_to_href('jsc#SLE-3275'), '<a href="https://jira.suse.de/browse/SLE-3275">jsc#SLE-3275</a>';
-is href_to_bugref('https://jira.suse.de/browse/FOOBAR-1234'), 'jsc#FOOBAR-1234', 'jira tickets url to bugref';
+is bugref_to_href('jsc#SLE-3275'), '<a href="https://jira.suse.com/browse/SLE-3275">jsc#SLE-3275</a>';
+is href_to_bugref('https://jira.suse.com/browse/FOOBAR-1234'), 'jsc#FOOBAR-1234', 'jira tickets url to bugref';
 is href_to_bugref('https://pagure.io/foo/issue/1234'), 'pio#foo#1234', 'pagure.io (no group) url to bugref';
 is href_to_bugref('https://pagure.io/foo/bar/issue/1234'), 'pio#foo/bar#1234', 'pagure.io (with group) url to bugref';
 is href_to_bugref('https://gitlab.gnome.org/GNOME/foo/-/issues/1234'), 'ggo#GNOME/foo#1234',
@@ -216,15 +216,9 @@ subtest 'get current version' => sub {
 -------------------------------------------------------------------
 Mon May 08 11:45:15 UTC 2017 - rd-ops-cm@suse.de
 
-- Update to version 4.4.1494239160.9869466:
-  * Fix missing space in log debug message (#1307)
-  * Register job assets even if one of the assets need to be skipped (#1310)
-  * Test whether admin table displays needles which never matched
-  * Show needles in admin table which never matched
-  * Improve logging in case of upload failure (#1309)
-  * Improve product fixtures to prevent dependency warnings
-  * Handle wrong/missing job dependencies appropriately
-  * clone_job.pl: Print URL of generated job for easy access (#1313)
+- Update to version 5.1743167903.dfbc473b:
+  * foo
+  * bar
 
 -------------------------------------------------------------------
 Sat Mar 18 20:03:22 UTC 2017 - coolo@suse.com
@@ -259,10 +253,10 @@ EOT
 
     # Create a valid Changelog and check if result is the expected one
     $changelog_file->spew($changelog_content);
-    is detect_current_version($changelog_dir), '4.4.1494239160.9869466', 'Detect current version from Changelog format';
-    like detect_current_version($changelog_dir), qr/(\d+\.\d+\.\d+\.$sha_regex)/, "Version scheme matches";
-    $changelog_file->spew("- Update to version 4.4.1494239160.9869466:\n- Update to version 4.4.1489864450.251306a:");
-    is detect_current_version($changelog_dir), '4.4.1494239160.9869466', 'Pick latest version detected in Changelog';
+    is detect_current_version($changelog_dir), '5.1743167903.dfbc473b', 'Detect current version from Changelog format';
+    like detect_current_version($changelog_dir), qr/(\d+\.\d+\.$sha_regex)/, "Version scheme matches";
+    $changelog_file->spew("- Update to version 5.1743167903.dfbc473b:\n- Update to version 5.1743167902.cebc473b:");
+    is detect_current_version($changelog_dir), '5.1743167903.dfbc473b', 'Pick latest version detected in Changelog';
 
     # Failure detection case for Changelog file
     $changelog_file->spew("* Do job cleanup even in case of api failure");
@@ -507,6 +501,14 @@ subtest 'human readable size' => sub {
     is(human_readable_size(-8007188480), '-7.5 GiB', 'negative smaller GB');
     is(human_readable_size(717946880), '685 MiB', 'large MB');
     is(human_readable_size(245760), '240 KiB', 'less than a MB');
+};
+
+subtest 'create downloads list' => sub {
+    is_deeply create_downloads_list({}), {}, 'empty for no settings provided';
+    is_deeply create_downloads_list({TEST_URL => 'test', TEST => 'test'}), {}, 'empty for non-asset URL';
+    my $utils_mocked = Test::MockModule->new('OpenQA::Utils')->redefine(locate_asset => 'foo/bar');
+    is_deeply create_downloads_list({ISO_URL => 'test', ISO => 'test'}), {test => ['foo/bar', '0']},
+      'valid download for asset URL';
 };
 
 done_testing;

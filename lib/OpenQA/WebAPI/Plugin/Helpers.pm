@@ -12,6 +12,7 @@ use OpenQA::Events;
 use OpenQA::Jobs::Constants qw(EXECUTION_STATES PRE_EXECUTION_STATES ABORTED_RESULTS FAILED NOT_COMPLETE_RESULTS);
 use Text::Glob qw(glob_to_regex_string);
 use List::Util qw(any);
+use Feature::Compat::Try;
 
 sub register ($self, $app, $config) {
     $app->helper(
@@ -197,7 +198,7 @@ sub register ($self, $app, $config) {
             my %d = ('bs-toggle' => 'popover', 'bs-trigger' => 'focus', 'bs-title' => $title, 'bs-content' => $content);
             $d{placement} = $placement if $placement;
             return $c->t(a => (tabindex => 0, class => $class, role => 'button', data => \%d, @args));
-        });
+          });
 
     $app->helper(
         help_popover_todo => sub ($c) {
@@ -370,12 +371,13 @@ sub register ($self, $app, $config) {
                 #       An example for such a warning is "$* matches null string many times in regex".
                 use warnings FATAL => 'regexp';
                 # test regex compilation and matching as some problems are only warned about when matching
-                eval { '' =~ qr/$regex_string/ };
-                next unless $@;
-                # strip last part of error/warning as it does not contain anything useful for the user
-                $regex_problem = $@;
-                $regex_problem =~ s{/ at .*}{}s;
-                last;
+                try { '' =~ qr/$regex_string/ }
+                catch ($e) {
+                    # strip last part of error/warning as it does not contain anything useful for the user
+                    $regex_problem = $e;
+                    $regex_problem =~ s{/ at .*}{}s;
+                    last;
+                }
             }
             return $regex_problem && $context ? "$context: $regex_problem" : $regex_problem;
         });
@@ -522,10 +524,8 @@ sub _param_hash ($c, $name) {
     return @$values ? {map { $_ => 1 } @$values} : undef;
 }
 
-sub _find_job_or_render_not_found {
-    my ($c, $job_id) = @_;
-
-    my $job = $c->schema->resultset('Jobs')->find(int($job_id));
+sub _find_job_or_render_not_found ($c, $job_id, $query_settings = {}) {
+    my $job = $c->schema->resultset('Jobs')->find(int($job_id), $query_settings);
     return $job if $job;
     $c->render(json => {error => 'Job does not exist'}, status => 404);
     return undef;

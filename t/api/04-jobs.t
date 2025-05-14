@@ -34,7 +34,7 @@ use Digest::MD5;
 OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl 05-job_modules.pl');
 
 # avoid polluting checkout
-my $tempdir = tempdir("/tmp/$FindBin::Script-XXXX")->make_path;
+my $tempdir = tempdir("$FindBin::Script-XXXX", TMPDIR => 1);
 $ENV{OPENQA_BASEDIR} = $tempdir;
 note("OPENQA_BASEDIR: $tempdir");
 path($tempdir, '/openqa/testresults')->make_path;
@@ -62,6 +62,7 @@ $ENV{MOJO_MAX_MESSAGE_SIZE} = 207741824;
 
 my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
 my $cfg = $t->app->config;
+$cfg->{'scm git'}->{git_auto_clone} = 'no';
 $cfg->{'scm git'}->{git_auto_update} = 'no';
 is $cfg->{audit}->{blocklist}, 'job_grab', 'blocklist updated';
 
@@ -77,7 +78,7 @@ $assets->find({type => 'iso', name => 'openSUSE-Factory-staging_e-x86_64-Build87
 $jobs->find(99963)->update({assigned_worker_id => 1});
 
 $t->get_ok('/api/v1/jobs')->status_is(200);
-diag explain $t->tx->res->body unless $t->success;
+always_explain $t->tx->res->body unless $t->success;
 exit unless $t->success;
 my @jobs = @{$t->tx->res->json->{jobs}};
 my $jobs_count = scalar @jobs;
@@ -359,7 +360,7 @@ subtest 'prevent restarting parents' => sub {
     # restart the two jobs 99963 and 99938; one has a parallel parent (99961) and one a directly chained parent (99937)
     $t->post_ok('/api/v1/jobs/restart?force=1&skip_parents=1', form => {jobs => [99963, 99938]})->status_is(200);
     $t->json_is('/result' => [{99938 => 99985}, {99963 => 99986}], 'response')
-      ->or(sub (@) { diag explain $t->tx->res->json });
+      ->or(sub (@) { always_explain $t->tx->res->json });
     # check whether jobs have been restarted but not their parents
     isnt($jobs->find(99963)->clone_id, undef, 'job with parallel parent has been cloned');
     isnt($jobs->find(99938)->clone_id, undef, 'job with directly chained parent has been cloned');
@@ -404,7 +405,7 @@ subtest 'restart jobs with commenting' => sub {
     my @args = (form => {jobs => [99981, 99963, 99946, 99945, 99927, 99939]});
     $t->post_ok('/api/v1/jobs/restart?comment=label%3Aforce_result%3Afoo%3Abar', @args)->status_is(200);
     my $res = $t->tx->res->json;
-    is_deeply $res->{result}, [], 'no jobs restarted when commenting fails' or diag explain $res->{result};
+    is_deeply $res->{result}, [], 'no jobs restarted when commenting fails' or always_explain $res->{result};
     like join("\n", @{$res->{errors}}), qr/Invalid result 'foo' for force_result/, 'error about comment creation';
 
     $t->post_ok('/api/v1/jobs/restart?comment=via restart', @args)->status_is(200);
@@ -412,7 +413,7 @@ subtest 'restart jobs with commenting' => sub {
     my @unexpected_jobs = (99939, 99945);
     my @expected_jobs = (99946, 99963, 99981);
     my @restarted_jobs = sort map { keys %$_ } @{$res->{result}};
-    is_deeply \@restarted_jobs, \@expected_jobs, 'expected set of jobs has been restarted' or diag explain $res;
+    is_deeply \@restarted_jobs, \@expected_jobs, 'expected set of jobs has been restarted' or always_explain $res;
     is _count_restart_comments($_), 0, "job $_ was not restarted and thus also not commented on" for @unexpected_jobs;
     is _count_restart_comments($_), 1, "job $_ was commented on" for @expected_jobs;
 
@@ -442,7 +443,7 @@ subtest 'restart single job passing settings' => sub {
     $jobs->find(80000)->update({group_id => 1002});
     $t->post_ok('/api/v1/jobs/restart?set=_GROUP_ID%3D0&prio=42&jobs=80000&clone=0')->status_is(200);
     my $restarted_id = [values %{($t->tx->res->json->{result} // [])->[0] // {}}]->[0];
-    isnt $restarted_id, undef, 'job has been restarted' or diag explain $t->tx->res->json and return;
+    isnt $restarted_id, undef, 'job has been restarted' or always_explain $t->tx->res->json and return;
     is $jobs->find(80000)->clone_id, undef, '2nd job is not considered cloned' or return;
     my $restarted = $jobs->find($restarted_id);
     isnt $restarted_id, undef, 'restarted job actually present' or return;
@@ -731,7 +732,7 @@ subtest 'update job status' => sub {
         $t->post_ok('/api/v1/jobs/99963/status', json => {status => {worker_id => 1}})->status_is(200);
         my $response = $t->tx->res->json;
         my %expected_response = (job_result => 'failed', known_files => [], known_images => [], result => 1);
-        is_deeply($response, \%expected_response, 'response as expected') or diag explain $response;
+        is_deeply($response, \%expected_response, 'response as expected') or always_explain $response;
     };
 
     subtest 'update running job with results/details' => sub {
@@ -779,7 +780,7 @@ subtest 'update job status' => sub {
         my %expected_response
           = (job_result => 'failed', known_files => \@known_files, known_images => \@known_images, result => 1);
         is_deeply($response, \%expected_response, 'response as expected; only the known images and files returned')
-          or diag explain $response;
+          or always_explain $response;
         # note: The arrays are supposed to be sorted so it is fine to assume a fix order here.
     };
 
@@ -824,6 +825,16 @@ subtest 'get job status' => sub {
       ->json_is('/error_status' => 404, 'Status code correct')->json_is('/error' => 'Job does not exist');
 };
 
+subtest 'validation of test name' => sub {
+    my @disallowed = ('spam=eggs', "spam\teggs", "spam\neggs", "spam eggs\n");
+    my @allowed = ('späm.eggs.垃圾郵件雞蛋', 'spam+eggs', 'sµam:eggs', 'spam@eggs', 'spam eggs 0123456789');
+    $t->post_ok('/api/v1/jobs', form => {TEST => $_})->status_is(400, "test name $_ disallowed") for @disallowed;
+    $t->json_is('/error' => 'The following settings are invalid: TEST', 'error for invalid test name returned');
+    $t->post_ok('/api/v1/jobs', form => {TEST => $_})->status_is(200, "test name $_ allowed") for @allowed;
+    is $jobs->search({TEST => {-in => \@disallowed}})->count, 0, 'no jobs with disallowed names created';
+    is $jobs->search({TEST => {-in => \@allowed}})->count, @allowed, 'all jobs with allowed names created';
+};
+
 subtest 'cancel job' => sub {
     $t->post_ok('/api/v1/jobs/99963/cancel')->status_is(200);
     is_deeply(
@@ -842,7 +853,7 @@ subtest 'cancel job' => sub {
     my $form = {TEST => 'spam_eggs'};
     $t->post_ok('/api/v1/jobs', form => $form)->status_is(200);
     $t->post_ok('/api/v1/jobs/cancel', form => $form)->status_is(200);
-    is($t->tx->res->json->{result}, 1, 'number of affected jobs returned') or diag explain $t->tx->res->json;
+    is($t->tx->res->json->{result}, 1, 'number of affected jobs returned') or always_explain $t->tx->res->json;
     is_deeply(OpenQA::Test::Case::find_most_recent_event($schema, 'job_cancel_by_settings'),
         $form, 'Cancellation was logged with settings');
 };
@@ -890,7 +901,7 @@ subtest 'json representation of group overview (actually not part of the API)' =
             key => 'Factory-0048',
         },
         'Build 0048 exported'
-    ) or diag explain $b48;
+    ) or always_explain $b48;
 };
 
 $t->get_ok('/dashboard_build_results.json?limit_builds=10')->status_is(200);
@@ -941,18 +952,18 @@ my %jobs_post_params = (
 subtest 'WORKER_CLASS correctly assigned when posting job' => sub {
     my $id;
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
-    ok $id = $t->tx->res->json->{id}, 'id returned (0)' or diag explain $t->tx->res->json;
+    ok $id = $t->tx->res->json->{id}, 'id returned (0)' or always_explain $t->tx->res->json;
     is $jobs->find($id)->settings_hash->{WORKER_CLASS}, 'qemu_x86_64',
       'default WORKER_CLASS assigned (with arch fallback)';
 
     $jobs_post_params{ARCH} = 'aarch64';
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
-    ok $id = $t->tx->res->json->{id}, 'id returned (1)' or diag explain $t->tx->res->json;
+    ok $id = $t->tx->res->json->{id}, 'id returned (1)' or always_explain $t->tx->res->json;
     is $jobs->find($id)->settings_hash->{WORKER_CLASS}, 'qemu_aarch64', 'default WORKER_CLASS assigned';
 
     $jobs_post_params{WORKER_CLASS} = 'svirt';
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200);
-    ok $id = $t->tx->res->json->{id}, 'id returned (2)' or diag explain $t->tx->res->json;
+    ok $id = $t->tx->res->json->{id}, 'id returned (2)' or always_explain $t->tx->res->json;
     is $jobs->find($id)->settings_hash->{WORKER_CLASS}, 'svirt', 'specified WORKER_CLASS assigned';
 };
 
@@ -1027,9 +1038,9 @@ subtest 'posting multiple jobs at once' => sub {
     );
     $t->post_ok('/api/v1/jobs', form => \%jobs_post_params)->status_is(200, 'posted multiple jobs');
     my $json = $t->tx->res->json;
-    diag explain $json or return unless $t->success;
+    always_explain $json or return unless $t->success;
     my $ids = $json->{ids};
-    is ref $ids, 'HASH', 'mapping of suffixes to IDs returned' or diag explain $json;
+    is ref $ids, 'HASH', 'mapping of suffixes to IDs returned' or always_explain $json;
     ok my $root_job_id = $ids->{0}, 'root-job created';
     ok my $follow_up_job_1_id = $ids->{1}, 'follow-up-job-1 created';
     ok my $follow_up_job_2_id = $ids->{2}, 'follow-up-job-2 created';
@@ -1057,7 +1068,7 @@ subtest 'posting multiple jobs at once' => sub {
         $deps->{parallel_parents} = [sort @{$deps->{parallel_parents}}];
         $deps->{chained_children} = [sort @{$deps->{chained_children}}];
     }
-    is_deeply $created_cluster, \%expected_cluster, 'expected cluster created' or diag explain $created_cluster;
+    is_deeply $created_cluster, \%expected_cluster, 'expected cluster created' or always_explain $created_cluster;
     is $follow_up_job_1->blocked_by_id, $root_job_id, 'blocked by computed (0)';
     is $follow_up_job_2->blocked_by_id, $root_job_id, 'blocked by computed (1)';
 };
@@ -1350,7 +1361,7 @@ subtest 'Parse extra tests results - LTP' => sub {
         'XML parsing error logged'
     );
     $t->json_is('/error' => 'Unable to parse extra test', 'error returned (JUnit)')
-      or diag explain $t->tx->res->content;
+      or always_explain $t->tx->res->content;
 
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
@@ -1359,7 +1370,8 @@ subtest 'Parse extra tests results - LTP' => sub {
             extra_test => 1,
             script => 'test'
         })->status_is(400, 'request considered invalid (foo)');
-    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)') or diag explain $t->tx->res->content;
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)')
+      or always_explain $t->tx->res->content;
     ok !-e path($basedir, 'details-LTP_syscalls_accept01.json'), 'detail from LTP was NOT written';
 
     $t->post_ok(
@@ -1372,7 +1384,7 @@ subtest 'Parse extra tests results - LTP' => sub {
     $t->content_is('OK', 'ok returned');
     ok !-e path($basedir, $fname), 'file was not uploaded';
 
-    is $parser->tests->size, 7, 'Tests parsed correctly' or diag explain $parser->tests->size;
+    is $parser->tests->size, 7, 'Tests parsed correctly' or always_explain $parser->tests->size;
     junit_ok $parser, $jobid, $basedir, ['details-LTP_syscalls_accept01.json', 'LTP-LTP_syscalls_accept01.txt'];
 };
 
@@ -1392,7 +1404,8 @@ subtest 'Parse extra tests results - xunit' => sub {
             extra_test => 1,
             script => 'test'
         })->status_is(400, 'request considered invalid (LTP)');
-    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (LTP)') or diag explain $t->tx->res->content;
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (LTP)')
+      or always_explain $t->tx->res->content;
 
     $t->post_ok(
         "/api/v1/jobs/$jobid/artefact" => form => {
@@ -1401,7 +1414,8 @@ subtest 'Parse extra tests results - xunit' => sub {
             extra_test => 1,
             script => 'test'
         })->status_is(400, 'request considered invalid (foo)');
-    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)') or diag explain $t->tx->res->content;
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)')
+      or always_explain $t->tx->res->content;
     ok !-e path($basedir, 'details-unkn.json'), 'detail from junit was NOT written';
 
     $t->post_ok(
@@ -1414,7 +1428,7 @@ subtest 'Parse extra tests results - xunit' => sub {
     $t->content_is('OK', 'ok returned');
     ok !-e path($basedir, $fname), 'file was not uploaded';
 
-    is $parser->tests->size, 11, 'Tests parsed correctly' or diag explain $parser->tests->size;
+    is $parser->tests->size, 11, 'Tests parsed correctly' or always_explain $parser->tests->size;
     junit_ok $parser, $jobid, $basedir, ['details-unkn.json', 'xunit-bacon-1.txt'];
 };
 
@@ -1434,7 +1448,8 @@ subtest 'Parse extra tests results - junit' => sub {
             extra_test => 1,
             script => 'test'
         })->status_is(400, 'request considered invalid (foo)');
-    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)') or diag explain $t->tx->res->content;
+    $t->json_is('/error' => 'Unable to parse extra test', 'error returned (foo)')
+      or always_explain $t->tx->res->content;
     ok !-e path($basedir, 'details-1_running_upstream_tests.json'), 'detail from junit was NOT written';
 
     $t->post_ok(
@@ -1520,7 +1535,7 @@ subtest 'marking job as done' => sub {
         $schema->txn_begin;
         $t->post_ok('/api/v1/jobs/99961/set_done')->status_is(200);
         $t->json_is('/result' => INCOMPLETE, 'post yields incomplete result (calculated)');
-        $t->success or diag explain $t->tx->res->json;
+        $t->success or always_explain $t->tx->res->json;
         $job = $jobs->find(99961);
         is $job->result, INCOMPLETE, 'result is incomplete (no modules and no reason explicitely specified)';
         is $job->reason, 'no test modules scheduled/uploaded', 'reason for incomplete set';
@@ -1614,7 +1629,7 @@ subtest 'handle FOO_URL' => sub {
 };
 
 subtest 'handle git_clone with CASEDIR' => sub {
-    OpenQA::App->singleton->config->{'scm git'}->{git_auto_clone} = 'yes';
+    $cfg->{'scm git'}->{git_auto_clone} = 'yes';
     $testsuites->create(
         {
             name => 'handle_foo_casedir',
@@ -1645,7 +1660,7 @@ subtest 'handle git_clone with CASEDIR' => sub {
 };
 
 subtest 'handle git_clone without CASEDIR' => sub {
-    OpenQA::App->singleton->config->{'scm git'}->{git_auto_update} = 'yes';
+    $cfg->{'scm git'}->{git_auto_update} = 'yes';
     $testsuites->create(
         {
             name => 'handle_git_clone',

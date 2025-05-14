@@ -7,7 +7,7 @@ use Mojo::Base -strict, -signatures;
 
 use Exporter 'import';
 use Carp;
-use Try::Tiny;
+use Feature::Compat::Try;
 use JSON::Validator;
 use YAML::XS;    # Required by JSON::Validator as a runtime dependency
 use YAML::PP 0.027;
@@ -50,15 +50,7 @@ sub load_yaml ($type, $input) {
     }
 }
 
-sub dump_yaml ($type, @args) {
-    if ($type eq 'file') {
-        my ($output, @docs) = @args;
-        return $YP->dump_file($output, @docs);
-    }
-    else {
-        return $YP->dump_string(@args);
-    }
-}
+sub dump_yaml (@args) { $YP->dump_string(@args) }
 
 sub validate_data (%args) {
     my $schema_file = $args{schema_file};
@@ -85,15 +77,15 @@ sub validate_data (%args) {
             $schema = $validator->schema($schema_file);
         }
     }
-    catch {
-        if (m/^YAML::XS::Load Error/) {
-            push @errors, $_;
+    catch ($e) {
+        if ($e =~ m/^YAML::XS::Load Error/) {
+            push @errors, $e;
         }
         else {
             # The first line of the backtrace gives us the error message we want
-            push @errors, (split /\n/, $_, 2)[0];
+            push @errors, (split /\n/, $e, 2)[0];
         }
-    };
+    }
     if ($schema) {
         # Note: Don't pass $schema here, that won't work
         push @errors, $validator->validate($data);

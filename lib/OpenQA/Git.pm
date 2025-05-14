@@ -6,11 +6,16 @@ package OpenQA::Git;
 use Mojo::Base -base, -signatures;
 use Mojo::Util 'trim';
 use Cwd 'abs_path';
-use OpenQA::Utils qw(run_cmd_with_log_return_error);
+use Mojo::File 'path';
+use OpenQA::Utils qw(run_cmd_with_log_return_error run_cmd_with_log);
+use OpenQA::App;
+use Feature::Compat::Try;
 
 has 'app';
 has 'dir';
 has 'user';
+
+my %CHECK_OPTIONS = (expected_return_codes => {0 => 1, 1 => 1});
 
 sub enabled ($self, $args = undef) {
     die 'no app assigned' unless my $app = $self->app;
@@ -30,12 +35,15 @@ sub _validate_attributes ($self) {
 
 sub _run_cmd ($self, $args, $options = {}) {
     my $include_git_path = $options->{include_git_path} // 1;
-    my $ssh_batchmode = $options->{ssh_batchmode} // 0;
+    my $batchmode = $options->{batchmode} // 0;
     my @cmd;
-    push @cmd, 'env', 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' if $ssh_batchmode;
+    push @cmd, 'env', 'GIT_SSH_COMMAND=ssh -oBatchMode=yes', 'GIT_ASKPASS=', 'GIT_TERMINAL_PROMPT=false' if $batchmode;
     push @cmd, $self->_prepare_git_command($include_git_path), @$args;
 
-    my $result = run_cmd_with_log_return_error(\@cmd);
+    my $result = run_cmd_with_log_return_error(
+        \@cmd,
+        expected_return_codes => $options->{expected_return_codes},
+        output_file => $options->{output_file});
     $self->app->log->error("Git command failed: @cmd - Error: $result->{stderr}") unless $result->{status};
     return $result;
 }
@@ -97,8 +105,15 @@ sub commit ($self, $args = undef) {
 
     # push changes
     if (($self->config->{do_push} || '') eq 'yes') {
-        $res = $self->_run_cmd(['push']);
-        return $self->_format_git_error($res, 'Unable to push Git commit') unless $res->{status};
+        $res = $self->_run_cmd(['push'], {batchmode => 1});
+        return undef if $res->{status};
+
+        my $msg = 'Unable to push Git commit';
+        if ($res->{return_code} == 128 and $res->{stderr} =~ m/Authentication failed for .http/) {
+            $msg
+              .= '. See https://open.qa/docs/#_setting_up_git_support on how to setup git support and possibly push via ssh.';
+        }
+        return $self->_format_git_error($res, $msg);
     }
 
     return undef;
@@ -110,9 +125,14 @@ sub get_current_branch ($self) {
     return trim($r->{stdout});
 }
 
+sub invoke_command ($self, $command_and_args) {
+    my $r = $self->_run_cmd($command_and_args);
+    $r->{status} or die $self->_format_git_error($r, "Failed to invoke Git command $command_and_args->[0]");
+}
+
 sub check_sha ($self, $sha) {
-    my $r = $self->_run_cmd(['rev-parse', '--verify', '-q', $sha]);
-    return 0 if $r->{return_code} == 128;
+    my $r = $self->_run_cmd(['rev-parse', '--verify', '-q', $sha], \%CHECK_OPTIONS);
+    return 0 if $r->{return_code} == 1;
     if ($r->{return_code} == 0) {
         # rev-parse returns a sha, $sha could be a branchname. if $sha matches
         # the beginning of the returned sha, we're good
@@ -123,14 +143,14 @@ sub check_sha ($self, $sha) {
 }
 
 sub get_remote_default_branch ($self, $url) {
-    my $r = $self->_run_cmd(['ls-remote', '--symref', $url, 'HEAD'], {include_git_path => 0, ssh_batchmode => 1});
+    my $r = $self->_run_cmd(['ls-remote', '--symref', $url, 'HEAD'], {include_git_path => 0, batchmode => 1});
     die qq/Error detecting remote default branch name for "$url": $r->{stdout} $r->{stderr}/
       unless $r->{status} && $r->{stdout} =~ m{refs/heads/(\S+)\s+HEAD};
     return $1;
 }
 
 sub clone_url ($self, $url) {
-    my $r = $self->_run_cmd(['clone', $url, $self->dir], {include_git_path => 0, ssh_batchmode => 1});
+    my $r = $self->_run_cmd(['clone', $url, $self->dir], {include_git_path => 0, batchmode => 1});
     die $self->_format_git_error($r, qq/Failed to clone "$url"/) unless $r->{status};
 }
 
@@ -141,7 +161,7 @@ sub get_origin_url ($self) {
 }
 
 sub fetch ($self, $branch_arg) {
-    my $r = $self->_run_cmd(['fetch', 'origin', $branch_arg], {ssh_batchmode => 1});
+    my $r = $self->_run_cmd(['fetch', 'origin', $branch_arg], {batchmode => 1});
     die $self->_format_git_error($r, "Failed to fetch from '$branch_arg'") unless $r->{status};
 }
 
@@ -151,10 +171,45 @@ sub reset_hard ($self, $branch) {
 }
 
 sub is_workdir_clean ($self) {
-    my $r = $self->_run_cmd(['diff-index', 'HEAD', '--exit-code']);
+    my $r = $self->_run_cmd(['diff-index', 'HEAD', '--exit-code'], \%CHECK_OPTIONS);
     die $self->_format_git_error($r, 'Internal Git error: Unexpected exit code ' . $r->{return_code})
       if $r->{return_code} > 1;
     return $r->{status};
+}
+
+sub cache_ref ($self, $ref, $url, $relative_path, $output_file, $allow_arbitrary_url_fetch = 1) {
+    # checkout git versioned file <$relative_path> of from repo at version <$ref> and write it to <$output_file>
+    # returns undef on success - else the error message
+    if (-f $output_file) {
+        try {
+            path($output_file)->touch;
+            return undef;
+        }
+        catch ($e) { return $e }
+    }
+
+    $self->app->log->debug(
+        "Checking out $relative_path from url '" . ($url // '') . "' rev '" . ($ref // '') . "' to $output_file");
+
+    # Now check if the ref is already present in the repo
+    my $res = $self->_run_cmd(['cat-file', '-t', $ref], \%CHECK_OPTIONS);
+    unless ($res->{status} && $res->{stdout} eq "commit\n") {
+        # the commit ref is not yet known in the local repo copy
+
+        # add a remote and fetch from that one if url is set and allow_arbitrary_url_fetch allows it
+        my $remote_name = $url && $allow_arbitrary_url_fetch ? $url : 'origin';
+
+        # fetch needle ref from remote
+        $res = $self->_run_cmd(['fetch', '--depth', 1, $remote_name, $ref]);
+        return $self->_format_git_error($res, 'Unable to fetch Git ref from remote') unless $res->{status};
+    }
+
+    # create output dir
+    path($output_file)->dirname->make_path;
+    $res = $self->_run_cmd(['show', "$ref:./$relative_path"], {output_file => $output_file});
+    return undef if $res->{status};
+    unlink $output_file;
+    return $self->_format_git_error($res, 'Unable to cache Git ref');
 }
 
 1;

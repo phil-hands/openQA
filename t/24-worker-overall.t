@@ -14,7 +14,6 @@ use Data::Dumper;
 use Mojo::File qw(tempdir tempfile path);
 use Mojo::Util 'scope_guard';
 use Mojolicious;
-use Test::Fatal;
 use Test::Output qw(combined_like combined_from);
 use Test::MockModule;
 use OpenQA::Constants qw(WORKER_COMMAND_QUIT WORKER_SR_API_FAILURE WORKER_SR_DIED WORKER_SR_DONE WORKER_SR_FINISH_OFF);
@@ -29,6 +28,10 @@ $ENV{OPENQA_CONFIG} = "$FindBin::Bin/data/24-worker-overall";
 # note: The worker instantiates OpenQA::Setup which would configure logging to use the output
 #       file specified via OPENQA_LOGFILE instead of stdout/stderr.
 $ENV{OPENQA_LOGFILE} = undef;
+
+my $workdir = tempdir("$FindBin::Script-XXXX", TMPDIR => 1);
+chdir $workdir;
+my $guard = scope_guard sub { chdir $FindBin::Bin };
 
 # define fake isotovideo
 {
@@ -90,13 +93,8 @@ my $cache_service_client_mock = Test::MockModule->new('OpenQA::CacheService::Cli
 $cache_service_client_mock->redefine(info => sub { Test::FakeCacheServiceClientInfo->new });
 my $load_avg_file = simulate_load('10.93 10.91 10.25 2/2207 1212', 'worker-overall-load-avg');
 
-like(
-    exception {
-        OpenQA::Worker->new({instance => 'foo'});
-    },
-    qr{.*the specified instance number \"foo\" is no number.*},
-    'instance number must be a number',
-);
+throws_ok { OpenQA::Worker->new({instance => 'foo'}); } qr{.*the specified instance number \"foo\" is no number.*},
+  'instance number must be a number';
 my $worker = OpenQA::Worker->new({instance => 1, apikey => 'foo', apisecret => 'bar', verbose => 1, 'no-cleanup' => 1});
 ok($worker->no_cleanup, 'no-cleanup flag works');
 ok(my $settings = $worker->settings, 'settings instantiated');
@@ -108,7 +106,7 @@ qr/Ignoring host.*Working directory does not exist/,
 is($worker->app->level, 'debug', 'log level set to debug with verbose switch');
 my @webui_hosts = sort keys %{$worker->clients_by_webui_host};
 is_deeply(\@webui_hosts, [qw(http://localhost:9527 https://remotehost)], 'client for each web UI host')
-  or diag explain \@webui_hosts;
+  or always_explain \@webui_hosts;
 
 
 combined_like { $worker->log_setup_info }
@@ -158,7 +156,7 @@ subtest 'capabilities' => sub {
             )
         ],
         'capabilities contain expected information'
-    ) or diag explain $capabilities;
+    ) or always_explain $capabilities;
 
     # clear cached capabilities
     delete $worker->{_caps};
@@ -187,7 +185,7 @@ subtest 'capabilities' => sub {
                 )
             ],
             'capabilities contain expected information'
-        ) or diag explain $capabilities;
+        ) or always_explain $capabilities;
         is($capabilities->{worker_class}, 'qemu_aarch64', 'default worker class for architecture assigned');
     };
 
@@ -273,7 +271,7 @@ subtest 'accept or skip next job' => sub {
             my $next_job = OpenQA::Worker::_grab_next_job(\@pending_jobs, \%queue_info);
             my @actual_step_results = ($next_job, $queue_info{parent_chain});
             my $ok = is_deeply \@actual_step_results, $expected_step, "iteration step $step_index";
-            $ok or diag explain $_ for @actual_step_results;
+            $ok or always_explain $_ for @actual_step_results;
             $step_index += 1;
         }
         is scalar @pending_jobs, 0, 'no pending jobs left';
@@ -388,7 +386,7 @@ subtest 'accept or skip next job' => sub {
         $worker->enqueue_jobs_and_accept_first($client, \%job_info);
         ok($worker->current_job, 'current job assigned');
         is_deeply($worker->current_job->info, $job_info{data}->{26}, 'the current job is the first job in the sequence')
-          or diag explain $worker->current_job->info;
+          or always_explain $worker->current_job->info;
 
         ok($worker->has_pending_jobs, 'worker has pending jobs');
         is_deeply($worker->pending_job_ids, [27, 28], 'pending job IDs returned as expected');
@@ -416,7 +414,7 @@ subtest 'accept or skip next job' => sub {
             $client->api_calls,
             [post => 'jobs/27/set_done', {reason => 'skip for testing', result => 'skipped', worker_id => 42}],
             'API call for skipping done'
-        ) or diag explain $client->api_calls;
+        ) or always_explain $client->api_calls;
     };
 };
 
@@ -498,7 +496,7 @@ subtest 'is_qemu_running' => sub {
     ok OpenQA::Worker::is_qemu('/usr/bin/qemu-system-x86_64'), 'QEMU executable considered to be QEMU';
     ok !OpenQA::Worker::is_qemu('/usr/bin/true'), 'other executable not considered to be QEMU';
 
-    my $pool_directory = tempdir('poolXXXX');
+    my $pool_directory = tempdir('poolXXXX', TMPDIR => 1);
     $worker->pool_directory($pool_directory);
 
     $worker->no_cleanup(0);
@@ -525,8 +523,8 @@ subtest 'checking and cleaning pool directory' => sub {
 
     # assign temporary pool dir
     # note: Using scope guard to "get out" of pool directory again so we can delete the tempdir.
-    my $pool_directory = tempdir('poolXXXX');
-    my $guard = scope_guard sub { chdir $FindBin::Bin };
+    my $pool_directory = tempdir('poolXXXX', TMPDIR => 1);
+    my $guard = scope_guard sub { chdir $workdir };
     $worker->pool_directory($pool_directory);
 
     # pretend QEMU is still running
@@ -545,6 +543,9 @@ subtest 'checking and cleaning pool directory' => sub {
 };
 
 subtest 'checking worker address' => sub {
+    my $pool_directory = tempdir('poolXXXX', TMPDIR => 1);
+    my $guard = scope_guard sub { chdir $workdir };
+    $worker->pool_directory($pool_directory);
     my $fqdn_lookup_mock = Test::MockModule->new('OpenQA::Worker::Settings');
     ok !$settings->is_local_worker, 'not considered local initially because we have https://remotehost configured';
     $global_settings->{WORKER_HOSTNAME} = undef;
@@ -571,6 +572,9 @@ subtest 'checking worker address' => sub {
 };
 
 subtest 'check availability of Open vSwitch related D-Bus service' => sub {
+    my $pool_directory = tempdir('poolXXXX', TMPDIR => 1);
+    my $guard = scope_guard sub { chdir $workdir };
+    $worker->pool_directory($pool_directory);
     delete $worker->settings->{_worker_classes};
     $worker->settings->global_settings->{WORKER_CLASS} = 'foo,tap,bar';
     ok $worker->settings->has_class('tap'), 'worker has tap class';
@@ -857,6 +861,7 @@ qr/Job 42 from some-host finished - reason: done.*A QEMU instance using.*Skippin
                 'A QEMU instance using the current pool directory is still running (PID: 17377)',
                 'error status recomputed'
             );
+            ok $worker->current_error_is_fatal, 'leftover QEMU process considered fatal';
             is $pending_job->status, 'skipped: ?', 'pending job is supposed to be skipped due to the error';
             combined_like {
                 $worker->_handle_job_status_changed($pending_job, {status => 'stopped', reason => 'skipped'});
@@ -864,11 +869,22 @@ qr/Job 42 from some-host finished - reason: done.*A QEMU instance using.*Skippin
             qr/Job 769 from some-host finished - reason: skipped/s, 'assume skipping of job 769 is complete';
             is $worker->status->{status}, 'broken', 'worker still considered broken';
 
+            # set back the job/queue for another test
+            $pending_job->{_status} = 'new';
+            $worker->current_job($fake_job);
+            $worker->_init_queue([$pending_job]);
+
             # assume the average load exceeds configured threshold
             $worker_mock->unmock('is_qemu_running');
             $worker->settings->global_settings->{CRITICAL_LOAD_AVG_THRESHOLD} = '10';
-            is $worker->status->{status}, 'broken', 'worker considered broken when average load exceeds threshold';
+            combined_like { $worker->_handle_job_status_changed($fake_job, {status => 'stopped', reason => 'done'}) }
+            qr/Job 42 from some-host finished - reason: done.*Continuing.*769.*despite.*load.*exceeding/s,
+              'continuation despite error logged';
             like $worker->current_error, qr/load \(.*10\.25.*exceeding.*10/, 'error shows current load and threshold';
+            ok !$worker->current_error_is_fatal, 'exceeding the load is not considered fatal';
+            is $pending_job->status, 'accepted', 'pending job is not supposed to be skipped due load';
+            $worker->current_job(undef);
+            is $worker->status->{status}, 'broken', 'worker is considered broken when after the job is done';
 
             # assume the error is gone
             $load_avg_file->remove;
@@ -878,13 +894,9 @@ qr/Job 42 from some-host finished - reason: done.*A QEMU instance using.*Skippin
         };
     };
 
-    like(
-        exception {
-            $worker->_handle_job_status_changed($fake_job, {status => 'stopped', reason => 'another test'});
-        },
-        qr{Received job status update for job 42 \(stopped\) which is not the current one\.},
-        'handling job status changed refused with no job',
-    );
+    throws_ok { $worker->_handle_job_status_changed($fake_job, {status => 'stopped', reason => 'another test'}); }
+    qr{Received job status update for job 42 \(stopped\) which is not the current one\.},
+      'handling job status changed refused with no job';
 };
 
 subtest 'handle critical error' => sub {
@@ -927,7 +939,7 @@ subtest 'resolving 127.0.0.1 without relying on getaddrinfo()' => sub {
 };
 
 subtest 'storing package list' => sub {
-    $worker->pool_directory(tempdir('pool-dir-XXXXX'));
+    $worker->pool_directory(tempdir('pool-dir-XXXXX', TMPDIR => 1));
     combined_like { $worker->_store_package_list('echo foo') }
     qr/Gathering package information/, 'log message about command invocation';
     is $worker->pool_directory->child('worker_packages.txt')->slurp('UTF-8'), "foo\n", 'package list written';

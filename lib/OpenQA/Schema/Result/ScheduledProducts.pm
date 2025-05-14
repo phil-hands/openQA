@@ -10,7 +10,7 @@ use Mojo::Base -base, -signatures;
 use DBIx::Class::Timestamps 'now';
 use Exporter 'import';
 use File::Basename;
-use Try::Tiny;
+use Feature::Compat::Try;
 use OpenQA::App;
 use OpenQA::Log qw(log_debug log_warning log_error);
 use OpenQA::Utils;
@@ -192,19 +192,26 @@ from B<_generate_jobs()>. Returns a list of job ids from the jobs that were succ
 and a list of failure reason for the jobs that could not be scheduled. Internal function, not
 exported - but called by B<create()>.
 
+=item $guard
+
+Expects an C<OpenQA::Task::SignalGuard> object. If the related Minion job is aborting after the database
+transaction has completed, a restart of the Minion job is prevented so jobs aren't created twice.
+
 =back
 
 =cut
 
-sub schedule_iso ($self, $args) {
-
+sub schedule_iso ($self, $args, $guard) {
     # update status to SCHEDULING or just return if the job was updated otherwise
     return undef unless $self->_update_status_if(SCHEDULING, status => ADDED);
     $self->{_settings} = $args;
 
     # schedule the ISO
     $self->discard_changes;
-    my $result = try { $self->_schedule_iso($args) } catch { {error => $_} };
+    my $result = do {
+        try { $self->_schedule_iso($args, $guard) }
+        catch ($e) { {error => $e} }
+    };
     $self->set_done($result);
 
     # return result here as it is consumed by the old synchronous ISO post route and added as Minion job result
@@ -241,7 +248,7 @@ sub _log_wrong_parents ($self, $parent, $cluster_parents, $failed_job_info) {
 }
 
 sub _create_jobs_in_database ($self, $jobs, $failed_job_info, $skip_chained_deps, $include_children,
-    $successful_job_ids)
+    $successful_job_ids, $minion_ids = undef)
 {
     my $schema = $self->result_source->schema;
     my $jobs_resultset = $schema->resultset('Jobs');
@@ -253,9 +260,8 @@ sub _create_jobs_in_database ($self, $jobs, $failed_job_info, $skip_chained_deps
     my %job_ids_by_test_machine;    # key: "TEST@MACHINE", value: "array of job ids"
 
     for my $settings (@{$jobs || []}) {
-        $settings->{_GROUP_ID} = delete $settings->{GROUP_ID};
-
         # create a new job with these parameters and count if successful, do not send job notifies yet
+        $schema->svp_begin('try_create_job_from_settings');
         try {
             # Any setting name ending in _URL is special: it tells us to download
             # the file at that URL before running the job
@@ -267,11 +273,15 @@ sub _create_jobs_in_database ($self, $jobs, $failed_job_info, $skip_chained_deps
             $job_ids_by_test_machine{_job_ref($settings)} //= [];
             push @{$job_ids_by_test_machine{_job_ref($settings)}}, $j_id;
             $self->_create_download_lists(\%tmp_downloads, $download_list, $j_id);
+            $schema->svp_release('try_create_job_from_settings');
         }
-        catch {
-            push @$failed_job_info, {job_name => $settings->{TEST}, error_message => $_};
+        catch ($e) {
+            $schema->svp_rollback('try_create_job_from_settings');
+            die $e if $schema->is_deadlock($e);
+            push @$failed_job_info, {job_name => $settings->{TEST}, error_message => $e};
         }
     }
+
     # keep track of ...
     my %created_jobs;    # ... for cycle detection
     my %cluster_parents;    # ... for checking wrong parents
@@ -297,8 +307,8 @@ sub _create_jobs_in_database ($self, $jobs, $failed_job_info, $skip_chained_deps
             $tmp_downloads{$_}->{blocked_job_id}]
     } keys %tmp_downloads;
     my $gru = OpenQA::App->singleton->gru;
-    $gru->enqueue_download_jobs(\%downloads);
-    $gru->enqueue_git_clones(\%clones, $successful_job_ids) if keys %clones;
+    $gru->enqueue_download_jobs(\%downloads, $minion_ids);
+    $gru->enqueue_git_clones(\%clones, $successful_job_ids, $minion_ids) if keys %clones;
 }
 
 =over 4
@@ -311,9 +321,7 @@ Internal function to actually schedule the ISO, see schedule_iso().
 
 =cut
 
-sub _schedule_iso {
-    my ($self, $args) = @_;
-
+sub _schedule_iso ($self, $args, $guard) {
     my @notes;
     my $schema = $self->result_source->schema;
     my $user_id = $self->user_id;
@@ -380,33 +388,39 @@ sub _schedule_iso {
                     data => {scheduled_product_id => $self->id},
                     user_id => $user_id
                 );
-                $schema->resultset('Jobs')->cancel_by_settings(\%cond, 1, $deprioritize, $deprioritize_limit);
+                $schema->resultset('Jobs')->cancel_by_settings(\%cond, 1, $deprioritize, $deprioritize_limit, $self);
             }
-            catch {
-                my $error = shift;
-                push(@notes, "Failed to cancel old jobs: $error");
-            };
+            catch ($e) {
+                push(@notes, "Failed to cancel old jobs: $e");
+            }
         }
     }
 
     # define function to create jobs in the database; executed as transaction
     my @successful_job_ids;
     my @failed_job_info;
+    my @minion_ids;
+    my $gru = OpenQA::App->singleton->gru;
 
     try {
-        $schema->txn_do(
+        $schema->txn_do_retry_on_deadlock(
             sub {
                 $self->_create_jobs_in_database($jobs, \@failed_job_info, $skip_chained_deps, $include_children,
-                    \@successful_job_ids);
+                    \@successful_job_ids, \@minion_ids);
+            },
+            sub {   # this handler is generally covered but tests are unable to reproduce the deadlock 100 % of the time
+                $gru->obsolete_minion_jobs(\@minion_ids);    # uncoverable statement
+                (@successful_job_ids, @failed_job_info, @minion_ids) = ();    # uncoverable statement
             });
     }
-    catch {
-        my $error = shift;
-        push(@notes, "Transaction failed: $error");
-        push(@failed_job_info, map { {job_id => $_, error_messages => [$error]} } @successful_job_ids);
+    catch ($e) {
+        $gru->obsolete_minion_jobs(\@minion_ids);
+        push(@notes, "Transaction failed: $e");
+        push(@failed_job_info, map { {job_id => $_, error_messages => [$e]} } @successful_job_ids);
         @successful_job_ids = ();
-    };
+    }
 
+    $guard->retry(0) if defined($guard);
     # emit events
     for my $succjob (@successful_job_ids) {
         OpenQA::Events->singleton->emit_event('openqa_job_create', data => {id => $succjob}, user_id => $user_id);
@@ -688,9 +702,9 @@ sub _create_dependencies_for_parents ($self, $job, $created_jobs, $deptype, $par
         try {
             _check_for_cycle($job->id, $parent, $created_jobs);
         }
-        catch {
+        catch ($e) {
             die 'There is a cycle in the dependencies of ' . $job->TEST;
-        };
+        }
         if ($deptype eq OpenQA::JobDependencies::Constants::DIRECTLY_CHAINED) {
             $worker_classes //= join(',', @{$job_settings->all_values_sorted($job->id, 'WORKER_CLASS')});
             my $parent_worker_classes = join(',', @{$job_settings->all_values_sorted($parent, 'WORKER_CLASS')});
@@ -737,8 +751,10 @@ sub _create_download_lists {
 }
 
 sub _schedule_from_yaml ($self, $args, $skip_chained_deps, $include_children, @load_yaml_args) {
-    my $data = eval { load_yaml(@load_yaml_args) };
-    if (my $error = $@) { return {error_message => "Unable to load YAML: $error"} }
+    my $data;
+    try { $data = load_yaml(@load_yaml_args) }
+    catch ($e) { return {error_message => "Unable to load YAML: $e"} }
+
     my $app = OpenQA::App->singleton;
     my $validation_errors = $app->validate_yaml($data, 'JobScenarios-01.yaml', $app->log->level eq 'debug');
     return {error_message => "YAML validation failed:\n" . join("\n", @$validation_errors)} if @$validation_errors;

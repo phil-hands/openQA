@@ -33,6 +33,7 @@ sub command ($self, @args) {
       unless getopt \@args,
       'param-file=s' => \my @param_file,
       'm|monitor' => \my $monitor,
+      'f|follow' => \my $follow,
       'i|poll-interval=i' => \my $poll_interval,
       ;
     @args = $self->decode_args(@args);
@@ -41,7 +42,7 @@ sub command ($self, @args) {
     my @job_ids;
     my $create_res = $self->_create_jobs($client, \@args, \@param_file, \@job_ids);
     return $create_res if $create_res != 0 || !$monitor;
-    return $self->_monitor_and_return($client, $poll_interval, \@job_ids);
+    return $self->_monitor_and_return($client, $follow, $poll_interval, \@job_ids);
 }
 
 1;
@@ -51,6 +52,8 @@ sub command ($self, @args) {
 =head1 SYNOPSIS
 
   Usage: openqa-cli schedule [OPTIONS] DISTRI=… VERSION=… FLAVOR=… ARCH=… [ISO=… …]
+
+  Schedule a set of jobs creating a scheduled product on the web UI ("posts an ISO").
 
   Options:
         --apibase <path>           API base, defaults to /api/v1
@@ -67,6 +70,7 @@ sub command ($self, @args) {
     -m, --monitor                  Wait until all jobs are done/cancelled and return
                                    non-zero exit code if at least on job has not
                                    passed/softfailed
+    -f, --follow                   Use the newest clone of each monitored job
         --name <name>              Name of this client, used by openQA to
                                    identify different clients via User-Agent
                                    header, defaults to "openqa-cli"

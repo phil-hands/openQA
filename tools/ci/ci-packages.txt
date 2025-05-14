@@ -62,10 +62,10 @@ perl-DateTime-Format-Strptime-1.74
 perl-DateTime-Locale-1.170000
 perl-DateTime-TimeZone-2.60
 perl-DBD-Pg-3.18.0
-perl-DBD-SQLite-1.740.0
-perl-DBI-1.643
+perl-DBD-SQLite-1.760.0
+perl-DBI-1.647.0
 perl-DBIx-Class-0.082843
-perl-DBIx-Class-DeploymentHandler-0.002233
+perl-DBIx-Class-DeploymentHandler-0.002234
 perl-DBIx-Class-DynamicDefault-0.04
 perl-DBIx-Class-OptimisticLocking-0.02
 perl-DBIx-Class-Schema-Config-0.001014
@@ -82,6 +82,7 @@ perl-Eval-Closure-0.14
 perl-Exception-Class-1.44
 perl-Exporter-Declare-0.114
 perl-Exporter-Tiny-1.000000
+perl-Feature-Compat-Try-0.05
 perl-File-chdir-0.1011
 perl-File-Copy-Recursive-0.38
 perl-File-HomeDir-1.002
@@ -127,7 +128,7 @@ perl-Log-Contextual-0.008001
 perl-LWP-MediaTypes-6.02
 perl-LWP-Protocol-https-6.06
 perl-Meta-Builder-0.004
-perl-Minion-10.300.0
+perl-Minion-10.310.0
 perl-Minion-Backend-SQLite-5.0.7
 perl-Mixin-Linewise-0.111
 perl-Module-Build-0.422400
@@ -136,9 +137,9 @@ perl-Module-Implementation-0.09
 perl-Module-Pluggable-5.2
 perl-Module-Runtime-0.016
 perl-Module-Runtime-Conflicts-0.003
-perl-Mojo-IOLoop-ReadWriteProcess-0.340.0
-perl-Mojolicious-9.380.0
-perl-Mojolicious-Plugin-AssetPack-2.14
+perl-Mojo-IOLoop-ReadWriteProcess-1.1.0
+perl-Mojolicious-9.390.0
+perl-Mojolicious-Plugin-AssetPack-2.150.0
 perl-Mojolicious-Plugin-OAuth2-2.02
 perl-Mojo-Pg-4.27
 perl-Mojo-RabbitMQ-Client-0.3.1
@@ -173,7 +174,7 @@ perl-Perl-Critic-Community-1.0.3
 perl-Perl-Critic-Policy-Variables-ProhibitLoopOnHash-0.008
 perl-Perl-Critic-Pulp-99
 perl-PerlIO-utf8_strict-0.008
-perl-Perl-Tidy-20240511.0.0
+perl-Perl-Tidy-20250311.0.0
 perl-Pod-MinimumVersion-50
 perl-Pod-POM-2.01
 perl-Pod-Spell-1.26
@@ -208,6 +209,7 @@ perl-Sub-Name-0.21
 perl-Sub-Quote-2.004000
 perl-Sub-Uplevel-0.240.0
 perl-SUPER-1.20141117
+perl-Syntax-Keyword-Try-0.28
 perl-TAP-Harness-JUnit-0.42
 perl-Task-Weaken-1.06
 perl-Test-Deep-1.127
@@ -244,8 +246,9 @@ perl-XML-SAX-Base-1.09
 perl-XML-SAX-Expat-0.51
 perl-XML-SemanticDiff-1.0007
 perl-XML-Simple-2.24
+perl-XS-Parse-Keyword-0.380.0
 perl-YAML-1.24
-perl-YAML-LibYAML-0.902.0
+perl-YAML-LibYAML-0.903.0
 perl-YAML-PP-0.036
 psmisc-23.0
 python3-pathspec-0.7.0

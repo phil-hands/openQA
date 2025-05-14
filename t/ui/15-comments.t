@@ -15,7 +15,7 @@ use OpenQA::Test::Case;
 use OpenQA::SeleniumTest;
 
 my $test_case = OpenQA::Test::Case->new;
-my $schema_name = OpenQA::Test::Database->generate_schema_name;
+my $schema_name = OpenQA::Test::Database::generate_schema_name;
 my $schema
   = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '01-jobs.pl 03-users.pl 04-products.pl');
 my $comments = $schema->resultset('Comments');
@@ -292,7 +292,7 @@ subtest 'commenting in test results including labels' => sub {
         disable_bootstrap_animations;
         my $help_icon = $driver->find_element('#commentForm .help_popover.fa-question-circle');
         $help_icon->click;
-        like($driver->find_element('.popover')->get_text, qr/Help for comments/, 'popover shown on click');
+        is wait_for_element(selector => '.popover-header')->get_text, 'Help for comments', 'popover shown on click';
         $help_icon->click;
     };
 
@@ -301,8 +301,8 @@ subtest 'commenting in test results including labels' => sub {
         my $textarea = $driver->find_element_by_id('text');
         like $textarea->get_value, qr/label:force_result:new_result/, 'label template added';
         $driver->find_element_by_id('submitComment')->click;
-        eval { wait_for_ajax(msg => 'alert when trying to submit comment') };
-        like $@, qr/unexpected alert/, 'alert already shown shown when trying to wait for it' if $@;
+        throws_ok { wait_for_ajax(msg => 'alert when trying to submit comment') } qr/unexpected alert/,
+          'alert already shown shown when trying to wait for it';
         like $driver->get_alert_text, qr/Invalid result 'new_result' for force_result/, 'error from server shown';
         $driver->dismiss_alert;
         $textarea->clear;

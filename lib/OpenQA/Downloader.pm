@@ -5,17 +5,17 @@ package OpenQA::Downloader;
 use Mojo::Base -base, -signatures;
 
 use Mojo::Loader 'load_class';
-use Mojo::UserAgent;
 use Mojo::File 'path';
 use Mojo::URL;
+use OpenQA::UserAgent;
 use OpenQA::Utils 'human_readable_size';
-use Try::Tiny;
 use Time::HiRes 'sleep';
+use Feature::Compat::Try;
 
 has attempts => 5;
 has [qw(log tmpdir)];
 has sleep_time => 5;
-has ua => sub { Mojo::UserAgent->new(max_redirects => 5, max_response_size => 0) };
+has ua => sub { OpenQA::UserAgent->new(max_redirects => 5, max_response_size => 0) };
 has res => undef;
 
 sub download ($self, $url, $target, $options = {}) {
@@ -49,7 +49,8 @@ sub _extract_asset ($self, $to_extract, $target) {
     my $cmd;
     if ($to_extract =~ qr/\.tar(\..*)?/) {
         # invoke bsdtar to extract (compressed) tar archives
-        eval { $target->make_path } or return $@;
+        try { $target->make_path }
+        catch ($e) { return $e }
         $cmd = "bsdtar -x --directory '$target' -f '$to_extract' 2>&1";
     }
     else {
@@ -114,7 +115,8 @@ sub _get ($self, $url, $target, $options) {
             if ($err) {
                 $ret = $code;
                 $log->error(qq{Extracting "$tempfile" failed: $err});
-                eval { $target->remove_tree } or $log->error("Unable to remove leftovers after failed extraction: $@");
+                try { $target->remove_tree }
+                catch ($e) { $log->error("Unable to remove leftovers after failed extraction: $e") }
             }
         }
         else { $asset->move_to($target) }

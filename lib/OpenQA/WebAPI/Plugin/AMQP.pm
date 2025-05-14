@@ -4,7 +4,7 @@
 package OpenQA::WebAPI::Plugin::AMQP;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
-use OpenQA::Log qw(log_debug log_error);
+use OpenQA::Log qw(log_debug log_info log_error);
 use OpenQA::Jobs::Constants;
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Events;
@@ -16,9 +16,8 @@ use Scalar::Util qw(looks_like_number);
 my @job_events = qw(job_create job_delete job_cancel job_restart job_update_result job_done);
 my @comment_events = qw(comment_create comment_update comment_delete);
 
-sub new {
-    my $class = shift;
-    my $self = $class->SUPER::new(@_);
+sub new ($class, @args) {
+    my $self = $class->SUPER::new(@args);
     $self->{app} = undef;
     $self->{config} = undef;
     $self->{client} = undef;
@@ -26,10 +25,9 @@ sub new {
     return $self;
 }
 
-sub register {
-    my $self = shift;
-    $self->{app} = shift;
-    $self->{config} = $self->{app}->config;
+sub register ($self, $app, @args) {
+    $self->{app} = $app;
+    $self->{config} = $app->config;
     Mojo::IOLoop->singleton->next_tick(
         sub {
             # register for events
@@ -42,8 +40,7 @@ sub register {
         });
 }
 
-sub log_event {
-    my ($self, $event, $event_data) = @_;
+sub log_event ($self, $event, $event_data) {
 
     # use dot separators
     $event =~ s/_/\./;
@@ -76,19 +73,20 @@ sub publish_amqp ($self, $topic, $event_data, $headers = {}, $remaining_attempts
         sub ($error) {
             my $left = looks_like_number $remaining_attempts && $remaining_attempts > 1 ? $remaining_attempts - 1 : 0;
             my $delay = $retry_delay * $config->{publish_retry_delay_factor};
-            log_error "Publishing $topic failed: $error ($left attempts left)";
+            my ($event_id, $job_id) = ($event_data->{id} // 'none', $event_data->{job_id});
+            my $additional_info = $job_id ? ", job ID: $job_id" : '';
+            my $log_msg = "Publishing $topic failed: $error (event ID: $event_id$additional_info, $left attempts left)";
+            return log_error $log_msg unless $left;
             my $retry_function = sub ($loop) { $self->publish_amqp($topic, $event_data, $headers, $left, $delay) };
+            log_info $log_msg;
             Mojo::IOLoop->timer($retry_delay => $retry_function) if $left;
         })->finally(sub { undef $publisher });
 }
 
-sub on_job_event {
-    my ($self, $args) = @_;
-
+sub on_job_event ($self, $args) {
     my ($user_id, $connection_id, $event, $event_data) = @$args;
     my $jobs = $self->{app}->schema->resultset('Jobs');
-    my $job = $jobs->find({id => $event_data->{id}})
-      or die "Could not find job '$event_data->{id}' in database";
+    return undef unless my $job = $jobs->find({id => $event_data->{id}});
 
     # find count of pending jobs for the same build to know whether all tests for a build are done
     $event_data->{remaining} = $jobs->search(
@@ -115,8 +113,7 @@ sub on_job_event {
     $self->log_event($event, $event_data);
 }
 
-sub on_comment_event {
-    my ($self, $args) = @_;
+sub on_comment_event ($self, $args) {
     my ($comment_id, $connection_id, $event, $event_data) = @$args;
 
     # find comment in database

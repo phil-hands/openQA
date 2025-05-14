@@ -3,6 +3,7 @@
 
 package OpenQA::WebAPI::Controller::Test;
 use Mojo::Base 'Mojolicious::Controller', -signatures;
+use Feature::Compat::Try;
 
 use OpenQA::App;
 use OpenQA::Utils;
@@ -113,10 +114,6 @@ sub referer_check ($self) {
     return 1;
 }
 
-sub list {
-    my ($self) = @_;
-}
-
 sub _load_test_preset ($self, $preset_key) {
     return undef unless defined $preset_key;
     # avoid reading INI file again on subsequent calls
@@ -125,8 +122,8 @@ sub _load_test_preset ($self, $preset_key) {
     $presets{$preset_key} = undef;
     # read preset from an INI section [test_presets/…] or fallback to defaults assigned on setup
     my $config = $self->app->config;
-    return undef unless my $ini_config = $config->{ini_config};
     my $ini_key = "test_preset $preset_key";
+    my $ini_config = $config->{ini_config};
     return $presets{$preset_key}
       = $ini_config->SectionExists($ini_key)
       ? {map { ($_ => $ini_config->val($ini_key, $_)) } $ini_config->Parameters($ini_key)}
@@ -137,16 +134,20 @@ sub _load_scenario_definitions ($self, $preset) {
     return undef if exists $preset->{scenario_definitions};
     return undef unless my $distri = $preset->{distri};
     return undef unless my $casedir = testcasedir($distri, $preset->{version});
-    my $defs_yaml = eval { path($casedir, 'scenario-definitions.yaml')->slurp('UTF-8') };
-    if (my $error = $@) {
-        return $self->stash(flash_error => "Unable to read scenario definitions for the specified preset: $error")
-          unless $error =~ /no.*file/i;
+    my $defs_yaml;
+    try { $defs_yaml = path($casedir, 'scenario-definitions.yaml')->slurp('UTF-8') }
+    catch ($e) {
+        return $self->stash(flash_error => "Unable to read scenario definitions for the specified preset: $e")
+          unless $e =~ /no.*file/i;
         my $info = Mojo::ByteStream->new(
             qq(You first need to <a href="#" onclick="cloneTests(this)">clone the $distri test distribution</a>.));
         return $self->stash(flash_info => $info);
     }
-    my $defs = eval { load_yaml(string => $defs_yaml) };
-    return $self->stash(flash_error => "Unable to parse scenario definitions for the specified preset: $@") if $@;
+    my $defs;
+    try { $defs = load_yaml(string => $defs_yaml) }
+    catch ($e) {
+        return $self->stash(flash_error => "Unable to parse scenario definitions for the specified preset: $e")
+    }
     my $e = join("\n", @{$self->app->validate_yaml($defs, 'JobScenarios-01.yaml')});
     return $self->stash(flash_error => "Unable to validate scenarios definitions of the specified preset:\n$e") if $e;
     $preset->{scenario_definitions} = $defs_yaml;
@@ -182,15 +183,9 @@ sub clone ($self) {
       ->catch(sub ($error, @) { $self->reply->gru_result($error, 400) });
 }
 
-sub get_match_param {
-    my ($self) = @_;
-
-    my $match;
-    if (defined($self->param('match'))) {
-        $match = $self->param('match');
-        $match =~ s/[^\w\[\]\{\}\(\),:.+*?\\\$^|-]//g;    # sanitize
-    }
-    return $match;
+sub get_match_param ($self) {
+    return undef unless defined(my $match = $self->param('match'));
+    return $match =~ s/[^\w\[\]\{\}\(\),:.+*?\\\$^|-]//gr;    # sanitize
 }
 
 sub list_ajax ($self) {
@@ -275,9 +270,7 @@ sub _render_comment_data_for_ajax ($self, $job_id, $comment_data) {
     return \%data;
 }
 
-sub list_running_ajax {
-    my ($self) = @_;
-
+sub list_running_ajax ($self) {
     my $running = $self->schema->resultset('Jobs')->complex_query(
         state => [OpenQA::Jobs::Constants::EXECUTION_STATES],
         match => $self->get_match_param,
@@ -321,8 +314,7 @@ sub list_running_ajax {
     $self->render(json => \%response);
 }
 
-sub list_scheduled_ajax {
-    my ($self) = @_;
+sub list_scheduled_ajax ($self) {
     my $limits = OpenQA::App->singleton->config->{misc_limits};
     my $limit = min($limits->{generic_max_limit}, $self->param('limit') // $limits->{generic_default_limit});
 
@@ -374,9 +366,7 @@ sub _stash_job ($self, $args = undef) {
     return $job;
 }
 
-sub _stash_job_and_module_list {
-    my ($self, $args) = @_;
-
+sub _stash_job_and_module_list ($self, $args = undef) {
     return undef unless my $job = $self->_stash_job($args);
     my $test_modules = read_test_modules($job);
     $self->stash(modlist => ($test_modules ? $test_modules->{modules} : []));
@@ -454,11 +444,15 @@ sub downloads ($self) {
     $self->render('test/downloads');
 }
 
-sub settings {
-    my ($self) = @_;
-
+sub settings ($self) {
     $self->_stash_job({prefetch => 'settings'}) or return $self->reply->not_found;
     $self->render('test/settings');
+}
+
+sub test_file_path ($self, $testcasedir, $dir, $data_uri) {
+    return path($dir, $data_uri) if -d path($testcasedir)->child($dir);
+    my $default_data_dir = $self->app->config->{job_settings_ui}->{default_data_dir};
+    return path($default_data_dir, $dir, $data_uri);
 }
 
 =over 4
@@ -472,22 +466,13 @@ So this works in the same way as the test module source.
 
 =cut
 
-sub show_filesrc {
-    my ($self) = @_;
+sub show_filesrc ($self) {
     my $job = $self->_stash_job or return $self->reply->not_found;
     my $jobid = $self->param('testid');
     my $dir = $self->stash('dir');
     my $data_uri = $self->stash('link_path');
     my $testcasedir = testcasedir($job->DISTRI, $job->VERSION);
-    # Use the testcasedir to determine the correct path
-    my $filepath;
-    if (-d path($testcasedir)->child($dir)) {
-        $filepath = path($dir, $data_uri);
-    }
-    else {
-        my $default_data_dir = $self->app->config->{job_settings_ui}->{default_data_dir};
-        $filepath = path($default_data_dir, $dir, $data_uri);
-    }
+    my $filepath = $self->test_file_path($testcasedir, $dir, $data_uri);
 
     if (my $casedir = $job->settings->single({key => 'CASEDIR'})) {
         my $casedir_url = Mojo::URL->new($casedir->value);
@@ -496,11 +481,12 @@ sub show_filesrc {
         last unless $casedir_url->scheme;
         my $refspec = $casedir_url->fragment;
         # try to read vars.json from resultdir and replace branch by actual git hash if possible
-        eval {
+        try {
             my $vars_json = Mojo::File->new($job->result_dir(), 'vars.json')->slurp;
             my $vars = decode_json($vars_json);
             $refspec = $vars->{TEST_GIT_HASH} if $vars->{TEST_GIT_HASH};
-        };
+        }
+        catch ($e) { }
         my $src_path = path('/blob', $refspec, $filepath);
         # github treats '.git' as optional extension which needs to be stripped
         $casedir_url->path($casedir_url->path =~ s/\.git//r . $src_path);
@@ -519,9 +505,7 @@ sub show_filesrc {
     );
 }
 
-sub comments {
-    my ($self) = @_;
-
+sub comments ($self) {
     $self->_stash_job({prefetch => 'comments', order_by => 'comments.id'}) or return $self->reply->not_found;
     $self->render('test/comments');
 }
@@ -536,8 +520,7 @@ sub _stash_clone_info ($self, $job) {
         });
 }
 
-sub infopanel {
-    my ($self) = @_;
+sub infopanel ($self) {
     my $job = $self->_stash_job or return $self->reply->not_found;
     $self->stash({worker => $job->assigned_worker, additional_data => 1});
     $self->_stash_clone_info($job);
@@ -554,8 +537,7 @@ sub _get_current_job ($self, $with_assets = 0) {
 
 sub show ($self) { $self->_show($self->_get_current_job(1)) }
 
-sub _show {
-    my ($self, $job) = @_;
+sub _show ($self, $job = undef) {
     return $self->reply->not_found unless $job;
 
     $self->stash(
@@ -663,9 +645,7 @@ sub job_next_previous_ajax ($self) {
     $self->render(json => {data => \@data});
 }
 
-sub _calculate_preferred_machines {
-    my ($jobs) = @_;
-
+sub _calculate_preferred_machines ($jobs) {
     my %machines;
     for my $job (@$jobs) {
         next unless my $machine = $job->MACHINE;
@@ -830,9 +810,7 @@ sub _fetch_dependencies_by_jobs ($self, $ids) {
 }
 
 # appends the specified $distri and $version to $array_to_add_parts_to as string or if $raw as Mojo::ByteStream
-sub _add_distri_and_version_to_summary {
-    my ($array_to_add_parts_to, $distri, $version, $raw) = @_;
-
+sub _add_distri_and_version_to_summary ($array_to_add_parts_to, $distri, $version, $raw = undef) {
     for my $part ($distri, $version) {
         # handle case when multiple distri/version parameters have been specified
         $part = $part->{-in} if (ref $part eq 'HASH');
@@ -855,8 +833,7 @@ sub _add_distri_and_version_to_summary {
 }
 
 # A generic query page showing test results in a configurable matrix
-sub overview {
-    my ($self) = @_;
+sub overview ($self) {
     my ($search_args, $groups) = $self->compose_job_overview_search_args;
     my $config = OpenQA::App->singleton->config;
     my $validation = $self->validation;
@@ -937,9 +914,7 @@ sub latest ($self) {
 
 sub latest_badge ($self) { $self->_badge($self->_get_latest_job) }
 
-sub module_fails {
-    my ($self) = @_;
-
+sub module_fails ($self) {
     return $self->reply->not_found unless defined $self->param('testid') and defined $self->param('moduleid');
     my $module = $self->app->schema->resultset('JobModules')->search(
         {
@@ -1076,7 +1051,6 @@ sub _add_job ($dependency_data, $job, $as_child_of, $preferred_depth) {
 }
 
 sub dependencies ($self) {
-
     # build dependency graph starting from the current job
     my $job = $self->_get_current_job or return $self->reply->not_found;
     my (@nodes, @edges, %cluster);
@@ -1085,8 +1059,7 @@ sub dependencies ($self) {
     $self->render(json => {nodes => \@nodes, edges => \@edges, cluster => \%cluster});
 }
 
-sub investigate {
-    my ($self) = @_;
+sub investigate ($self) {
     return $self->reply->not_found unless my $job = $self->_get_current_job;
     my $git_limit = OpenQA::App->singleton->config->{global}->{job_investigate_git_log_limit} // 200;
     my $investigation = $job->investigate(git_limit => $git_limit);

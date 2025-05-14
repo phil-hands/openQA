@@ -2,7 +2,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::WebSockets::Controller::Worker;
-use Mojo::Base 'Mojolicious::Controller';
+use Mojo::Base 'Mojolicious::Controller', -signatures;
 
 use DBIx::Class::Timestamps 'now';
 use OpenQA::Schema;
@@ -10,16 +10,14 @@ use OpenQA::Log qw(log_debug log_error log_info log_warning log_trace);
 use OpenQA::Constants qw(WEBSOCKET_API_VERSION MIN_TIMER);
 use OpenQA::WebSockets::Model::Status;
 use OpenQA::Jobs::Constants;
-use OpenQA::Scheduler::Client;
 use DateTime;
 use Data::Dump 'pp';
-use Try::Tiny;
+use Feature::Compat::Try;
 use Mojo::Util 'dumper';
 
 use constant LOG_WORKER_STATUS_MESSAGES => $ENV{OPENQA_LOG_WORKER_STATUS_MESSAGES} // 0;
 
-sub ws {
-    my ($self) = @_;
+sub ws ($self) {
     my $status = $self->status;
 
     # add worker connection
@@ -34,8 +32,7 @@ sub ws {
     $self->tx->max_websocket_size(10485760);
 }
 
-sub _finish {
-    my ($self, $code, $reason) = @_;
+sub _finish ($self, $code, $reason) {
     return undef unless $self;
 
     my $worker = OpenQA::WebSockets::Model::Status->singleton->remove_worker_connection($self->tx);
@@ -51,9 +48,7 @@ sub _finish {
     #       is lost unexpectedly. It will be considered offline after the configured timeout expires.
 }
 
-sub _message {
-    my ($self, $json) = @_;
-
+sub _message ($self, $json) {
     my $app = $self->app;
     my $schema = $app->schema;
     my $tx = $self->tx;
@@ -109,10 +104,10 @@ sub _message {
                     $_->reschedule_state for @jobs;
                 });
         }
-        catch {
+        catch ($e) {
             # uncoverable statement
-            log_warning("Unable to re-schedule job(s) $job_ids_str rejected by worker $worker_id: $_");
-        };
+            log_warning("Unable to re-schedule job(s) $job_ids_str rejected by worker $worker_id: $e");
+        }
 
         # log that we 'saw' the worker
         $worker_db->seen;
@@ -161,77 +156,61 @@ sub _message {
         $worker_status->{last_seen} = $now;
 
         my $workers = $schema->resultset('Workers');
-        my $worker = $workers->find($worker_id);
+        return undef unless my $worker = $workers->find($worker_id);
 
         # log that we 'saw' the worker
-        if ($worker) {
-            try {
-                log_debug("Updating seen of worker $worker_id from worker_status ($current_worker_status)");
-                $worker->seen({error => $current_worker_error});
+        try {
+            log_debug("Updating seen of worker $worker_id from worker_status ($current_worker_status)");
+            $worker->seen({error => $current_worker_error});
 
-                # Tell the worker that we saw it (used for tests and debugging)
-                $tx->send({json => {type => 'info', seen => 1}});
-            }
-            catch {
-                log_error("Failed updating seen and error status of worker $worker_id: $_");    # uncoverable statement
-            };
+            # Tell the worker that we saw it (used for tests and debugging)
+            $tx->send({json => {type => 'info', seen => 1}});
+        }
+        catch ($e) {
+            log_error("Failed updating seen and error status of worker $worker_id: $e");    # uncoverable statement
         }
 
         # find the job currently associated with that worker and check whether the worker still
         # executes the job it is supposed to
-        my $current_job_id;
+        my @unfinished_jobs = $worker->unfinished_jobs;
+        my $current_job = $worker->job // $unfinished_jobs[0]
+          or return undef;
+        my $current_job_id = $current_job->id;
+        my $current_job_state = $current_job->state;
+
+        log_trace("Found job $current_job_id in DB from worker_status update sent by worker $worker_id");
+        log_trace("Received request has job id: $job_id") if defined $job_id;
+        my $registered_job_token = $worker->get_property('JOBTOKEN');
+        log_trace("Worker $worker_id for job $current_job_id has token $registered_job_token")
+          if defined $registered_job_token;
+        log_trace("Received request has token: $job_token") if defined $job_token;
+
+        # skip any further actions if worker just does the one job we expected it to do
+        return undef
+          if ( defined $job_id
+            && defined $job_token
+            && defined $registered_job_token
+            && $job_id eq $current_job_id
+            && (my $job_token_correct = $job_token eq $registered_job_token)
+            && OpenQA::Jobs::Constants::meta_state($current_job_state) eq OpenQA::Jobs::Constants::EXECUTION)
+          && (scalar @unfinished_jobs <= 1);
         try {
-            return undef unless $worker;
-
-            my $registered_job_token;
-            my $current_job_state;
-            my @unfinished_jobs = $worker->unfinished_jobs;
-            my $current_job = $worker->job // $unfinished_jobs[0];
-            if ($current_job) {
-                $current_job_id = $current_job->id;
-                $current_job_state = $current_job->state;
-            }
-
-            # log debugging info
-            log_trace("Found job $current_job_id in DB from worker_status update sent by worker $worker_id")
-              if defined $current_job_id;
-            log_trace("Received request has job id: $job_id")
-              if defined $job_id;
-            $registered_job_token = $worker->get_property('JOBTOKEN');
-            log_trace("Worker $worker_id for job $current_job_id has token $registered_job_token")
-              if defined $current_job_id && defined $registered_job_token;
-            log_trace("Received request has token: $job_token")
-              if defined $job_token;
-
-            # skip any further actions if worker just does the one job we expected it to do
-            return undef
-              if ( defined $job_id
-                && defined $current_job_id
-                && defined $job_token
-                && defined $registered_job_token
-                && $job_id eq $current_job_id
-                && (my $job_token_correct = $job_token eq $registered_job_token)
-                && OpenQA::Jobs::Constants::meta_state($current_job_state) eq OpenQA::Jobs::Constants::EXECUTION)
-              && (scalar @unfinished_jobs <= 1);
-
             # give worker a second chance to process the job assignment
             # possible situation on the worker: The worker might be sending a status update claiming it is
             # idle (or has doing that task piled up on the event loop). At the same time a job arrives. The
             # message regarding that job will be processed after sending the idle status. So let's give the
-            # worker another change to process the message about its assigned job.
-            return undef unless $worker_previously_idle;
-
-            log_debug("Rescheduling jobs assigned to worker $worker_id");
-            $worker->reschedule_assigned_jobs([$current_job, @unfinished_jobs]);
+            # worker another chance to process the message about its assigned job.
+            if ($worker_previously_idle) {
+                log_debug("Rescheduling jobs assigned to worker $worker_id");
+                $worker->reschedule_assigned_jobs([$current_job, @unfinished_jobs]);
+            }
         }
-        catch {
+        catch ($e) {
             # uncoverable statement
-            log_warning("Unable to verify whether worker $worker_id runs its job(s) as expected: $_");
-        };
-
+            log_warning("Unable to verify whether worker $worker_id runs its job(s) as expected: $e");
+        }
         # consider the worker idle unless it claims to be broken or work on a job
-        $worker_status->{idle_despite_job_assignment}
-          = !$worker_is_broken && !defined $job_id && defined $current_job_id;
+        $worker_status->{idle_despite_job_assignment} = !$worker_is_broken && !defined $job_id;
     }
     else {
         log_error(sprintf('Received unknown message type "%s" from worker %u', $message_type, $worker_status->{id}));

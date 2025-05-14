@@ -21,7 +21,7 @@ my $online_worker_id = 6;
 my $offline_worker_id = 8;
 
 my $test_case = OpenQA::Test::Case->new;
-my $schema_name = OpenQA::Test::Database->generate_schema_name;
+my $schema_name = OpenQA::Test::Database::generate_schema_name;
 my $schema
   = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '01-jobs.pl 02-workers.pl 03-users.pl');
 assume_all_assets_exist;
@@ -136,9 +136,9 @@ subtest 'worker overview' => sub {
     $driver->find_element("tr#worker_$broken_worker_id .help_popover")->click();
     is(
         $driver->find_element("tr#worker_$broken_worker_id .status")->get_text(),
-        'Broken', "worker $broken_worker_id is broken",
+        'Unavailable', "worker $broken_worker_id is broken and displayed as unavailable",
     );
-    like($driver->find_element('.popover')->get_text(), qr/Error\nout of order/, 'reason for brokenness shown');
+    like wait_for_element(selector => '.popover')->get_text, qr/Details\nout of order/, 'reason for brokenness shown';
 };
 
 # test delete offline worker function

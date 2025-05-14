@@ -12,6 +12,7 @@ use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants;
 use OpenQA::JobGroupDefaults;
 use OpenQA::Schema::Result::Jobs;
+use OpenQA::Needles;
 use File::Copy;
 require OpenQA::Test::Database;
 use OpenQA::Test::Utils qw(run_gru_job perform_minion_jobs);
@@ -37,6 +38,9 @@ use utf8;
 use Time::Seconds;
 
 plan skip_all => 'set HEAVY=1 to execute (takes longer)' unless $ENV{HEAVY};
+
+# Avoid using tester's ~/.gitconfig
+delete $ENV{HOME};
 
 # Avoid tampering with git checkout
 my $workdir = tempdir("$FindBin::Script-XXXX", TMPDIR => 1);
@@ -337,10 +341,10 @@ subtest 'assets associated with pending jobs are preserved' => sub {
         my ($removed_assets, $deleted_assets) = (mock_removed, mock_deleted);
         is_deeply($removed_assets, [$other_asset_name],
             "only other asset $other_asset_name has been removed with 99947 pending")
-          or diag explain $removed_assets;
+          or always_explain $removed_assets;
         is_deeply($deleted_assets, [$other_asset_name],
             "only other asset $other_asset_name has been deleted with 99947 pending")
-          or diag explain $deleted_assets;
+          or always_explain $deleted_assets;
     };
 
     reset_mocked_asset_deletions;
@@ -355,10 +359,10 @@ subtest 'assets associated with pending jobs are preserved' => sub {
         my ($removed_assets, $deleted_assets) = (mock_removed, mock_deleted);
         is_deeply($removed_assets, [$other_asset_name],
             "only other asset $other_asset_name has been removed with 99947 pending")
-          or diag explain $removed_assets;
+          or always_explain $removed_assets;
         is_deeply($deleted_assets, [$other_asset_name],
             "only other asset $other_asset_name has been deleted with 99947 pending")
-          or diag explain $deleted_assets;
+          or always_explain $deleted_assets;
         $another_associated_job->discard_changes;
         $another_associated_job->delete;
     };
@@ -373,12 +377,12 @@ subtest 'assets associated with pending jobs are preserved' => sub {
             [sort @$removed_assets],
             [$pending_asset_name, $other_asset_name],
             "asset $pending_asset_name has been removed with 99947 no longer pending"
-        ) or diag explain $removed_assets;
+        ) or always_explain $removed_assets;
         is_deeply(
             [sort @$deleted_assets],
             [$pending_asset_name, $other_asset_name],
             "asset $pending_asset_name has been deleted with 99947 no longer pending"
-        ) or diag explain $deleted_assets;
+        ) or always_explain $deleted_assets;
     # note: The main purpose of this subtest is to cross-check whether this test is actually working. If the asset would
       #       still not be cleaned up here that would mean the pending state makes no difference for this test and it is
         #       therefore meaningless.
@@ -404,10 +408,42 @@ subtest 'limit_results_and_logs gru task cleans up logs' => sub {
     my $log_file_for_groupless_job = create_temp_job_log_file($groupless_job->result_dir);
     my $no_group = $schema->resultset('JobGroups')->new({});
     my %expired_jobs = map { $_->id => 1 } @{$no_group->find_jobs_with_expired_logs};
-    is $expired_jobs{$groupless_job->id}, 1, 'groupless job considered expired' or diag explain \%expired_jobs;
+    is $expired_jobs{$groupless_job->id}, 1, 'groupless job considered expired' or always_explain \%expired_jobs;
     run_gru_job $t->app, 'limit_results_and_logs';
     ok !-e $log_file_for_job, 'log file for job in group got cleaned';
     ok !-e $log_file_for_groupless_job, 'log file for groupless job got cleaned';
+};
+
+subtest 'limit_temp_needle_refs task cleans up temp needle refs exceeding retention' => sub {
+    my $temp_dir = path(OpenQA::Needles::temp_dir);
+    is $temp_dir, 't/data/openqa/webui/cache/needle-refs', 'needle temp dir determined as expected';
+    $temp_dir->child($_)->make_path for qw(ref1 ref2);
+    my @old_needle_files = ("$temp_dir/ref1/needle_old.png", "$temp_dir/ref1/needle_old.json");
+    my @new_needle_files = ("$temp_dir/ref2/needle_new.png", "$temp_dir/ref2/needle_new.json");
+    my $now = time;
+    my $old_timestamp = $now - (2 * ONE_HOUR + 1);
+    my $new_timestamp = $now - ONE_MINUTE + 1;
+    foreach my $file (@old_needle_files) {
+        path($file)->touch;
+        utime $old_timestamp, $old_timestamp, $file;
+    }
+    foreach my $file (@new_needle_files) {
+        path($file)->touch;
+        utime $new_timestamp, $new_timestamp, $file;
+    }
+
+    # enqueue and run cleanup
+    my $minion = $t->app->minion;
+    my $id = $minion->enqueue('limit_temp_needle_refs');
+    ok defined $id, 'job enqueued';
+    perform_minion_jobs $minion;
+    my $job_info = $minion->job($id)->info;
+    subtest 'cleanup result' => sub {
+        is $job_info->{state}, 'finished', 'job finished';
+        ok !-e $_, "old file '$_' cleaned up" for @old_needle_files;
+        ok !-e "$temp_dir/ref1", 'empty directory removed';
+        ok -e $_, "new file '$_' preserved" for @new_needle_files;
+    } or diag explain $job_info;
 };
 
 subtest 'limit audit events' => sub {
@@ -444,10 +480,10 @@ subtest 'labeled jobs considered important' => sub {
         my ($mock, @retry) = Test::MockModule->new('OpenQA::Task::SignalGuard');
         $mock->redefine(retry => sub ($job, @args) { push @retry, [@args]; $mock->original('retry')->($job, @args) });
         run_gru_job($app, 'limit_results_and_logs');
-        is_deeply \@retry, [[0]], 'retry disabled by limit task' or diag explain \@retry;
+        is_deeply \@retry, [[0]], 'retry disabled by limit task' or always_explain \@retry;
         @retry = ();
         perform_minion_jobs($t->app->minion);
-        is_deeply \@retry, [[0]], 'retry disabled by archiving task' or diag explain \@retry;
+        is_deeply \@retry, [[0]], 'retry disabled by archiving task' or always_explain \@retry;
     };
     my $minion_jobs = $minion->jobs({tasks => ['archive_job_results']});
     if (is $minion_jobs->total, 1, 'archiving job enqueued') {
@@ -455,7 +491,7 @@ subtest 'labeled jobs considered important' => sub {
         my $expected_archive_path
           = 't/data/openqa/archive/testresults/00099/00099938-opensuse-Factory-DVD-x86_64-Build0048-doc';
         is_deeply $archiving_job->{args}, [99938], 'archiving job is for right openQA job'
-          or diag explain $archiving_job->{args};
+          or always_explain $archiving_job->{args};
         is $archiving_job->{state}, 'finished', 'archiving job succeeded';
         is $archiving_job->{notes}->{archived_path}, $expected_archive_path, 'archive path noted';
         $job->discard_changes;
@@ -530,7 +566,7 @@ subtest 'Gru tasks TTL' => sub {
 
     # Depending on logging options, gru task output can differ
     like $result, qr/Removing asset|Job successfully executed/i, 'job has not expired'
-      or diag explain $result;
+      or always_explain $result;
 
     my @ids;
     push @ids, $t->app->gru->enqueue(limit_assets => [] => {priority => 10, ttl => 0})->{minion_id};
@@ -565,15 +601,36 @@ subtest 'Gru tasks retry' => sub {
 };
 
 subtest 'waiting gru job' => sub {
+    $t->app->config->{misc_limits}->{wait_for_grutask_retries} = 4;
     my $enq = $app->gru->enqueue(wait_for_grutask => {});
+    my $id = $enq->{minion_id};
     # Simulate that the gru task is not yet visible for the minion server
     $schema->resultset('GruTasks')->find($enq->{gru_id})->delete;
     my $worker = $app->minion->worker->register;
-    my $job = $worker->dequeue(0, {id => $enq->{minion_id}});
-    $job->execute;
+    perform_minion_jobs($t->app->minion);
+    my $job = $t->app->minion->job($id);
     is $job->info->{retries}, 1, 'job retried because there is no GruTasks entry';
     is $job->info->{state}, 'inactive', 'state inactive because there is no GruTasks entry';
     is $job->info->{finished}, undef, 'finished is not defined';
+
+    subtest 'Giving up on missing GruTask' => sub {
+        # Calling retry() with delay 0 explicitly again to run the next job immediately
+        $t->app->minion->job($id)->retry({delay => 0});    # retries=2
+        combined_like { perform_minion_jobs($t->app->minion) } qr{Could not find GruTask.*after 2 retries, delaying 8s};
+        is $job->info->{retries}, 3, 'job retried because there is no GruTasks entry';
+
+        $t->app->minion->job($id)->retry({delay => 0});    # retries=4
+        combined_like { perform_minion_jobs($t->app->minion) }
+        qr{Could not find GruTask.*after 4 retries, delaying 32s};
+        is $job->info->{retries}, 5, 'job retried because there is no GruTasks entry';
+
+        $t->app->minion->job($id)->retry({delay => 0});    # retries=6
+        perform_minion_jobs($t->app->minion);
+        is $job->info->{state}, 'finished', 'job finished successfully';
+        like $job->info->{notes}->{stop_reason}, qr{Could not find GruTask '\d+' after 6 retries.*},
+          'Message is logged as job result';
+        is $job->info->{retries}, 6, 'job retried because there is no GruTasks entry';
+    };
 };
 
 # prevent writing to a log file to enable use of combined_like in the following tests
@@ -765,7 +822,7 @@ subtest 'finalize job results' => sub {
     subtest 'successful run triggered via $job->done' => sub {
         my $a_txt = path($job->result_dir, 'a-0.txt')->spew('Foo');
         my $b_txt = path('t/data/14-module-b.txt')->copy_to($job->result_dir . '/b-0.txt');
-        $job->done;
+        combined_like { $job->done; } qr/_carry_over_candidate/, 'no unexpected log output from resultset';
         $_->discard_changes for ($job, $child_job);
         is($job->result, FAILED, 'job result is failed');
         is($child_job->state, CANCELLED, 'child job cancelled');
@@ -802,11 +859,16 @@ subtest 'finalize job results' => sub {
             my $info = $minion_jobs->next;
             is($info->{state}, 'failed', 'the minion job failed');
             like($info->{notes}->{failed_modules}->{a}, qr/malformed JSON string/, 'the minion job failed')
-              or diag explain $info->{notes};
+              or always_explain $info->{notes};
         }
     };
 };
 
+subtest 'marking Minion jobs as obsolete' => sub {
+    my $job_id = $app->minion->jobs->next->{id};
+    $app->gru->obsolete_minion_jobs([$job_id]);
+    ok $app->minion->job($job_id)->info->{notes}->{obsolete}, "job $job_id marked as obsolete";
+};
 
 done_testing();
 

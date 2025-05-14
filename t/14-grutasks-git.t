@@ -8,6 +8,7 @@ use Mojo::Base -signatures;
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use OpenQA::Task::Git::Clone;
+use OpenQA::Git::ServerAvailability qw(report_server_unavailable report_server_available SKIP FAIL);
 require OpenQA::Test::Database;
 use OpenQA::Test::Utils qw(run_gru_job perform_minion_jobs);
 use OpenQA::Test::TimeLimit '20';
@@ -20,6 +21,9 @@ use Mojo::File qw(path tempdir);
 use Time::Seconds;
 use File::Copy::Recursive qw(dircopy);
 
+# Avoid using tester's ~/.gitconfig
+delete $ENV{HOME};
+
 # Avoid tampering with git checkout
 my $workdir = tempdir("$FindBin::Script-XXXX", TMPDIR => 1);
 my $guard = scope_guard sub { chdir $FindBin::Bin };
@@ -27,8 +31,9 @@ chdir $workdir;
 path('t/data/openqa/db')->make_path;
 my $git_clones = "$workdir/git-clones";
 mkdir $git_clones;
-mkdir "$git_clones/$_"
-  for qw(default branch dirty-error dirty-status nodefault wrong-url sha1 sha2 sha-error sha-branchname);
+path("$git_clones/$_")->make_path
+  for
+  qw(default branch dirty-error dirty-status nodefault wrong-url sha1 sha2 sha-error sha-branchname opensuse opensuse/needles);
 mkdir 't';
 dircopy "$FindBin::Bin/$_", "$workdir/t/$_" or BAIL_OUT($!) for qw(data);
 
@@ -57,10 +62,10 @@ subtest 'git clone' => sub {
         "$git_clones/sha-branchname" => 'http://localhost/present.git#a123',
     };
     $openqa_git->redefine(
-        run_cmd_with_log_return_error => sub ($cmd) {
+        run_cmd_with_log_return_error => sub ($cmd, %args) {
             push @mocked_git_calls, join(' ', map { tr/ // ? "'$_'" : $_ } @$cmd) =~ s/\Q$git_clones//r;
             my $stdout = '';
-            splice @$cmd, 0, 2 if $cmd->[0] eq 'env';
+            splice @$cmd, 0, 4 if $cmd->[0] eq 'env';
             my $path = '';
             (undef, $path) = splice @$cmd, 1, 2 if $cmd->[1] eq '-C';
             my $action = $cmd->[1];
@@ -85,8 +90,7 @@ subtest 'git clone' => sub {
             }
             elsif ($action eq 'diff-index') {
                 $return_code = 1 if $path =~ m/dirty-status/;
-                $return_code = 2
-                  if $path =~ m/dirty-error/;
+                $return_code = 2 if $path =~ m/dirty-error/;
             }
             elsif ($action eq 'rev-parse') {
                 if ($path =~ m/sha1/) {
@@ -97,8 +101,8 @@ subtest 'git clone' => sub {
                     $return_code = 0;
                     $stdout = 'abcdef123456789';
                 }
-                $return_code = 128 if $path =~ m/sha2/;
-                $return_code = 1 if $path =~ m/sha-error/;
+                $return_code = 1 if $path =~ m/sha2/;
+                $return_code = 2 if $path =~ m/sha-error/;
             }
             return {
                 status => $return_code == 0,
@@ -108,7 +112,9 @@ subtest 'git clone' => sub {
             };
         });
     my @gru_args = ($t->app, 'git_clone', $clone_dirs, {priority => 10});
-    my $res = run_gru_job(@gru_args);
+    my $res;
+    stderr_like { $res = run_gru_job(@gru_args) } qr{Git command failed.*verify};
+
     is $res->{result}, 'Job successfully executed', 'minion job result indicates success';
     #<<< no perltidy
     my $expected_calls = [
@@ -121,20 +127,20 @@ subtest 'git clone' => sub {
         ['rev-parse'      => 'git -C /sha2 rev-parse --verify -q def'],
         ['check dirty'    => 'git -C /sha2 diff-index HEAD --exit-code'],
         ['current branch' => 'git -C /sha2 branch --show-current'],
-        ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git -C /sha2 fetch origin def"],
+        ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git -C /sha2 fetch origin def"],
 
         # /branch
         ['get-url'        => 'git -C /branch/ remote get-url origin'],
         ['check dirty'    => 'git -C /branch/ diff-index HEAD --exit-code'],
         ['current branch' => 'git -C /branch/ branch --show-current'],
-        ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git -C /branch/ fetch origin foobranch"],
+        ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git -C /branch/ fetch origin foobranch"],
 
         # /default/
         ['get-url'        => 'git -C /default/ remote get-url origin'],
         ['check dirty'    => 'git -C /default/ diff-index HEAD --exit-code'],
-        ['default remote' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git ls-remote --symref http://localhost/foo.git HEAD"],
+        ['default remote' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git ls-remote --symref http://localhost/foo.git HEAD"],
         ['current branch' => 'git -C /default/ branch --show-current'],
-        ['fetch default'  => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git -C /default/ fetch origin master"],
+        ['fetch default'  => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git -C /default/ fetch origin master"],
         ['reset'          => 'git -C /default/ reset --hard origin/master'],
 
         # /sha-branchname
@@ -142,10 +148,10 @@ subtest 'git clone' => sub {
         ['rev-parse'      => 'git -C /sha-branchname rev-parse --verify -q a123'],
         ['check dirty'    => 'git -C /sha-branchname diff-index HEAD --exit-code'],
         ['current branch' => 'git -C /sha-branchname branch --show-current'],
-        ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git -C /sha-branchname fetch origin a123"],
+        ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git -C /sha-branchname fetch origin a123"],
 
         # /this_directory_does_not_exist/
-        ['clone' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git clone http://localhost/bar.git /this_directory_does_not_exist/"],
+        ['clone' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git clone http://localhost/bar.git /this_directory_does_not_exist/"],
     ];
     #>>> no perltidy
     for my $i (0 .. $#$expected_calls) {
@@ -185,7 +191,7 @@ subtest 'git clone' => sub {
         stderr_like { $res = run_gru_job(@gru_args) }
         qr(git diff-index HEAD), 'error about diff on stderr';
         is $res->{state}, 'failed', 'minion job failed';
-        like $res->{result}, qr/NOT updating dirty git checkout/, 'error message';
+        like $res->{result}, qr/NOT updating dirty Git checkout.*can disable.*details/s, 'error message';
     };
 
     subtest 'error testing dirty git checkout' => sub {
@@ -199,9 +205,9 @@ subtest 'git clone' => sub {
     subtest 'error testing local sha' => sub {
         %$clone_dirs = ("$git_clones/sha-error/" => 'http://localhost/foo.git#abc');
         stderr_like { $res = run_gru_job(@gru_args) }
-        qr(Unexpected exit code 1), 'error message on stderr';
+        qr(Unexpected exit code 2), 'error message on stderr';
         is $res->{state}, 'failed', 'minion job failed';
-        like $res->{result}, qr/Internal Git error: Unexpected exit code 1/, 'error message';
+        like $res->{result}, qr/Internal Git error: Unexpected exit code 2/, 'error message';
     };
 
     subtest 'error because of different url' => sub {
@@ -222,17 +228,17 @@ subtest 'git clone' => sub {
             # /opensuse
             ['get-url'        => 'git -C /opensuse remote get-url origin'],
             ['check dirty'    => 'git -C /opensuse diff-index HEAD --exit-code'],
-            ['default remote' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git ls-remote --symref http://osado HEAD"],
+            ['default remote' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git ls-remote --symref http://osado HEAD"],
             ['current branch' => 'git -C /opensuse branch --show-current'],
-            ['fetch default ' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git -C /opensuse fetch origin master"],
+            ['fetch default ' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git -C /opensuse fetch origin master"],
             ['reset'          => 'git -C /opensuse reset --hard origin/master'],
 
             # /opensuse/needles
             ['get-url'        => 'git -C /opensuse/needles remote get-url origin'],
             ['check dirty'    => 'git -C /opensuse/needles diff-index HEAD --exit-code'],
-            ['default remote' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git ls-remote --symref http://osado HEAD"],
+            ['default remote' => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git ls-remote --symref http://osado HEAD"],
             ['current branch' => 'git -C /opensuse/needles branch --show-current'],
-            ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' git -C /opensuse/needles fetch origin master"],
+            ['fetch branch'   => "env 'GIT_SSH_COMMAND=ssh -oBatchMode=yes' GIT_ASKPASS= GIT_TERMINAL_PROMPT=false git -C /opensuse/needles fetch origin master"],
             ['reset'          => 'git -C /opensuse/needles reset --hard origin/master'],
         ];
         #>>> no perltidy
@@ -262,6 +268,8 @@ subtest 'git clone' => sub {
 subtest 'git_update_all' => sub {
     my $clone_mock = Test::MockModule->new('OpenQA::Task::Git::Clone');
     $clone_mock->redefine(_git_clone => sub (@args) { die 'fake disconnect' });
+    my $openqa_git = Test::MockModule->new('OpenQA::Git');
+    $openqa_git->redefine(get_origin_url => 'foo');
 
     my $git_config = $t->app->config->{'scm git'};
     $git_config->{git_auto_update} = 'yes';
@@ -399,21 +407,41 @@ subtest 'delete_needles' => sub {
     like $error->{message}, qr{Unable to find needle.*99}, 'expected error for not existing needle';
 
     $t->app->config->{global}->{scm} = 'git';
+    $t->app->config->{'scm git'}->{do_push} = 'yes';
     my $openqa_git = Test::MockModule->new('OpenQA::Git');
     my @cmds;
     $openqa_git->redefine(
-        run_cmd_with_log_return_error => sub ($cmd) {
+        run_cmd_with_log_return_error => sub ($cmd, %args) {
             push @cmds, "@$cmd";
+            if (grep m/push/, @$cmd) {
+                return {
+                    status => 0,
+                    return_code => 128,
+                    stderr => q{fatal: Authentication failed for 'https://github.com/lala},
+                    stdout => ''
+                };
+            }
             return {status => 1};
         });
     $args{needle_ids} = [4];
+    stderr_like { $res = run_gru_job(@gru_args) } qr{Git command failed: .*push}, 'Got error on stderr';
+    is $res->{state}, 'finished', 'git job finished';
+    like $res->{result}->{errors}->[0]->{message},
+      qr{Unable to push Git commit. See .*_setting_up_git_support on how to setup}, 'Got error for push';
+
+    $openqa_git->redefine(
+        run_cmd_with_log_return_error => sub ($cmd, %args) {
+            push @cmds, "@$cmd";
+            return {status => 1};
+        });
     $res = run_gru_job(@gru_args);
     is $res->{state}, 'finished', 'git job finished';
     like $cmds[0], qr{git.*rm.*test-nestedneedle-1.json}, 'git rm was executed';
     like $cmds[1], qr{git.*commit.*Remove.*test-nestedneedle-1.json}, 'git commit was executed';
+    like $cmds[2], qr{git.*push}, 'git push was executed';
 
     $openqa_git->redefine(
-        run_cmd_with_log_return_error => sub ($cmd) {
+        run_cmd_with_log_return_error => sub ($cmd, %args) {
             push @cmds, "@$cmd";
             return {status => 0, stderr => 'lala', stdout => ''};
         });
@@ -424,11 +452,103 @@ subtest 'delete_needles' => sub {
     like $error->{message}, qr{Unable to rm via Git}, 'expected error from git';
 
     subtest 'minion guard' => sub {
-        my $guard = $t->app->minion->guard("git_clone_t/data/openqa/share/tests/fedora/needles_task", ONE_HOUR);
+        my $guard = $t->app->minion->guard('git_clone_t/data/openqa/share/tests/fedora/needles_task', ONE_HOUR);
         $res = run_gru_job(@gru_args);
         is $res->{state}, 'finished', 'job finished';
         $error = $res->{result}->{errors}->[0];
         like $error->{message}, qr{Another git task for.*fedora.*is ongoing}, 'expected error message';
+    };
+};
+
+subtest ServerAvailability => sub {
+    my $tmpdir = tempdir();
+    local $ENV{OPENQA_GIT_SERVER_OUTAGE_FILE} = "$tmpdir/foo/mock";
+
+    subtest 'no flag file => skip' => sub {
+        my $outcome = report_server_unavailable($t->app, 'gitlab');
+        is $outcome, 'SKIP', 'Skips when flag file for gitlab is absent';
+    };
+
+    subtest 'file present but younger than 1800 => skip' => sub {
+        my $mock_file = $tmpdir->child('foo/mock.gitlab.flag')->touch;
+        my $outcome = report_server_unavailable($t->app, 'gitlab');
+        is $outcome, 'SKIP', 'Skips the job for an mtime < 1800';
+    };
+
+    subtest 'file present and older => fail' => sub {
+        my $mock_file = $tmpdir->child('foo/mock.gitlab.flag')->touch;
+        my $old_time = time - 2000;
+        utime($old_time, $old_time, $mock_file)
+          or die "Couldn't change mtime on file: $mock_file - $!";
+        my $outcome = report_server_unavailable($t->app, 'gitlab');
+        is $outcome, 'FAIL', 'Fails the job when mtime >= 1800';
+    };
+
+    subtest 'report_server_available removes existing flag file' => sub {
+        my $mock_file = $tmpdir->child('foo/mock.gitlab.flag')->touch;
+        ok -f $mock_file, 'mock.gitlab.flag exists initially';
+        report_server_available($t->app, 'gitlab');
+        ok !-f $mock_file, 'gitlab flag file was removed';
+    };
+
+    subtest 'multiple servers do not conflict' => sub {
+        my $outcome_gitlab = report_server_unavailable($t->app, 'gitlab');
+        is $outcome_gitlab, 'SKIP', 'No gitlab flag => skip';
+        my $gitlab_file = "$tmpdir/foo/mock.gitlab.flag";
+        ok -f $gitlab_file, 'Created mock.gitlab.flag';
+        my $outcome_github = report_server_unavailable($t->app, 'github');
+        is $outcome_github, 'SKIP', 'No github flag => skip';
+        my $github_file = "$tmpdir/foo/mock.github.flag";
+        ok -f $github_file, 'Created mock.github.flag';
+
+        my $old_time = time - 2000;
+        utime($old_time, $old_time, $github_file);
+        # Re-check
+        $outcome_gitlab = report_server_unavailable($t->app, 'gitlab');
+        $outcome_github = report_server_unavailable($t->app, 'github');
+        is $outcome_gitlab, 'SKIP', 'GitLab file still fresh => skip';
+        is $outcome_github, 'FAIL', 'GitHub file older => fail';
+    };
+
+    subtest Clone => sub {
+        my $clone_mock = Test::MockModule->new('OpenQA::Task::Git::Clone');
+        $clone_mock->redefine(_git_clone => sub { die "Internal API unreachable\n" });
+        subtest 'Internal API unreachable => skip' => sub {
+            my @gru_args = (
+                $t->app,
+                'git_clone',
+                {
+                    '/my/mock/path' => 'git@gitlab.suse.de:qa/foo',
+                });
+            my $res;
+            combined_like {
+                $res = run_gru_job(@gru_args);
+            }
+            qr/Git server outage likely, skipping clone job/i,
+              'Minion clone job skipped due to short Git server outage';
+            is $res->{state}, 'finished', 'Job ended in "finished" state';
+            is $res->{result}, 'Job successfully executed', 'Job result indicates success (skip)';
+        };
+
+        subtest 'Internal API unreachable => fail' => sub {
+            $tmpdir->child('foo/mock.gitlab.suse.de.flag')->touch;
+            my $old_time = time - 2000;    # "older" than 1800s
+            utime($old_time, $old_time, "$tmpdir/foo/mock.gitlab.suse.de.flag");
+            my @gru_args = (
+                $t->app,
+                'git_clone',
+                {
+                    '/my/other/mock/path' => 'https://gitlab.suse.de/qa/foo',
+                });
+            my $res;
+            combined_like {
+                $res = run_gru_job(@gru_args);
+            }
+            qr/Prolonged Git server outage, failing the job/i,
+              'Minion clone job failed due to prolonged Git server outage';
+            is $res->{state}, 'failed', 'Job ended in "failed" state';
+            like $res->{result}, qr/Internal API unreachable/, 'Job result includes original error message';
+        };
     };
 };
 

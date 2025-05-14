@@ -37,7 +37,7 @@ while true; do
     esac
 done
 
-sed -i -e 's/^.*httpsonly.*$/httpsonly = 0/g' /etc/openqa/openqa.ini
+echo -e "[openid]\nhttpsonly = 0" > /etc/openqa/openqa.ini.d/01-enable-http-auth.ini
 
 if [[ $web_proxy == "nginx" ]]; then
     echo "Setting up nginx"
@@ -57,4 +57,9 @@ elif [[ $web_proxy == "apache" || $web_proxy == "apache2" ]]; then
 else
     echo "No supported proxy: $web_proxy"
     exit 1
+fi
+
+if which semanage &> /dev/null; then
+    echo "Setting SELinux boolean httpd_can_network_connect to 1 allowing web proxy to connect to openQA daemon"
+    semanage boolean -m -1 httpd_can_network_connect
 fi

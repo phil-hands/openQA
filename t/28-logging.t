@@ -127,15 +127,10 @@ subtest 'log fatal to stderr' => sub {
     setup_log($app);
     OpenQA::App->set_singleton(undef);    # To make sure we are not setting it in other tests
     my $output = stderr_from {
-        eval { log_fatal('fatal message') }
+        throws_ok { log_fatal('fatal message') }
+        qr/fatal message.*t\/28-logging\.t/, 'Fatal raised exception';
     };
-    my $eval_error = $@;
-    my $exception_raised = 0;
-    $exception_raised++ if $eval_error;
-    is($exception_raised, 1, 'Fatal raised exception');
-    like($output, qr/\[FATAL\] fatal message/, 'OK fatal');
-    like($eval_error, qr{fatal message.*t/28-logging.t});
-
+    like $output, qr/\[FATAL\] fatal message/, 'OK fatal';
 };
 
 subtest 'Checking log level' => sub {
@@ -148,7 +143,6 @@ subtest 'Checking log level' => sub {
 
     my @loglevels = qw(trace debug info warn error fatal);
     my @channels = qw(channel1 channel2 channel3);
-    my $deathcounter = 0;
     my $counterFile = @loglevels;
     my $counterChannel = @loglevels;
     for my $level (@loglevels) {
@@ -167,11 +161,7 @@ subtest 'Checking log level' => sub {
         log_info('info message');
         log_warning('warn message');
         log_error('error message');
-
-        eval { log_fatal('fatal message'); };
-
-        $deathcounter++ if $@;
-
+        throws_ok { log_fatal('fatal message') } qr/fatal message/, 'exception raised';
         my %matches = map { $_ => 1 } (Mojo::File->new($output_logfile)->slurp =~ m/$reFile/gm);
         is(keys(%matches), $counterFile, "Worker log level $level entry");
 
@@ -184,10 +174,7 @@ subtest 'Checking log level' => sub {
             log_info("info message", channels => $channel);
             log_warning("warn message", channels => $channel);
             log_error("error message", channels => $channel);
-
-            eval { log_fatal('fatal message', channels => $channel); };
-            $deathcounter++ if $@;
-
+            throws_ok { log_fatal('fatal message', channels => $channel); } qr/fatal message/, 'exception raised';
             %matches = map { $_ => 1 } (Mojo::File->new($logging_test_file)->slurp =~ m/$reChannel/gm);
             is(keys(%matches), $counterChannel, "Worker channel log level $level entry");
             remove_log_channel($channel);
@@ -200,11 +187,7 @@ subtest 'Checking log level' => sub {
         log_info("info message", channels => 'no_channel');
         log_warning("warn message", channels => 'no_channel');
         log_error("error", channels => 'no_channel');
-
-        eval { log_fatal('fatal message', channels => 'no_channel'); };
-
-        $deathcounter++ if $@;
-
+        throws_ok { log_fatal('fatal message', channels => 'no_channel') } qr/fatal message/, 'exception raised';
         # print Mojo::File->new($output_logfile)->slurp;
 
         %matches = map { $_ => ($matches{$_} // 0) + 1 } (Mojo::File->new($output_logfile)->slurp =~ m/$reFile/gm);
@@ -214,7 +197,6 @@ subtest 'Checking log level' => sub {
 
         truncate $output_logfile, 0;
     }
-    is($deathcounter, (@loglevels * 2 + @channels * @loglevels), "Worker dies when logs fatal");
 };
 
 subtest 'Logging to right place' => sub {
@@ -302,7 +284,8 @@ subtest 'Logs to multiple channels' => sub {
             log_warning("warn message", channels => $channel_tupple, standard => 1);
             log_error("error message", channels => $channel_tupple, standard => 1);
 
-            eval { log_fatal('fatal message', channels => $channel_tupple, standard => 1); };
+            throws_ok { log_fatal('fatal message', channels => $channel_tupple, standard => 1) } qr/fatal message/,
+              'exception raised';
 
             my %matches = map { $_ => 1 } (Mojo::File->new($logging_test_file1)->slurp =~ m/$reChannel/gm);
             is(keys(%matches), $counterChannel, "Worker multiple channel $channel_tupple->[0] log level $level entry");
@@ -350,7 +333,8 @@ subtest 'Logs to bogus channels' => sub {
             log_warning("warn message", channels => ['test', 'test1']);
             log_error("error message", channels => ['test', 'test1']);
 
-            eval { log_fatal('fatal message', channels => ['test', 'test1']); };
+            throws_ok { log_fatal('fatal message', channels => ['test', 'test1']) } qr/fatal message/,
+              'exception raised';
 
             my %matches = map { $_ => 1 } (Mojo::File->new($logging_test_file1)->slurp =~ m/$reChannel/gm);
             is(keys(%matches), 0, "Worker multiple channel $channel_tupple->[0] log level $level entry");
@@ -400,7 +384,7 @@ subtest 'Logs to default channels' => sub {
         log_warning("warn message");
         log_error("error message");
 
-        eval { log_fatal('fatal message'); };
+        throws_ok { log_fatal('fatal message') } qr/fatal message/, 'exception raised';
 
         my %matches = map { $_ => 1 } (Mojo::File->new($logging_test_file1)->slurp =~ m/$reChannel/gm);
         is(keys(%matches), $counterChannel, "Worker default channel 1 log level $level entry");
@@ -424,7 +408,7 @@ subtest 'Logs to default channels' => sub {
         log_warning("warn message");
         log_error("error message");
 
-        eval { log_fatal('fatal message'); };
+        throws_ok { log_fatal('fatal message') } qr/fatal message/, 'exception raised';
 
         %matches = map { $_ => 1 } (Mojo::File->new($logging_test_file1)->slurp =~ m/$reChannel/gm);
         is(keys(%matches), $counterChannel, "Worker default channel 1 log level $level entry");
@@ -446,7 +430,7 @@ subtest 'Logs to default channels' => sub {
         log_warning("warn message");
         log_error("error message");
 
-        eval { log_fatal('fatal message'); };
+        throws_ok { log_fatal('fatal message') } qr/fatal message/, 'exception raised';
 
         %matches = map { $_ => 1 } (Mojo::File->new($logging_test_file1)->slurp =~ m/$reChannel/gm);
         is(keys(%matches), 0, "Worker default channel 1 log level $level entry");
@@ -468,7 +452,7 @@ subtest 'Logs to default channels' => sub {
         log_warning("warn message");
         log_error("error message");
 
-        eval { log_fatal('fatal message'); };
+        throws_ok { log_fatal('fatal message') } qr/fatal message/, 'exception raised';
 
         %matches = map { $_ => 1 } (Mojo::File->new($logging_test_file1)->slurp =~ m/$reChannel/gm);
         is(keys(%matches), 0, "Worker default channel 1 log level $level entry");

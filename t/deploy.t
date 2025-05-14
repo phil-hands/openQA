@@ -10,6 +10,7 @@ use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 
 use Test::Warnings ':report_warnings';
 use Test::Mojo;
+use Test::Output qw(stderr_like);
 use Mojo::File 'tempdir';
 use DBIx::Class::DeploymentHandler;
 use SQL::Translator;
@@ -18,7 +19,6 @@ use OpenQA::Test::TimeLimit '20';
 use OpenQA::Test::Case;
 use Mojo::File 'path';
 use List::Util 'min';
-use Try::Tiny;
 
 plan skip_all => 'set TEST_PG to e.g. "DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
 
@@ -35,7 +35,7 @@ sub ensure_schema_is_created_and_empty {
     $dbh->do("create schema deploy");
     $dbh->do("SET search_path TO deploy");
 }
-my $schema = OpenQA::Schema::connect_db(mode => 'test', deploy => 0);
+my $schema = OpenQA::Schema::connect_db(mode => 'test', deploy => 0, from_script => 1);
 ensure_schema_is_created_and_empty $schema;
 
 my $dh = DBIx::Class::DeploymentHandler->new(
@@ -45,11 +45,8 @@ my $dh = DBIx::Class::DeploymentHandler->new(
         databases => 'PostgreSQL',
         force_overwrite => 0,
     });
-my $deployed_version;
-try {
-    $deployed_version = $dh->version_storage->database_version;
-};
-ok(!$deployed_version, 'DB not deployed by plain schema connection with deploy => 0');
+throws_ok { $dh->version_storage->database_version } 'DBIx::Class::Exception',
+  'DB not deployed by plain schema connection with deploy => 0';
 
 my $ret = $schema->deploy;
 ok($dh->version_storage->database_version, 'DB deployed');
@@ -57,7 +54,7 @@ is($dh->version_storage->database_version, $dh->schema_version, 'Schema at corre
 is($ret, 2, 'Expected return value (2) for a deployment');
 
 OpenQA::Schema::disconnect_db;
-$schema = OpenQA::Schema::connect_db(mode => 'test', deploy => 0);
+$schema = OpenQA::Schema::connect_db(mode => 'test', deploy => 0, from_script => 1);
 ensure_schema_is_created_and_empty $schema;
 
 # redeploy DB to the oldest still supported version and check if deployment upgrades the DB
@@ -74,7 +71,8 @@ $schema->create_system_user;
 
 ok($dh->version_storage->database_version, 'DB deployed');
 is($dh->version_storage->database_version, $oldest_still_supported_schema_version, 'Schema at correct, old, version');
-$ret = $schema->deploy;
+stderr_like { $ret = $schema->deploy }
+qr{Job IDs will be converted to bigint.*Worker database IDs.*Further database IDs}s, 'Expected warnings are logged';
 
 # insert default fixtures so this test is at least a little bit closer to migrations in production
 OpenQA::Test::Database->new->insert_fixtures($schema);

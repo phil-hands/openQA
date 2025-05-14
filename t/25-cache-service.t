@@ -89,7 +89,7 @@ sub test_default_usage ($id, $asset) {
         wait_for_or_bail_out { $cache_client->status($asset_request)->is_processed } 'asset';
     }
     ok($cache_client->asset_exists('localhost', $asset), "Asset $asset downloaded");
-    ok($asset_request->minion_id, "Minion job id recorded in the request object") or die diag explain $asset_request;
+    ok($asset_request->minion_id, "Minion job id recorded in the request object") or die always_explain $asset_request;
 }
 
 sub test_sync ($run) {
@@ -151,7 +151,7 @@ sub test_download ($id, $asset) {
     ok !$status->data->{has_download_error}, 'no download error occurred';
 
     ok($cache_client->asset_exists('localhost', $asset), "Asset downloaded id $id, asset $asset");
-    ok($asset_request->minion_id, "Minion job id recorded in the request object") or die diag explain $asset_request;
+    ok($asset_request->minion_id, "Minion job id recorded in the request object") or die always_explain $asset_request;
 }
 
 sub perform_job_in_foreground ($job) {
@@ -214,11 +214,9 @@ subtest 'Cache Requests' => sub {
     is_deeply $asset_request->to_array, [qw(922756 hdd test open.qa)], 'asset request array';
 
     my $base = OpenQA::CacheService::Request->new;
-    local $@;
-    eval { $base->lock };
-    like $@, qr/lock\(\) not implemented in OpenQA::CacheService::Request/, 'lock() not implemented in base request';
-    eval { $base->to_array };
-    like $@, qr/to_array\(\) not implemented in OpenQA::CacheService::Request/,
+    throws_ok { $base->lock } qr/lock\(\) not implemented in OpenQA::CacheService::Request/,
+      'lock() not implemented in base request';
+    throws_ok { $base->to_array } qr/to_array\(\) not implemented in OpenQA::CacheService::Request/,
       'to_array() not implemented in base request';
 };
 
@@ -228,7 +226,7 @@ subtest 'Invalid requests' => sub {
     my $url = $cache_client->url('/status/12345');
     my $invalid_request = $cache_client->ua->get($url);
     my $json = $invalid_request->result->json;
-    is_deeply($json, {error => 'Specified job ID is invalid'}, 'invalid job ID') or diag explain $json;
+    is_deeply($json, {error => 'Specified job ID is invalid'}, 'invalid job ID') or always_explain $json;
 
     $url = $cache_client->url('/status/abc');
     $invalid_request = $cache_client->ua->get($url);
@@ -237,17 +235,17 @@ subtest 'Invalid requests' => sub {
     $url = $cache_client->url('/enqueue');
     $invalid_request = $cache_client->ua->post($url => json => {args => []});
     $json = $invalid_request->result->json;
-    is_deeply($json, {error => 'No task defined'}, 'invalid task') or diag explain $json;
+    is_deeply($json, {error => 'No task defined'}, 'invalid task') or always_explain $json;
 
     $url = $cache_client->url('/enqueue');
     $invalid_request = $cache_client->ua->post($url => json => {task => 'cache_asset'});
     $json = $invalid_request->result->json;
-    is_deeply($json, {error => 'No arguments defined'}, 'invalid args') or diag explain $json;
+    is_deeply($json, {error => 'No arguments defined'}, 'invalid args') or always_explain $json;
 
     $url = $cache_client->url('/enqueue');
     $invalid_request = $cache_client->ua->post($url => json => {task => 'cache_asset', args => []});
     $json = $invalid_request->result->json;
-    is_deeply($json, {error => 'No lock defined'}, 'invalid lock') or diag explain $json;
+    is_deeply($json, {error => 'No lock defined'}, 'invalid lock') or always_explain $json;
 };
 
 subtest 'Asset exists' => sub {
@@ -257,7 +255,7 @@ subtest 'Asset exists' => sub {
     ok($cache_client->asset_exists('localhost', 'foobar'), 'Asset exists');
     unlink path($cachedir, 'localhost')->child('foobar')->to_string;
     ok(!$cache_client->asset_exists('localhost', 'foobar'), 'Asset absent')
-      or die diag explain path($cachedir, 'localhost')->list_tree;
+      or die always_explain path($cachedir, 'localhost')->list_tree;
 
 };
 
@@ -348,7 +346,8 @@ subtest 'Race for same asset' => sub {
     is $q->done->size, $tot_proc, 'Queue consumed ' . $tot_proc . ' processes';
     $q->done->each(
         sub {
-            is $_->return_status, 1, "Asset exists after worker got released from cache service" or die diag explain $_;
+            is $_->return_status, 1, "Asset exists after worker got released from cache service"
+              or die always_explain $_;
         });
 
     ok($cache_client->asset_exists('localhost', $asset), 'Asset downloaded') or die diag "Failed - no asset is there";

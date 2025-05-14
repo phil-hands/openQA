@@ -10,6 +10,7 @@ use Encode qw(decode_utf8);
 use File::Basename 'basename';
 use IPC::Run;
 use OpenQA::App;
+use OpenQA::Jobs::Constants;
 use OpenQA::Log qw(log_trace log_debug log_info);
 use OpenQA::Schema::Result::Jobs;
 use OpenQA::Schema::Result::JobDependencies;
@@ -37,8 +38,7 @@ job that matches the settings provided as argument. Useful to find the
 latest build for a given pair of distri and version.
 
 =cut
-sub latest_build {
-    my ($self, %args) = @_;
+sub latest_build ($self, %args) {
     my @conds;
     my %attrs;
     my $rsource = $self->result_source;
@@ -109,29 +109,29 @@ sub latest_jobs ($self, $until = undef) {
     return @latest;
 }
 
-sub create_from_settings {
-    my ($self, $settings, $scheduled_product_id) = @_;
-
+sub create_from_settings ($self, $settings, $scheduled_product_id = undef) {
     my %settings = %$settings;
     my %new_job_args;
 
     my $result_source = $self->result_source;
     my $schema = $result_source->schema;
     my $job_settings = $schema->resultset('JobSettings');
-    my $txn_guard = $result_source->storage->txn_scope_guard;
 
     my @invalid_keys = grep { $_ =~ /^(PUBLISH_HDD|FORCE_PUBLISH_HDD|STORE_HDD)\S+(\d+)$/ && $settings{$_} =~ /\// }
       keys %settings;
     die 'The ' . join(',', @invalid_keys) . " cannot include / in value\n" if @invalid_keys;
 
     # validate special settings
-    my %special_settings = (_PRIORITY => delete $settings{_PRIORITY});
+    my %special_settings = (TEST => delete $settings{TEST}, _PRIORITY => delete $settings{_PRIORITY});
     my $validator = Mojolicious::Validator->new;
     my $v = Mojolicious::Validator::Validation->new(validator => $validator, input => \%special_settings);
+    my $test = $v->required('TEST')->like(TEST_NAME_REGEX)->param;
     my $prio = $v->optional('_PRIORITY')->num->param;
     die 'The following settings are invalid: ' . join(', ', @{$v->failed}) . "\n" if $v->has_error;
 
     # assign group ID and priority
+    my $group_id = delete $settings{GROUP_ID};
+    $settings{_GROUP_ID} = $group_id if defined $group_id;
     my ($group_args, $group) = OpenQA::Schema::Result::Jobs::extract_group_args_from_settings(\%settings);
     $new_job_args{priority} = $prio if defined $prio;
     if ($group) {
@@ -176,9 +176,9 @@ sub create_from_settings {
         my $value = $settings{$key};
         $settings{$key} = decode_utf8 encode_json $value if (ref $value eq 'ARRAY' || ref $value eq 'HASH');
     }
-    $new_job_args{TEST} = $settings{TEST};
 
     # move important keys from the settings directly to the job
+    $new_job_args{TEST} = $test;
     for my $key (OpenQA::Schema::Result::Jobs::MAIN_SETTINGS) {
         if (my $value = delete $settings{$key}) { $new_job_args{$key} = $value }
     }
@@ -206,7 +206,6 @@ sub create_from_settings {
     log_info('Ignoring invalid group ' . encode_json($group_args) . ' when creating new job ' . $job->id)
       if keys %$group_args && !$group;
     $job->calculate_blocked_by;
-    $txn_guard->commit;
     return $job;
 }
 
@@ -351,10 +350,14 @@ sub complex_query ($self, %args) {
     return $jobs;
 }
 
-sub cancel_by_settings {
-    my ($self, $settings, $newbuild, $deprioritize, $deprio_limit) = @_;
-    $newbuild //= 0;
-    $deprioritize //= 0;
+sub cancel_by_settings (
+    $self, $settings,
+    $newbuild = undef,
+    $deprioritize = undef,
+    $deprio_limit = undef,
+    $related_scheduled_product = undef
+  )
+{
     $deprio_limit //= 100;
     my $rsource = $self->result_source;
     my $schema = $rsource->schema;
@@ -397,37 +400,33 @@ sub cancel_by_settings {
         $jobs_to_cancel = $jobs;
     }
     my $cancelled_jobs = 0;
+    my $priority_increment = 10;
+    my $job_result = $newbuild ? OBSOLETED : USER_CANCELLED;
+    my $reason
+      = $related_scheduled_product
+      ? 'cancelled by scheduled product ' . $related_scheduled_product->id
+      : 'cancelled based on job settings';
+    my $cancel_or_deprioritize = sub ($job) {
+        if ($deprioritize) {
+            my $prio = $job->priority + $priority_increment;
+            if ($prio < $deprio_limit) {
+                $job->set_prio($prio);
+                return 0;
+            }
+        }
+        return $job->cancel($job_result, $reason) // 0;
+    };
     # first scheduled to avoid worker grab
-    my $scheduled = $jobs_to_cancel->search({state => OpenQA::Jobs::Constants::SCHEDULED});
-    while (my $j = $scheduled->next) {
-        $cancelled_jobs += _cancel_or_deprioritize($j, $newbuild, $deprioritize, $deprio_limit);
-    }
+    my $scheduled = $jobs_to_cancel->search({state => SCHEDULED});
+    $cancelled_jobs += $cancel_or_deprioritize->($_) for $scheduled->all;
     # then the rest
     my $executing = $jobs_to_cancel->search({state => [OpenQA::Jobs::Constants::EXECUTION_STATES]});
-    while (my $j = $executing->next) {
-        $cancelled_jobs += _cancel_or_deprioritize($j, $newbuild, $deprioritize, $deprio_limit);
-    }
-    OpenQA::App->singleton->emit_event(openqa_job_cancel_by_settings => $settings) if ($cancelled_jobs);
+    $cancelled_jobs += $cancel_or_deprioritize->($_) for $executing->all;
+    OpenQA::App->singleton->emit_event(openqa_job_cancel_by_settings => $settings) if $cancelled_jobs;
     return $cancelled_jobs;
 }
 
-sub _cancel_or_deprioritize {
-    my ($job, $newbuild, $deprioritize, $limit, $step) = @_;
-    $step //= 10;
-    if ($deprioritize) {
-        my $prio = $job->priority + $step;
-        if ($prio < $limit) {
-            $job->set_prio($prio);
-            return 0;
-        }
-    }
-    return $job->cancel($newbuild ? OpenQA::Jobs::Constants::OBSOLETED : OpenQA::Jobs::Constants::USER_CANCELLED,
-        'cancelled based on job settings') // 0;
-}
-
-sub next_previous_jobs_query {
-    my ($self, $job, $jobid, %args) = @_;
-
+sub next_previous_jobs_query ($self, $job, $jobid, %args) {
     my $p_limit = $args{previous_limit};
     my $n_limit = $args{next_limit};
     my @params = (
@@ -450,9 +449,7 @@ sub next_previous_jobs_query {
 }
 
 
-sub stale_ones {
-    my ($self) = @_;
-
+sub stale_ones ($self) {
     my $dt = DateTime->from_epoch(
         epoch => time() - OpenQA::App->singleton->config->{global}->{worker_timeout},
         time_zone => 'UTC'
@@ -470,9 +467,7 @@ sub stale_ones {
     return $self->search(\%overall_cond, \%attrs);
 }
 
-sub mark_job_linked {
-    my ($self, $jobid, $referer_url) = @_;
-
+sub mark_job_linked ($self, $jobid, $referer_url) {
     my $referer = Mojo::URL->new($referer_url);
     my $referer_host = $referer->host;
     my $app = OpenQA::App->singleton;

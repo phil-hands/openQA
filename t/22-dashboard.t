@@ -10,7 +10,6 @@ use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Mojo::Base -signatures;
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
-use Test::Exception;
 use Test::MockModule;
 use OpenQA::Test::Case;
 use OpenQA::Test::TimeLimit '10';
@@ -107,6 +106,9 @@ subtest 'Changelog' => sub {
 };
 
 $t->get_ok('/health')->status_is(200)->content_is('ok', 'health check route just returns plain ok');
+
+$t->get_ok('/api/v1/routes')->status_is(200)
+  ->json_is('/routes/1/path', '/admin', 'simple check for listing WebAPI routes');
 
 $t->get_ok('/dashboard_build_results')->status_is(200);
 @h2 = $t->tx->res->dom->find('h2 a')->map('text')->each;
@@ -468,7 +470,7 @@ sub check_builds {
     my $div_class = $parent ? 'children-expanded' : 'no-children';
     $t->get_ok("/$route/" . $group->id . '?limit_builds=100')->status_is(200);
     my @h4 = $t->tx->res->dom->find("div.$div_class .h4 a")->map('text')->each;
-    is_deeply(\@h4, $build_names, $msg) || diag explain @h4;
+    is_deeply(\@h4, $build_names, $msg) || always_explain @h4;
 }
 
 subtest 'proper build sorting for dotted build number' => sub {
@@ -603,6 +605,28 @@ subtest 're-routing' => sub {
     $t->get_ok('/')->status_is(200, 'could load main page with base');
     $t->content_like(qr|function urlWithBase.*return '/base' \+ path|s, 'JavaScript helper has base');
     $t->attr_like('#all_tests .nav-link', 'href', qr|/base/tests|s, 'base applied to navbar link');
+};
+
+subtest 'job skipped count' => sub {
+    my $job_skipped_hash = {
+        id => 12345,
+        BUILD => '0048@0815',
+        DISTRI => 'opensuse',
+        VERSION => 'Factory',
+        FLAVOR => 'tape',
+        ARCH => 'x86_64',
+        MACHINE => 'xxx',
+        TEST => 'dummy',
+        state => OpenQA::Jobs::Constants::DONE,
+        result => OpenQA::Jobs::Constants::SKIPPED,
+    };
+    $jobs->create($job_skipped_hash);
+    my $job_skipped = $jobs->find({id => 12345});
+    my $jr = {skipped => 0, total => 0};
+    OpenQA::BuildResults::count_job($job_skipped, $jr, {});
+
+    is $jr->{skipped}, 1, 'Job with aborted result correctly increments skipped count';
+    is $jr->{total}, 1, 'Total jobs incremented';
 };
 
 done_testing;

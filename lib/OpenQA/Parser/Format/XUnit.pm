@@ -11,6 +11,8 @@ sub _add_single_result { shift->results->add(OpenQA::Parser::Result::XUnit->new(
 
 sub addproperty { shift->{properties}->add(OpenQA::Parser::Result::XUnit::Property->new(shift)) }
 
+my %TC_RESULT_BY_TAG = (softfailure => 'softfail', failure => 'fail', error => 'fail');
+
 sub parse {
     my ($self, $xml) = @_;
     confess 'No XML given/loaded' unless $xml;
@@ -30,6 +32,7 @@ sub parse {
 
         $result->{errors} = exists $ts->{errors} ? $ts->{errors} : undef;
         $result->{tests} = exists $ts->{tests} ? $ts->{tests} : undef;
+        $result->{softfailures} = exists $ts->{softfailures} ? $ts->{softfailures} : undef;
         $result->{failures} = exists $ts->{failures} ? $ts->{failures} : undef;
         $result->{time} = exists $ts->{time} ? $ts->{time} : undef;
 
@@ -56,6 +59,7 @@ sub parse {
             });
 
         my $ts_result = 'ok';
+        $ts_result = 'softfail' if ($ts->{softfailures} && $ts->{softfailures} > 0);
         $ts_result = 'fail' if ($ts->{failures} && $ts->{failures} > 0) || ($ts->{errors} && $ts->{errors} > 0);
         $result->{result} = $ts_result;
         $result->{dents} = 0;
@@ -66,9 +70,6 @@ sub parse {
         $ts->children('testcase')->each(
             sub {
                 my $tc = shift;
-                my $tc_result = 'ok';
-                $tc_result = 'fail'
-                  if ($tc->{failures} && $tc->{failures} > 0) || ($tc->{errors} && $tc->{errors} > 0);
 
                 my $text_fn = "$ts_category-$ts_name-$num";
                 $text_fn =~ s/[\/.]/_/g;
@@ -76,8 +77,9 @@ sub parse {
                 my $content = '# Test messages ';
                 $content .= "# $tc->{name}\n" if $tc->{name};
 
-                for my $out ($tc->children('skipped, passed, error, failure')->each) {
-                    $tc_result = 'fail' if ($out->tag =~ m/failure|error/);
+                my $tc_result = 'ok';
+                for my $out ($tc->children('skipped, passed, error, failure, softfailure')->each) {
+                    if (my $res = $TC_RESULT_BY_TAG{$out->tag}) { $tc_result = $res }
                     $content .= '# ' . $out->tag . ": \n\n";
                     $content .= $out->{message} . "\n" if $out->{message};
                     $content .= $out->text . "\n";
@@ -106,7 +108,7 @@ sub parse {
     use Mojo::Base 'OpenQA::Parser::Result::OpenQA';
     has properties => sub { OpenQA::Parser::Results->new };
 
-    has [qw(errors tests failures time)];
+    has [qw(errors tests softfailures failures time)];
 }
 
 {

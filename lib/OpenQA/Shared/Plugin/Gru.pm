@@ -7,6 +7,7 @@ use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
 use Minion;
 use DBIx::Class::Timestamps 'now';
+use OpenQA::App;
 use OpenQA::Schema;
 use OpenQA::Shared::GruJob;
 use OpenQA::Log qw(log_debug log_info);
@@ -15,6 +16,7 @@ use Mojo::Pg;
 use Mojo::Promise;
 use Mojo::File qw(path);
 use Mojo::JSON qw(decode_json);
+use Feature::Compat::Try;
 
 has app => undef, weak => 1;
 has 'dsn';
@@ -31,7 +33,10 @@ sub register_tasks ($self) {
       OpenQA::Task::Asset::Download
       OpenQA::Task::Asset::Limit
       OpenQA::Task::Git::Clone
-      OpenQA::Task::Needle::Scan OpenQA::Task::Needle::Save OpenQA::Task::Needle::Delete
+      OpenQA::Task::Needle::Scan
+      OpenQA::Task::Needle::Save
+      OpenQA::Task::Needle::Delete
+      OpenQA::Task::Needle::LimitTempRefs
       OpenQA::Task::Job::Limit
       OpenQA::Task::Job::ArchiveResults
       OpenQA::Task::Job::FinalizeResults
@@ -151,22 +156,29 @@ sub _add_jobs_to_gru_task ($self, $gru_id, $job_ids) {
             $schema->svp_begin('try_gru_dependencies');
             for my $id (@$job_ids) {
                 # Add job to existing gru task with the same args
-                my $gru_dep
-                  = eval { $schema->resultset('GruDependencies')->create({job_id => $id, gru_task_id => $gru_id}); };
-                unless ($gru_dep) {
-                    my $error = $@;
+                try {
+                    my $gru_dep = $schema->resultset('GruDependencies')->create({job_id => $id, gru_task_id => $gru_id})
+                }
+                catch ($e) {
                     $schema->svp_rollback('try_gru_dependencies');
-                    die $error
-                      unless $error
+                    die $e
+                      unless $e
                       =~ m/insert or update on table "gru_dependencies" violates foreign key constraint "gru_dependencies_fk_gru_task_id"/i;
                     # if the GruTask was already deleted meanwhile, we can skip
                     # the rest of the jobs, since the wanted task was done
-                    log_debug("GruTask $gru_id already gone, skip assigning jobs (message: $error)");
+                    log_debug("GruTask $gru_id already gone, skip assigning jobs (message: $e)");
                     last;
                 }
             }
             $schema->svp_release('try_gru_dependencies');
         });
+}
+
+sub obsolete_minion_jobs ($self, $job_ids) {
+    my $minion = $self->app->minion;
+    for my $job_id (@$job_ids) {
+        if (my $job = $minion->job($job_id)) { $job->note(obsolete => 1) }
+    }
 }
 
 sub enqueue ($self, $task, $args = [], $options = {}, $jobs = []) {
@@ -211,13 +223,14 @@ sub enqueue ($self, $task, $args = [], $options = {}, $jobs = []) {
 # enqueues the limit_assets task with the default parameters
 sub enqueue_limit_assets ($self) { $self->enqueue('limit_assets', [], {priority => 0, ttl => 172800, limit => 1}) }
 
-sub enqueue_download_jobs ($self, $downloads) {
+sub enqueue_download_jobs ($self, $downloads, $minion_ids = undef) {
     return unless %$downloads;
     # array of hashrefs job_id => id; this is what create needs
     # to create entries in a related table (gru_dependencies)
     for my $url (keys %$downloads) {
         my ($path, $do_extract, $block_job_ids) = @{$downloads->{$url}};
-        $self->enqueue('download_asset', [$url, $path, $do_extract], {priority => 10}, $block_job_ids);
+        my $job = $self->enqueue('download_asset', [$url, $path, $do_extract], {priority => 10}, $block_job_ids);
+        push @$minion_ids, $job->{minion_id} if $minion_ids;
     }
 }
 
@@ -248,8 +261,8 @@ sub enqueue_git_update_all ($self) {
     $self->enqueue('git_clone', \%clones, {priority => 10});
 }
 
-sub enqueue_git_clones ($self, $clones, $job_ids) {
-    return unless %$clones;
+sub enqueue_git_clones ($self, $clones, $job_ids, $minion_ids = undef) {
+    return unless keys %$clones;
     return unless OpenQA::App->singleton->config->{'scm git'}->{git_auto_clone} eq 'yes';
     # $clones is a hashref with paths as keys and git urls as values
     # $job_id is used to create entries in a related table (gru_dependencies)
@@ -262,7 +275,10 @@ sub enqueue_git_clones ($self, $clones, $job_ids) {
     }
 
     my $found = $self->_find_existing_minion_job('git_clone', $clones_sr, $job_ids);
-    $self->enqueue('git_clone', $clones_sr, {priority => 10}, $job_ids) unless $found;
+    return $found if $found;
+    my $job = $self->enqueue('git_clone', $clones_sr, {priority => 10}, $job_ids);
+    push @$minion_ids, $job->{minion_id} if $minion_ids;
+    return $job;
 }
 
 sub enqueue_and_keep_track {

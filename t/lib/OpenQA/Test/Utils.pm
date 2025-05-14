@@ -25,7 +25,6 @@ use Mojo::Util 'dumper';
 use Mojo::URL;
 use Cwd qw(abs_path getcwd);
 use IPC::Run qw(start);
-use Mojolicious;
 use Mojo::Util qw(b64_decode gzip);
 use Test::Output 'combined_like';
 use Mojo::IOLoop;
@@ -33,6 +32,7 @@ use Mojo::IOLoop::ReadWriteProcess 'process';
 use Mojo::Server::Daemon;
 use Mojo::IOLoop::Server;
 use Test::MockModule;
+use Feature::Compat::Try;
 use Time::HiRes 'sleep';
 
 BEGIN {
@@ -44,6 +44,7 @@ BEGIN {
         require OpenQA::Utils;
         $ENV{MOJO_HOME} = Mojo::Home->new->detect('OpenQA::Utils');
     }
+    $ENV{OS_AUTOINST_BASEDIR} //= '../os-autoinst';
 }
 
 our (@EXPORT, @EXPORT_OK);
@@ -69,9 +70,10 @@ our (@EXPORT, @EXPORT_OK);
 #
 # Potentially this approach can also be used in production code.
 
-sub setup_mojo_app_with_default_worker_timeout {
-    OpenQA::App->set_singleton(
-        Mojolicious->new(config => {global => {worker_timeout => DEFAULT_WORKER_TIMEOUT}}, log => undef));
+sub setup_mojo_app_with_default_worker_timeout ($class = 'Mojolicious') {
+    my $app = $class->new(config => {global => {worker_timeout => DEFAULT_WORKER_TIMEOUT}}, log => undef);
+    OpenQA::App->set_singleton($app);
+    return $app;
 }
 
 sub cache_minion_worker {
@@ -213,8 +215,11 @@ my $SIGCHLD_HANDLER = sub {
     # note: This function is supposed to be called from the SIGCHLD handler. It seems to have no effect to
     #       call die or BAIL_OUT from that handler so fail and _exit is used instead.
     while ((my $pid = waitpid(-1, WNOHANG)) > 0) {
-        my $exit_code = $?;
         next unless my $child_name = delete $RELEVANT_CHILD_PIDS{$pid};
+        my $exit_status = $?;
+        my $exit_signal = $exit_status & 127;
+        _fail_and_exit "sub process $child_name terminated by signal $exit_signal", $exit_signal if $exit_signal;
+        my $exit_code = ($exit_status >> 8);
         _fail_and_exit "sub process $child_name terminated with exit code $exit_code", $exit_code if $exit_code;
     }
 };
@@ -352,14 +357,14 @@ sub setup_share_dir {
     $sharedir = path($sharedir, 'openqa', 'share')->make_path;
 
     path($sharedir, 'factory', 'iso')->make_path;
-
-    my $iso_file_path = abs_path('../os-autoinst/t/data/Core-7.2.iso') or die 'Core-7.2.iso not found';
+    my $iso_file_path = abs_path($ENV{OS_AUTOINST_BASEDIR} . '/t/data/Core-7.2.iso') or die 'Core-7.2.iso not found';
     my $iso_link_path = path($sharedir, 'factory', 'iso')->child('Core-7.2.iso')->to_string();
     symlink($iso_file_path, $iso_link_path) || die "can't symlink $iso_link_path -> $iso_file_path: $!";
 
     path($sharedir, 'tests')->make_path;
 
-    my $tests_dir_path = abs_path('../os-autoinst/t/data/tests/') or die 'tests dir not found';
+    my $tests_dir_path = abs_path($ENV{OS_AUTOINST_BASEDIR} . '/t/data/tests/')
+      or die 'tests dir not found';
     my $tests_link_path = path($sharedir, 'tests')->child('tinycore');
     symlink $tests_dir_path, $tests_link_path or die "can't symlink '$tests_link_path' -> '$tests_dir_path': $!";
     note "using tests and needles from $tests_dir_path";
@@ -381,6 +386,7 @@ sub setup_fullstack_temp_dir {
     my $config = $configdir->child('openqa.ini')->slurp;
     $config =~ s/^#\Q[scm git]/[scm git]/m;
     $config =~ s/^#git_auto_clone = .*/git_auto_clone = no/m;
+    $config =~ s/^#git_auto_update = .*/git_auto_update = no/m;
     $configdir->child('openqa.ini')->spew($config);
     note("OPENQA_BASEDIR: $basedir\nOPENQA_CONFIG: $configdir");
     $ENV{OPENQA_BASEDIR} = $basedir;
@@ -405,7 +411,7 @@ sub setup_worker {    # uncoverable statement
 }
 
 sub start_worker ($connect_args) {
-    my $os_autoinst_path = '../os-autoinst';
+    my $os_autoinst_path = $ENV{OS_AUTOINST_BASEDIR};
     my $isotovideo_path = $os_autoinst_path . '/isotovideo';
 
     # save testing time as we do not test a webUI host being down for
@@ -413,7 +419,7 @@ sub start_worker ($connect_args) {
     $ENV{OPENQA_WORKER_CONNECT_RETRIES} = 1;
     # enable additional diagnostics for serialization errors
     $ENV{DEBUG_JSON} = 1;
-    my @cmd = qw(perl ./script/worker --isotovideo=../os-autoinst/isotovideo --verbose);
+    my @cmd = ("perl", "./script/worker", "--isotovideo=$isotovideo_path", "--verbose");
     push @cmd, @$connect_args;
     start \@cmd;
 }
@@ -479,9 +485,9 @@ sub c_worker ($apikey, $apisecret, $host, $instance, $bogus, %options) {
         }
         my $error = $options{error};    # uncoverable statement
         my $worker_mock = Test::MockModule->new('OpenQA::Worker');    # uncoverable statement
-        $worker_mock->redefine(check_availability => $error) if defined $error;    # uncoverable statement
+        $worker_mock->redefine(check_availability => sub { (0, $error) }) if defined $error;    # uncoverable statement
         my $worker = OpenQA::Worker->new(\%worker_params);    # uncoverable statement
-        $worker->current_error($error) if defined $error;    # uncoverable statement
+        $worker->set_current_error_based_on_availability;    # uncoverable statement
         setup_worker($worker, $host);    # uncoverable statement
         $worker->exec();    # uncoverable statement
 
@@ -590,8 +596,10 @@ sub mock_io_loop (%args) {
     my $io_loop_mock = Test::MockModule->new('Mojo::IOLoop');
     $io_loop_mock->redefine(    # avoid forking to prevent coverage analysis from slowing down the test significantly
         subprocess => sub ($io_loop, $function, $callback) {
-            my @result = eval { $function->() };
-            my $error = $@;
+            my @result;
+            my $error = '';
+            try { @result = $function->() }
+            catch ($e) { $error = $e }
             $io_loop->next_tick(sub { $callback->(undef, $error, @result) });
         }) if $args{subprocess};
     return $io_loop_mock;

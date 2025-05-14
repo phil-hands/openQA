@@ -13,7 +13,6 @@ use Mojo::Base -signatures;
 use Mojo::IOLoop;
 use Mojolicious;
 use Test::Output 'combined_like';
-use Test::Fatal;
 use Test::Mojo;
 use Test::MockModule;
 use OpenQA::App;
@@ -28,19 +27,22 @@ use OpenQA::Constants qw(DEFAULT_WORKER_TIMEOUT WORKER_COMMAND_QUIT WORKER_COMMA
   WORKER_COMMAND_LIVELOG_START WORKER_COMMAND_DEVELOPER_SESSION_START WORKER_COMMAND_GRAB_JOB
   WORKER_COMMAND_GRAB_JOBS WORKER_SR_API_FAILURE MIN_TIMER MAX_TIMER);
 use OpenQA::Utils;
+use Mojo::Util 'scope_guard';
+use Mojo::File qw(path tempdir);
+
+my $workdir = tempdir("$FindBin::Script-XXXX", TMPDIR => 1);
+chdir $workdir;
+my $guard = scope_guard sub { chdir $FindBin::Bin };
 
 # use Mojo::Log and suppress debug messages
 OpenQA::App->set_singleton(Mojolicious->new);
 my $app = OpenQA::App->singleton;
 $app->log->level('info');
 
-like(
-    exception {
-        OpenQA::Worker::WebUIConnection->new('http://test-host', {});
-    },
-    qr{API key and secret are needed for the worker connecting http://test-host.*},
-    'auth required',
-);
+throws_ok {
+    OpenQA::Worker::WebUIConnection->new('http://test-host', {});
+}
+qr{API key and secret are needed for the worker connecting http://test-host.*}, 'auth required';
 
 my $client = OpenQA::Worker::WebUIConnection->new(
     'http://test-host',
@@ -69,13 +71,8 @@ $client->worker(OpenQA::Test::FakeWorker->new);
 $client->working_directory('t/');
 
 is($client->status, 'new', 'client in status new');
-like(
-    exception {
-        $client->send('get', '.');
-    },
-    qr{attempt to send command to web UI http://test-host with no worker ID.*},
-    'registration required',
-);
+throws_ok { $client->send('get', '.'); } qr{attempt to send command to web UI http://test-host with no worker ID.*},
+  'registration required';
 
 # mock OpenQA::Worker::Job so it starts/stops the livelog also if the backend isn't running
 my $job_mock = Test::MockModule->new('OpenQA::Worker::Job');
@@ -171,7 +168,7 @@ subtest 'attempt to register and send a command' => sub {
         my $error_message = ref($happened_events[1]) eq 'HASH' ? delete $happened_events[1]->{error_message} : undef;
         is_deeply \@happened_events, \@expected_events, 'expected events emitted';
         like $error_message, qr{Failed to register at http://test-host - connection error:.*}, 'error message';
-    } or diag explain \@happened_events;
+    } or always_explain \@happened_events;
 };
 
 subtest 'attempt to setup websocket connection' => sub {
@@ -194,7 +191,7 @@ subtest 'attempt to setup websocket connection' => sub {
     $client->_setup_websocket_connection;
     $client->once(status_changed => sub ($status, @) { Mojo::IOLoop->stop if $status eq 'failed' });
     Mojo::IOLoop->start;
-    is_deeply \@happened_events, \@expected_events, 'events emitted' or diag explain \@happened_events;
+    is_deeply \@happened_events, \@expected_events, 'events emitted' or always_explain \@happened_events;
 };
 
 subtest 'retry behavior' => sub {
@@ -360,8 +357,8 @@ subtest 'send status' => sub {
     $client->websocket_connection($ws);
     $client->send_status();
     is_deeply($ws->sent_messages, [{json => {fake_status => 1, reason => 'some error'}}], 'status sent')
-      or diag explain $ws->sent_messages;
-    combined_like { Mojo::IOLoop->one_tick } qr/some error.*checking again/, 'error logged in callback';
+      or always_explain $ws->sent_messages;
+    combined_like { $client->send_status_delayed } qr/some error.*checking again/, 'error logged in callback';
 };
 
 subtest 'quit' => sub {
@@ -373,7 +370,7 @@ subtest 'quit' => sub {
         $client->websocket_connection($ws);
         $client->quit($callback);
         is_deeply($ws->sent_messages, [{json => {type => 'quit'}}], 'quit sent')
-          or diag explain $ws->sent_messages;
+          or always_explain $ws->sent_messages;
         Mojo::IOLoop->one_tick;
         ok($callback_called, 'callback passed to websocket send');
     };
@@ -395,7 +392,7 @@ subtest 'rejecting jobs' => sub {
         $client->websocket_connection(undef);
         $client->reject_jobs([1, 2, 3], 'just a test', $callback);
         is_deeply($ws->sent_messages, [], 'no message send when not connected')
-          or diag explain $ws->sent_messages;
+          or always_explain $ws->sent_messages;
         ok(!$callback_called, 'callback not invoked so far');
     };
     subtest 'job rejected when connected' => sub {
@@ -406,7 +403,7 @@ subtest 'rejecting jobs' => sub {
             $ws->sent_messages,
             [{json => {type => 'rejected', job_ids => [1, 2, 3], reason => 'just a test'}}],
             'rejected sent when connected again'
-        ) or diag explain $ws->sent_messages;
+        ) or always_explain $ws->sent_messages;
         ok($callback_called, 'callback invoked');
     };
 };
@@ -499,7 +496,7 @@ qr/Ignoring WS message from http:\/\/test-host with type livelog_stop and job ID
             $rejection->(['42'], 'already busy with job(s) 43'),
         ],
         'jobs have been rejected in the error cases (when possible), no rejection for job 43'
-    ) or diag explain $ws->sent_messages;
+    ) or always_explain $ws->sent_messages;
 
     # test accepting a job
     is($worker->current_job, undef, 'no job accepted so far');
@@ -539,7 +536,7 @@ qr/Ignoring WS message from http:\/\/test-host with type livelog_stop and job ID
     $command_handler->handle_command(undef, {type => WORKER_COMMAND_GRAB_JOBS, job_info => \%job_info});
     is_deeply($worker->enqueued_job_info,
         \%job_info, 'job info successfully validated and passed to enqueue_jobs_and_accept_first')
-      or diag explain $worker->enqueued_job_info;
+      or always_explain $worker->enqueued_job_info;
 
     # test refusing multiple jobs due because job data is missing
     delete $job_info{data}->{28};
@@ -549,7 +546,7 @@ qr/Ignoring WS message from http:\/\/test-host with type livelog_stop and job ID
     }
     qr/Refusing to grab job.*: job data for job 28 is missing/, 'ignoring grab job if no valid job info provided';
     is_deeply($worker->enqueued_job_info, undef, 'no jobs enqueued if validation failed')
-      or diag explain $worker->enqueued_job_info;
+      or always_explain $worker->enqueued_job_info;
 
     # test incompatible (so far the worker stops when receiving this message; there are likely better ways to handle it)
     is($worker->is_stopping, 0, 'not already stopping');
@@ -576,6 +573,12 @@ qr/Ignoring WS message from http:\/\/test-host with type livelog_stop and job ID
     combined_like { $command_handler->handle_command(undef, {type => 'quit', jobid => 43}) }
     qr/Will quit job 43 later as requested by the web UI/, 'stop command for pending job executed later';
     is_deeply $worker->skipped_jobs, [[43, 'quit']], 'pending job is going to be skipped';
+
+    # reacting to info message
+    ok !$client->{_send_status_timer}, 'sending status update not scheduled yet';
+    combined_like { $command_handler->handle_command(undef, {type => 'info', seen => 1}) } qr/some error/,
+      'status update logged';
+    ok $client->{_send_status_timer}, 'sending status update with delay after receiving "seen" message';
 };
 
 $client->worker_id(undef);

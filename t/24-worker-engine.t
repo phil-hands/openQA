@@ -16,7 +16,6 @@ BEGIN {
 
 use File::Spec::Functions qw(abs2rel catdir);
 use OpenQA::Constants 'WORKER_EC_ASSET_FAILURE';
-use Test::Fatal;
 use Test::Warnings ':report_warnings';
 use OpenQA::Worker;
 use Test::MockModule;
@@ -27,6 +26,14 @@ use OpenQA::Test::FakeWorker;
 use Mojo::File qw(path tempdir);
 use Mojo::JSON 'decode_json';
 use OpenQA::Utils qw(testcasedir productdir needledir locate_asset base_host);
+use Cwd qw(getcwd);
+use Mojo::Util 'scope_guard';
+use File::Copy::Recursive qw(dircopy);
+
+my $workdir = tempdir("$FindBin::Script-XXXX", TMPDIR => 1);
+chdir $workdir;
+my $guard = scope_guard sub { chdir $FindBin::Bin };
+dircopy "$FindBin::Bin/$_", "$workdir/t/$_" or BAIL_OUT($!) for qw(data);
 
 # define fake packages for testing asset caching
 {
@@ -77,13 +84,10 @@ sub _run_engine ($job) {
 }
 
 subtest 'isotovideo version' => sub {
-    like(
-        exception {
-            OpenQA::Worker::Engines::isotovideo::set_engine_exec('/bogus/location');
-        },
-        qr{Path to isotovideo invalid},
-        'isotovideo version path invalid'
-    );
+    throws_ok {
+        OpenQA::Worker::Engines::isotovideo::set_engine_exec('/bogus/location');
+    }
+    qr{Path to isotovideo invalid}, 'isotovideo version path invalid';
 
     # init does not fail without isotovideo parameter
     # note that this might set the isotovideo version because the isotovideo path defaults
@@ -136,20 +140,20 @@ subtest 'asset settings' => sub {
     };
 
     my $got = OpenQA::Worker::Engines::isotovideo::detect_asset_keys($settings);
-    is_deeply($got, $expected, 'Asset settings are correct (relative PFLASH)') or diag explain $got;
+    is_deeply($got, $expected, 'Asset settings are correct (relative PFLASH)') or always_explain $got;
 
     # if UEFI_PFLASH_VARS is an absolute path, we should not treat it as an asset
     $settings->{UEFI_PFLASH_VARS} = '/absolute/path/OVMF_VARS.fd';
     delete($expected->{UEFI_PFLASH_VARS});
 
     $got = OpenQA::Worker::Engines::isotovideo::detect_asset_keys($settings);
-    is_deeply($got, $expected, 'Asset settings are correct (absolute PFLASH)') or diag explain $got;
+    is_deeply($got, $expected, 'Asset settings are correct (absolute PFLASH)') or always_explain $got;
 
     delete($settings->{UEFI_PFLASH_VARS});
     delete($settings->{NUMDISKS});
 
     $got = OpenQA::Worker::Engines::isotovideo::detect_asset_keys($settings);
-    is_deeply($got, $expected, 'Asset settings are correct (no UEFI or NUMDISKS)') or diag explain $got;
+    is_deeply($got, $expected, 'Asset settings are correct (no UEFI or NUMDISKS)') or always_explain $got;
 };
 
 subtest 'caching' => sub {
@@ -170,7 +174,7 @@ subtest 'asset caching' => sub {
         cache_assets =>
           sub ($cache_client, $job, $vars, $assets_to_cache, $assetkeys, $webui_host, $pooldir, $callback) {
             $callback->(undef);
-        });
+          });
     my $job = Test::MockObject->new;
     my $testpool_server;
     $job->mock(client => sub { Test::MockObject->new->set_bound(testpool_server => \$testpool_server) });
@@ -350,11 +354,11 @@ subtest 'syncing tests' => sub {
     $cache_client_mock->redefine(status => $status_response);
     OpenQA::Worker::Engines::isotovideo::sync_tests(OpenQA::CacheService::Client->new, @args);
     Mojo::IOLoop->start;
-    is $result, 'cache-dir/webuihost/tests', 'returns synced test directory on success' or diag explain $result;
+    is $result, 'cache-dir/webuihost/tests', 'returns synced test directory on success' or always_explain $result;
 };
 
 subtest 'symlink testrepo, logging behavior, variable expansion' => sub {
-    my $pool_directory = tempdir('poolXXXX');
+    my $pool_directory = tempdir('poolXXXX', TMPDIR => 1);
     my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
 
@@ -478,7 +482,7 @@ subtest 'symlink testrepo, logging behavior, variable expansion' => sub {
 };
 
 subtest 'behavior with ABSOLUTE_TEST_CONFIG_PATHS=1' => sub {
-    my $pool_directory = tempdir('poolXXXX');
+    my $pool_directory = tempdir('poolXXXX', TMPDIR => 1);
     my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
     my @settings = (DISTRI => 'fedora', JOBTOKEN => 'token000', ABSOLUTE_TEST_CONFIG_PATHS => 1);
@@ -511,14 +515,18 @@ subtest 'behavior with ABSOLUTE_TEST_CONFIG_PATHS=1' => sub {
 };
 
 subtest 'link asset' => sub {
-    my $pool_directory = tempdir('poolXXXX');
+    my $cwd = getcwd;
+    my $pool_directory = tempdir('poolXXXX', TMPDIR => 1);
     my $worker = OpenQA::Test::FakeWorker->new(pool_directory => $pool_directory);
     my $client = Test::FakeClient->new;
+    # just in case cleanup the symlink to really check if it gets re-created
+    unlink 't/data/openqa/share/factory/hdd/symlink.qcow2' if -e 't/data/openqa/share/factory/hdd/symlink.qcow2';
     my $settings = {
         JOBTOKEN => 'token000',
         ISO => 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso',
         HDD_1 => 'foo.qcow2',
         HDD_2 => 'symlink.qcow2',
+        SYNC_ASSETS_HOOK => "ln -s foo.qcow2 $cwd/t/data/openqa/share/factory/hdd/symlink.qcow2"
     };
     my $job = OpenQA::Worker::Job->new($worker, $client, {id => 16, settings => $settings});
     combined_like { my $result = _run_engine($job) }
@@ -537,6 +545,7 @@ subtest 'link asset' => sub {
     is $vars_data->{ISO}, 'openSUSE-13.1-DVD-x86_64-Build0091-Media.iso',
       'the value of ISO is basename when doing link';
     is $vars_data->{HDD_1}, 'foo.qcow2', 'the value of HDD_1 is basename when doing link';
+    unlink 't/data/openqa/share/factory/hdd/symlink.qcow2';
 };
 
 subtest 'using cgroupv2' => sub {

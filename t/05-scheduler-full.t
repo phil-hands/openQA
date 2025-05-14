@@ -16,7 +16,6 @@ use Test::MockModule;
 use DateTime;
 use File::Which;
 use IPC::Run qw(start);
-use Mojolicious;
 use Mojo::IOLoop::Server;
 use Mojo::File qw(path tempfile);
 use Time::HiRes 'sleep';
@@ -26,6 +25,7 @@ use OpenQA::Constants qw(DEFAULT_WORKER_TIMEOUT DB_TIMESTAMP_ACCURACY);
 use OpenQA::Jobs::Constants;
 use OpenQA::Scheduler::Client;
 use OpenQA::Scheduler::Model::Jobs;
+use OpenQA::WebAPI;
 use OpenQA::Worker::WebUIConnection;
 use OpenQA::Utils;
 require OpenQA::Test::Database;
@@ -42,9 +42,6 @@ use OpenQA::Test::TimeLimit '150';
 # treat this test like the fullstack test
 plan skip_all => "set FULLSTACK=1 (be careful)" unless $ENV{FULLSTACK};
 
-setup_mojo_app_with_default_worker_timeout;
-OpenQA::Setup::read_config(OpenQA::App->singleton);
-
 my $load_avg_file = simulate_load('0.93 0.95 3.25 2/2207 1212', '05-scheduler-full');
 
 # setup directories and database
@@ -55,10 +52,12 @@ my $api_key = $api_credentials->key;
 my $api_secret = $api_credentials->secret;
 
 # create web UI and websocket server
+my $app = setup_mojo_app_with_default_worker_timeout('OpenQA::WebAPI');
 my $mojoport = service_port 'webui';
 my $ws = create_websocket_server(undef, 0, 1);
 my $webapi = create_webapi($mojoport, sub { });
 my @workers;
+$app->config->{'scm git'}->{git_auto_update} = 'no';
 
 # setup share and result dir
 my $sharedir = setup_share_dir($ENV{OPENQA_BASEDIR});
@@ -118,7 +117,7 @@ subtest 'Scheduler worker job allocation' => sub {
     my $wr_id2 = $allocated->[1]->{worker};
     my $different_workers = isnt($wr_id1, $wr_id2, 'jobs dispatched to different workers');
     my $different_jobs = isnt($job_id1, $job_id2, 'each of the two jobs allocated to one of the workers');
-    diag explain $allocated unless $different_workers && $different_jobs;
+    always_explain $allocated unless $different_workers && $different_jobs;
 
     $allocated = $job_model->schedule;
     is @$allocated, 0, 'no more jobs need to be allocated';
@@ -217,7 +216,7 @@ subtest 'Simulation of heavy unstable load' => sub {
 
     # duplicate latest jobs ignoring failures
     my @duplicated = map { my $dup = $_->auto_duplicate; ref $dup ? $dup : () } $schema->resultset('Jobs')->latest_jobs;
-    my $nr = $ENV{OPENQA_SCHEDULER_TEST_UNRESPONSIVE_COUNT} // 50;
+    my $nr = $ENV{OPENQA_SCHEDULER_TEST_UNRESPONSIVE_COUNT} // ($ENV{CI} ? 10 : 50);
     @workers = map { unresponsive_worker(@$worker_settings, $_) } (1 .. $nr);
     my $i = 2;
     wait_for_worker($schema, ++$i) for 1 .. $nr;

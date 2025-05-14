@@ -33,11 +33,21 @@
   /etc/gitconfig r,
   /etc/libnl/classid r,
   /etc/openqa/client.conf r,
+  /etc/openqa/client.conf.d/ r,
+  /etc/openqa/client.conf.d/** r,
   /etc/openqa/workers.ini r,
+  /etc/openqa/workers.ini.d/ r,
+  /etc/openqa/workers.ini.d/** r,
   /etc/qemu/* r,
   /etc/udev/udev.conf r,
   /etc/vde2/vdecmd r,
   /etc/containers/storage.conf r,
+  /usr/etc/openqa/client.conf r,
+  /usr/etc/openqa/client.conf.d/ r,
+  /usr/etc/openqa/client.conf.d/** r,
+  /usr/etc/openqa/workers.ini r,
+  /usr/etc/openqa/workers.ini.d/ r,
+  /usr/etc/openqa/workers.ini.d/** r,
   /usr/share/containers/containers.conf r,
   /usr/bin/conmon rix,
   /usr/lib/cni/bridge rix,
@@ -132,7 +142,7 @@
   /usr/lib{,exec}/git{,-core}/git-remote-https rix,
   /usr/lib{,exec}/git{,-core}/git-write-tree rix,
   /usr/lib/os-autoinst/videoencoder rix,
-  /usr/lib/os-autoinst/check_qemu_oom arCx,
+  /usr/lib/os-autoinst/script/check_qemu_oom arCx,
   /usr/bin/ffmpeg rix,
   /usr/lib/utempter/utempter rix,
   /usr/sbin/smbd rix,
@@ -182,7 +192,7 @@
 
   }
 
-  profile /usr/lib/os-autoinst/check_qemu_oom {
+  profile /usr/lib/os-autoinst/script/check_qemu_oom {
     #include <abstractions/base>
     #include <abstractions/perl>
     /usr/bin/dmesg rix,

@@ -3,8 +3,7 @@
 
 package OpenQA::Schema::Result::JobModules;
 
-
-use Mojo::Base 'DBIx::Class::Core';
+use Mojo::Base 'DBIx::Class::Core', -signatures;
 
 use OpenQA::Jobs::Constants;
 use Mojo::JSON qw(decode_json encode_json);
@@ -13,7 +12,7 @@ use Mojo::Util 'decode';
 use File::Basename qw(dirname basename);
 use File::Path 'remove_tree';
 use Cwd 'abs_path';
-use Try::Tiny;
+use Feature::Compat::Try;
 
 __PACKAGE__->table('job_modules');
 __PACKAGE__->load_components(qw(InflateColumn::DateTime Timestamps));
@@ -77,23 +76,24 @@ __PACKAGE__->belongs_to(
 );
 __PACKAGE__->add_unique_constraint([qw(job_id name category script)]);
 
-sub sqlt_deploy_hook {
-    my ($self, $sqlt_table) = @_;
-
+sub sqlt_deploy_hook ($self, $sqlt_table) {
     $sqlt_table->add_index(name => 'idx_job_modules_result', fields => ['result']);
 }
 
-sub results {
-    my ($self, %options) = @_;
+sub results ($self, %options) {
     my $skip_text_data = $options{skip_text_data};
 
     return {} unless my $dir = $self->job->result_dir;
     my $name = $self->name;
 
     my $file = path($dir, "details-$name.json");
-    return {} unless my $json_data = eval { $file->slurp };
-    die qq{Malformed/unreadable JSON file "$file": $@} unless my $json = eval { decode_json($json_data) };
+    my $json_data;
+    try { $json_data = $file->slurp }
+    catch ($e) { return {} }
 
+    my $json;
+    try { $json = decode_json($json_data) }
+    catch ($e) { die qq{Malformed/unreadable JSON file "$file": $e} }
     # load detail file which restores all results provided by os-autoinst (with hash-root)
     # support also old format which only restores details information (with array-root)
     my $results = ref($json) eq 'HASH' ? $json : {details => $json};
@@ -109,9 +109,10 @@ sub results {
     for my $step (@$details) {
         my $text_file_name = $step->{text};
         if (!$skip_text_data && $text_file_name && !defined $step->{text_data}) {
-            my $text_file = path($dir, $text_file_name);
-            my $text_data = eval { decode('UTF-8', $text_file->slurp) };
-            $step->{text_data} = $text_data // "Unable to read $text_file_name.";
+            $step->{text_data} = do {
+                try { decode('UTF-8', path($dir, $text_file_name)->slurp) // "Unable to decode $text_file_name." }
+                catch ($e) { "Unable to read $text_file_name." }
+            };
         }
 
         next unless $step->{screenshot};
@@ -130,8 +131,7 @@ sub results {
     return $results;
 }
 
-sub update_result {
-    my ($self, $r) = @_;
+sub update_result ($self, $r) {
     my $result = $r->{result} || 'none';
     $result =~ s,fail,failed,;
     $result =~ s,^na,none,;
@@ -145,8 +145,7 @@ sub update_result {
 
 # if you give a needle_cache, make sure to call
 # OpenQA::Schema::Result::Needles::update_needle_cache
-sub store_needle_infos {
-    my ($self, $details, $needle_cache) = @_;
+sub store_needle_infos ($self, $details, $needle_cache = undef) {
 
     # we often see the same needles in the same test, so avoid duplicated work
     my %hash;
@@ -164,9 +163,7 @@ sub store_needle_infos {
     OpenQA::Schema::Result::Needles::update_needle_cache(\%hash);
 }
 
-sub _save_details_screenshot {
-    my ($self, $screenshot, $known_md5_sums) = @_;
-
+sub _save_details_screenshot ($self, $screenshot, $known_md5_sums) {
     my ($full, $thumb) = OpenQA::Utils::image_md5_filename($screenshot->{md5});
     my $result_dir = $self->job->result_dir;
     my $screenshot_name = $screenshot->{name};
@@ -176,8 +173,7 @@ sub _save_details_screenshot {
     return $screenshot_name;
 }
 
-sub save_results {
-    my ($self, $results, $known_md5_sums, $known_file_names) = @_;
+sub save_results ($self, $results, $known_md5_sums = undef, $known_file_names = undef) {
     my @dbpaths;
     my $details = $results->{details};
     my $result_dir = $self->job->result_dir;
@@ -206,9 +202,7 @@ sub save_results {
 
 # incorporate textual step data into details JSON
 # note: Can not be called from save_results() because the upload must have already been concluded.
-sub finalize_results {
-    my ($self) = @_;
-
+sub finalize_results ($self) {
     # locate details JSON; skip if not present or empty
     my $dir = $self->job->result_dir;
     return undef unless $dir;
@@ -224,8 +218,9 @@ sub finalize_results {
     # incorporate textual step data into details
     for my $step (@$details) {
         next unless my $text = $step->{text};
-        my $txtfile = path($dir, $text);
-        my $txtdata = eval { decode('UTF-8', $txtfile->slurp) };
+        my $txtdata;
+        try { $txtdata = decode('UTF-8', path($dir, $text)->slurp) }
+        catch ($e) { }
         $step->{text_data} = $txtdata if defined $txtdata;
     }
 

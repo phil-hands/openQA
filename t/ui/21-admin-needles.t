@@ -19,7 +19,7 @@ use Cwd qw(getcwd);
 use DateTime;
 
 my $test_case = OpenQA::Test::Case->new;
-my $schema_name = OpenQA::Test::Database->generate_schema_name;
+my $schema_name = OpenQA::Test::Database::generate_schema_name;
 my $schema
   = $test_case->init_data(schema_name => $schema_name, fixtures_glob => '01-jobs.pl 05-job_modules.pl 07-needles.pl');
 
@@ -351,6 +351,7 @@ subtest 'custom needles search' => sub {
     is($needle_tds[1]->get_text(), 'seven_month-undef.json', 'search seven_month-undef needle correctly');
 
     $last_seen_options[0]->click();
+    wait_for_data_table($needles_table, 3);    # minimize chance for race condition, see poo#167611
     $last_match_options[6]->click();
     wait_for_data_table($needles_table, 4);
     @needle_trs = $driver->find_elements('#needles tbody tr');

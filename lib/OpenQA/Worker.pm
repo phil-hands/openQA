@@ -32,13 +32,13 @@ BEGIN {
 }
 
 use Fcntl;
+use Feature::Compat::Try;
 use File::Path qw(make_path remove_tree);
 use File::Spec::Functions 'catdir';
 use List::Util qw(all max min);
 use Mojo::IOLoop;
 use Mojo::File 'path';
 use POSIX;
-use Try::Tiny;
 use Scalar::Util 'looks_like_number';
 use OpenQA::Constants
   qw(WEBSOCKET_API_VERSION WORKER_COMMAND_QUIT WORKER_SR_BROKEN WORKER_SR_DONE WORKER_SR_DIED WORKER_SR_FINISH_OFF);
@@ -59,6 +59,7 @@ has 'clients_by_webui_host';
 has 'current_webui_host';
 has 'current_job';
 has 'current_error';
+has 'current_error_is_fatal';
 has 'worker_hostname';
 has 'isotovideo_interface_version';
 
@@ -225,13 +226,12 @@ sub status ($self) {
         $status{current_webui_host} = $self->current_webui_host;
         $status{job} = $current_job->info;
     }
-    elsif (my $availability_error = $self->check_availability) {
+    elsif (my $availability_reason = $self->set_current_error_based_on_availability) {
         $status{status} = 'broken';
-        $self->current_error($status{reason} = $availability_error);
+        $status{reason} = $availability_reason;
     }
     else {
         $status{status} = 'free';
-        $self->current_error(undef);
     }
     if (my $queue = $self->{_queue}) {
         $status{pending_job_ids} = $queue->{pending_job_ids} if keys %{$queue->{pending_job_ids}};
@@ -280,8 +280,8 @@ sub init ($self) {
     # note: This assigns $self->current_error if there's an error and therefore prevents us from grabbing
     #       a job while broken. The error is propagated to the web UIs.
     $self->configure_cache_client;
-    $self->current_error($self->check_availability);
-    log_error $self->current_error if $self->current_error;
+    $self->set_current_error_based_on_availability;
+    log_error 'Unavailable: ' . $self->current_error if $self->current_error;
 
     # register error handler to stop the current job when a critical/unhandled error occurs
     Mojo::IOLoop->singleton->reactor->on(
@@ -292,15 +292,15 @@ sub init ($self) {
             # try to stop gracefully
             my $fatal_error = 'Another error occurred when trying to stop gracefully due to an error';
             if (!$self->{_shall_terminate} || $self->{_finishing_off}) {
-                eval {
+                try {
                     # log error using print because logging utils might have caused the exception
                     # (no need to repeat $err, it is printed anyways)
                     log_error('Stopping because a critical error occurred.');
 
                     # try to stop the job nicely
                     return $self->stop('exception');
-                };
-                $fatal_error = "$fatal_error: $@" if $@;
+                }
+                catch ($e) { $fatal_error = "$fatal_error: $e" }
             }
 
             # kill if stopping gracefully does not work
@@ -484,9 +484,14 @@ sub _accept_or_skip_next_job_in_queue ($self) {
         log_info("Skipping job $next_job_id from queue (web UI sent command $skip_reason)");
         return $self->_prepare_and_skip_job($next_job, $skip_reason);
     }
-    if (my $current_error = $self->current_error) {
-        log_info("Skipping job $next_job_id from queue because worker is broken ($current_error)");
-        return $self->_prepare_and_skip_job($next_job);
+    if (my $e = $self->current_error) {
+        if ($self->current_error_is_fatal) {
+            log_info "Skipping job $next_job_id from queue because worker is broken ($e)";
+            return $self->_prepare_and_skip_job($next_job);
+        }
+        else {
+            log_info "Continuing with job $next_job_id as it is already enqueued despite current error ($e)";
+        }
     }
     my $parent_chain = $queue_info->{parent_chain};
     my $last_parent = $parent_chain->[-1];
@@ -604,43 +609,53 @@ sub is_qemu_running ($self) {
 }
 
 sub is_ovs_dbus_service_running ($self) {
-    eval { defined &Net::DBus::system or require Net::DBus };
-    return 0 if $@;
+    try { defined &Net::DBus::system or require Net::DBus }
+    catch ($e) { return 0 }
     my $bus = ($self->{_system_dbus} //= Net::DBus->system(nomainloop => 1));
-    my $service = eval { defined $bus->get_service('org.opensuse.os_autoinst.switch') };
-    return !$@ && $service;
+    try { return defined $bus->get_service('org.opensuse.os_autoinst.switch') }
+    catch ($e) { return 0 }
 }
 
-# checks whether the worker is available
+# returns whether the worker is available and a reason
 # note: This is used to check certain error conditions *before* starting a job to prevent incompletes and
 #       being able to propagate the brokenness to the web UIs.
+# note: High load will yield a corresponding error message as reason so the worker becomes broken and
+#       thus will not pick up any new jobs. However, a worker under high load is still considered being
+#       able to work on jobs that are already enqueued. Hence this function returns a "1" for the
+#       availability in this case.
 sub check_availability ($self) {
     # check whether the cache service is available if caching enabled
     if (my $cache_service_client = $self->{_cache_service_client}) {
         my $error = $cache_service_client->info->availability_error;
         my $host = $cache_service_client->host // '?';
-        return "Worker cache not available via $host: $error" if $error;
+        return (0, "Worker cache not available via $host: $error") if $error;
     }
 
     # check whether qemu is still running
     if (my $qemu_pid = $self->is_qemu_running) {
-        return "A QEMU instance using the current pool directory is still running (PID: $qemu_pid)";
+        return (0, "A QEMU instance using the current pool directory is still running (PID: $qemu_pid)");
     }
 
-    # avoid running jobs if system utilization is critical and ensure pool directory is locked
-    if (my $error = $self->_check_system_utilization || $self->_setup_pool_directory) {
-        return $error;
-    }
+    # ensure pool directory is locked
+    if (my $error = $self->_setup_pool_directory) { return (0, $error) }
 
     # auto-detect worker address if not specified explicitly
     my $settings = $self->settings;
-    return 'Unable to determine worker address (WORKER_HOSTNAME)' unless $settings->auto_detect_worker_address;
+    return (0, 'Unable to determine worker address (WORKER_HOSTNAME)') unless $settings->auto_detect_worker_address;
 
     # check org.opensuse.os_autoinst.switch if it is a MM-capable worker slot
-    return "D-Bus service '$self->{_ovs_dbus_service_name}' is not running"
+    return (0, "D-Bus service '$self->{_ovs_dbus_service_name}' is not running")
       if $settings->has_class('tap') && !$self->is_ovs_dbus_service_running;
 
-    return undef;
+    # continue with enqueued jobs in any case but avoid picking up new jobs if system utilization is critical
+    return (1, $self->_check_system_utilization);
+}
+
+sub set_current_error_based_on_availability ($self) {
+    my ($is_available, $reason) = $self->check_availability;
+    $self->current_error($reason);
+    $self->current_error_is_fatal(!$is_available);
+    return $reason;
 }
 
 sub _handle_client_status_changed ($self, $client, $event_data) {
@@ -741,8 +756,8 @@ sub _handle_job_status_changed ($self, $job, $event_data) {
         # hasn't been terminated yet)
         # incomplete subsequent jobs in the queue if it turns out the worker is generally broken
         # continue with the next job in the queue (this just returns if there are no further jobs)
-        $self->current_error(my $availability_error = $self->check_availability);
-        log_warning $availability_error if $availability_error;
+        my $availability_reason = $self->set_current_error_based_on_availability;
+        log_warning $availability_reason if $availability_reason;
 
         if (!$self->_accept_or_skip_next_job_in_queue) {
             # stop if we can not accept/skip the next job (e.g. because there's no further job) if that's configured
@@ -752,10 +767,14 @@ sub _handle_job_status_changed ($self, $job, $event_data) {
 }
 
 sub _load_avg ($path = $ENV{OPENQA_LOAD_AVG_FILE} // '/proc/loadavg') {
-    my @load = eval { split(' ', path($path)->slurp) };
-    log_warning "Unable to determine average load: $@" if $@;
-    splice @load, 3;    # remove non-load numbers
-    log_error "Unable to parse system load from file '$path'" and return [] unless all { looks_like_number $_ } @load;
+    my @load;
+    try {
+        @load = split(' ', path($path)->slurp);
+        splice @load, 3;    # remove non-load numbers
+        log_error "Unable to parse system load from file '$path'" and return []
+          unless all { looks_like_number $_ } @load;
+    }
+    catch ($e) { log_warning "Unable to determine average load: $e" }
     return \@load;
 }
 
@@ -767,7 +786,8 @@ sub _check_system_utilization (
     return undef unless $threshold && @$load >= 3;
     # look at the load evolution over time to react quick enough if the load
     # rises but accept a falling edge
-    return "The average load (@$load) is exceeding the configured threshold of $threshold."
+    return
+"The average load (@$load) is exceeding the configured threshold of $threshold. The worker will temporarily not accept new jobs until the load is lower again."
       if max(@$load) > $threshold && ($load->[0] > $load->[1] || $load->[0] > $load->[2] || min(@$load) > $threshold);
     return undef;
 }
@@ -779,8 +799,8 @@ sub _setup_pool_directory ($self) {
     my $pool_directory = $self->pool_directory;
     return 'No pool directory assigned.' unless $pool_directory;
 
-    eval { $self->{_pool_directory_lock_fd} = $self->_lock_pool_directory };
-    return 'Unable to lock pool directory: ' . $@ if $@;
+    try { $self->{_pool_directory_lock_fd} = $self->_lock_pool_directory }
+    catch ($e) { return 'Unable to lock pool directory: ' . $e }
     return undef;
 }
 

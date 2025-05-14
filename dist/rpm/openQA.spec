@@ -15,10 +15,14 @@
 # Please submit bugfixes or comments via http://bugs.opensuse.org/
 #
 
+# define _distconfdir for openSUSE Leap 15 and SLE 15 (like other packages such as libvpl do)
+%if 0%{?suse_version} < 1550
+%define _distconfdir %{_prefix}%{_sysconfdir}
+%endif
 
 # can't use linebreaks here!
 %define openqa_main_service openqa-webui.service
-%define openqa_extra_services openqa-gru.service openqa-websockets.service openqa-scheduler.service openqa-enqueue-audit-event-cleanup.service openqa-enqueue-audit-event-cleanup.timer openqa-enqueue-asset-cleanup.service openqa-enqueue-git-auto-update.service openqa-enqueue-asset-cleanup.timer openqa-enqueue-result-cleanup.service openqa-enqueue-result-cleanup.timer openqa-enqueue-bug-cleanup.service openqa-enqueue-bug-cleanup.timer openqa-enqueue-git-auto-update.timer
+%define openqa_extra_services openqa-gru.service openqa-websockets.service openqa-scheduler.service openqa-enqueue-audit-event-cleanup.service openqa-enqueue-audit-event-cleanup.timer openqa-enqueue-asset-cleanup.service openqa-enqueue-git-auto-update.service openqa-enqueue-asset-cleanup.timer openqa-enqueue-result-cleanup.service openqa-enqueue-result-cleanup.timer openqa-enqueue-bug-cleanup.service openqa-enqueue-bug-cleanup.timer openqa-enqueue-git-auto-update.timer openqa-enqueue-needle-ref-cleanup.service openqa-enqueue-needle-ref-cleanup.timer
 %define openqa_services %{openqa_main_service} %{openqa_extra_services}
 %define openqa_worker_services openqa-worker.target openqa-slirpvde.service openqa-vde_switch.service openqa-worker-cacheservice.service openqa-worker-cacheservice-minion.service
 %if %{undefined tmpfiles_create}
@@ -59,14 +63,14 @@
 # The following line is generated from dependencies.yaml
 %define assetpack_requires perl(CSS::Minifier::XS) >= 0.01 perl(JavaScript::Minifier::XS) >= 0.11 perl(Mojolicious) perl(Mojolicious::Plugin::AssetPack) >= 1.36 perl(YAML::PP) >= 0.026
 # The following line is generated from dependencies.yaml
-%define common_requires ntp-daemon perl >= 5.20.0 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.340.0 perl(Regexp::Common) perl(Storable) perl(Text::Glob) perl(Time::Moment) perl(Try::Tiny)
+%define common_requires ntp-daemon perl >= 5.20.0 perl(Carp::Always) >= 0.14.02 perl(Config::IniFiles) perl(Config::Tiny) perl(Cpanel::JSON::XS) >= 4.09 perl(Cwd) perl(Data::Dump) perl(Data::Dumper) perl(Digest::MD5) perl(Feature::Compat::Try) perl(Filesys::Df) perl(Getopt::Long) perl(Minion) >= 10.25 perl(Mojolicious) >= 9.340.0 perl(Regexp::Common) perl(Storable) perl(Text::Glob) perl(Time::Moment)
 # runtime requirements for the main package that are not required by other sub-packages
 # The following line is generated from dependencies.yaml
 %define main_requires %assetpack_requires bsdtar git-core hostname perl(BSD::Resource) perl(Carp) perl(CommonMark) perl(Config::Tiny) perl(DBD::Pg) >= 3.7.4 perl(DBI) >= 1.632 perl(DBIx::Class) >= 0.082801 perl(DBIx::Class::DeploymentHandler) perl(DBIx::Class::DynamicDefault) perl(DBIx::Class::OptimisticLocking) perl(DBIx::Class::ResultClass::HashRefInflator) perl(DBIx::Class::Schema::Config) perl(DBIx::Class::Storage::Statistics) perl(Date::Format) perl(DateTime) perl(DateTime::Duration) perl(DateTime::Format::Pg) perl(Exporter) perl(Fcntl) perl(File::Basename) perl(File::Copy) perl(File::Copy::Recursive) perl(File::Path) perl(File::Spec) perl(FindBin) perl(Getopt::Long::Descriptive) perl(IO::Handle) perl(IPC::Run) perl(JSON::Validator) perl(LWP::UserAgent) perl(Module::Load::Conditional) perl(Module::Pluggable) perl(Mojo::Base) perl(Mojo::ByteStream) perl(Mojo::IOLoop) perl(Mojo::JSON) perl(Mojo::Pg) perl(Mojo::RabbitMQ::Client) >= 0.2 perl(Mojo::URL) perl(Mojo::Util) perl(Mojolicious::Commands) perl(Mojolicious::Plugin) perl(Mojolicious::Plugin::OAuth2) perl(Mojolicious::Static) perl(Net::OpenID::Consumer) perl(POSIX) perl(Pod::POM) perl(SQL::Translator) perl(Scalar::Util) perl(Sort::Versions) perl(Text::Diff) perl(Time::HiRes) perl(Time::ParseDate) perl(Time::Piece) perl(Time::Seconds) perl(URI::Escape) perl(YAML::PP) >= 0.026 perl(YAML::XS) perl(aliased) perl(base) perl(constant) perl(diagnostics) perl(strict) perl(warnings)
 # The following line is generated from dependencies.yaml
 %define client_requires curl git-core jq perl(Getopt::Long::Descriptive) perl(IO::Socket::SSL) >= 2.009 perl(IPC::Run) perl(JSON::Validator) perl(LWP::Protocol::https) perl(LWP::UserAgent) perl(Test::More) perl(YAML::PP) >= 0.020 perl(YAML::XS)
 # The following line is generated from dependencies.yaml
-%define worker_requires bsdtar openQA-client optipng os-autoinst < 5 perl(Capture::Tiny) perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.7 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
+%define worker_requires bsdtar openQA-client optipng os-autoinst perl(Capture::Tiny) perl(File::Map) perl(Minion::Backend::SQLite) >= 5.0.7 perl(Mojo::IOLoop::ReadWriteProcess) >= 0.26 perl(Mojo::SQLite) psmisc sqlite3 >= 3.24.0
 # The following line is generated from dependencies.yaml
 %define build_requires %assetpack_requires npm rubygem(sass) >= 3.7.4
 
@@ -81,7 +85,7 @@
 %define qemu qemu
 %endif
 # The following line is generated from dependencies.yaml
-%define style_check_requires ShellCheck perl(Code::TidyAll) perl(Perl::Critic) perl(Perl::Critic::Freenode) python3-yamllint shfmt
+%define style_check_requires ShellCheck perl(Code::TidyAll) perl(Perl::Critic) perl(Perl::Critic::Community) python3-yamllint shfmt
 # The following line is generated from dependencies.yaml
 %define cover_requires perl(Devel::Cover) perl(Devel::Cover::Report::Codecovbash)
 # The following line is generated from dependencies.yaml
@@ -90,7 +94,7 @@
 %define devel_requires %devel_no_selenium_requires chromedriver
 
 Name:           openQA
-Version:        4.6
+Version:        5
 Release:        0
 Summary:        The openQA web-frontend, scheduler and tools
 License:        GPL-2.0-or-later
@@ -108,6 +112,7 @@ BuildRequires:  openSUSE-release
 BuildRequires:  sles-release
 %endif
 BuildRequires:  %{build_requires}
+BuildRequires:  apparmor-rpm-macros
 BuildRequires:  local-npm-registry
 Requires:       perl(Minion) >= 10.0
 Requires:       %{main_requires}
@@ -318,8 +323,7 @@ statistics.
 %prep
 %setup -q
 sed -e 's,/bin/env python,/bin/python,' -i script/openqa-label-all
-rm package-lock.json
-local-npm-registry %{_sourcedir} install --also=dev --legacy-peer-deps
+local-npm-registry %{_sourcedir} install --also=dev --legacy-peer-deps --no-package-lock
 
 %build
 %make_build
@@ -383,9 +387,11 @@ export LANG=en_US.UTF-8
 rm -rf %{buildroot}/%{_sysusersdir}
 %endif
 
-mkdir -p %{buildroot}%{_datadir}/openqa%{_sysconfdir}/openqa
-ln -s %{_sysconfdir}/openqa/openqa.ini %{buildroot}%{_datadir}/openqa%{_sysconfdir}/openqa/openqa.ini
-ln -s %{_sysconfdir}/openqa/database.ini %{buildroot}%{_datadir}/openqa%{_sysconfdir}/openqa/database.ini
+%if 0%{?suse_version} > 1560
+# the limit set via sysctl is already present on Tumbleweed and packaging sysctl config would require a security review
+rm -rf %{buildroot}/%{_prefix}/lib/sysctl.d/01-openqa-reload-worker-auto-restart.conf
+%endif
+
 mkdir -p %{buildroot}%{_bindir}
 ln -s %{_datadir}/openqa/script/client %{buildroot}%{_bindir}/openqa-client
 ln -s %{_datadir}/openqa/script/openqa-cli %{buildroot}%{_bindir}/openqa-cli
@@ -395,6 +401,7 @@ ln -s %{_datadir}/openqa/script/openqa-load-templates %{buildroot}%{_bindir}/ope
 ln -s %{_datadir}/openqa/script/openqa-clone-custom-git-refspec %{buildroot}%{_bindir}/openqa-clone-custom-git-refspec
 ln -s %{_datadir}/openqa/script/openqa-validate-yaml %{buildroot}%{_bindir}/openqa-validate-yaml
 ln -s %{_datadir}/openqa/script/setup-db %{buildroot}%{_bindir}/openqa-setup-db
+ln -s %{_datadir}/openqa/script/dump-db %{buildroot}%{_bindir}/openqa-dump-db
 %if %{with python_scripts}
 ln -s %{_datadir}/openqa/script/openqa-label-all %{buildroot}%{_bindir}/openqa-label-all
 %endif
@@ -531,9 +538,14 @@ if [ -x /usr/bin/systemctl ] && [ $1 -ge 1 ]; then
 fi
 # restart other services
 %service_del_postun %{openqa_extra_services}
-%restart_on_update apparmor
+# reload AppArmor profiles
+%apparmor_reload %{_sysconfdir}/apparmor.d/usr.share.openqa.script.openqa
+%apparmor_reload %{_sysconfdir}/apparmor.d/local/usr.share.openqa.script.openqa
 
 %postun worker
+# reload AppArmor profiles
+%apparmor_reload %{_sysconfdir}/apparmor.d/usr.share.openqa.script.worker
+%apparmor_reload %{_sysconfdir}/apparmor.d/local/usr.share.openqa.script.worker
 # restart worker services on updates; does *not* include services for worker slots unless openqa-worker.target
 # is running at the time of the update
 %service_del_postun %{openqa_worker_services}
@@ -566,14 +578,17 @@ fi
 %{_sbindir}/rcopenqa-websockets
 %{_sbindir}/rcopenqa-webui
 %{_sbindir}/rcopenqa-livehandler
+%ghost %config(noreplace) %attr(0644,geekotest,root) %{_sysconfdir}/openqa/openqa.ini
+%ghost %config(noreplace) %attr(0640,geekotest,root) %{_sysconfdir}/openqa/database.ini
 %dir %{_sysconfdir}/openqa
-%config(noreplace) %attr(-,geekotest,root) %{_sysconfdir}/openqa/openqa.ini
-%config(noreplace) %attr(-,geekotest,root) %{_sysconfdir}/openqa/database.ini
+%dir %{_sysconfdir}/openqa/openqa.ini.d
+%dir %{_sysconfdir}/openqa/database.ini.d
+%dir %{_distconfdir}/openqa
+%dir %{_distconfdir}/openqa/openqa.ini.d
+%dir %{_distconfdir}/openqa/database.ini.d
+%{_datadir}/doc/openqa/examples/openqa.ini
+%{_datadir}/doc/openqa/examples/database.ini
 %dir %{_datadir}/openqa
-%dir %{_datadir}/openqa/etc
-%dir %{_datadir}/openqa%{_sysconfdir}/openqa
-%{_datadir}/openqa%{_sysconfdir}/openqa/openqa.ini
-%{_datadir}/openqa%{_sysconfdir}/openqa/database.ini
 %config %{_sysconfdir}/logrotate.d
 # apache vhost
 %dir %{_sysconfdir}/apache2
@@ -612,6 +627,8 @@ fi
 %{_unitdir}/openqa-enqueue-result-cleanup.timer
 %{_unitdir}/openqa-enqueue-bug-cleanup.service
 %{_unitdir}/openqa-enqueue-bug-cleanup.timer
+%{_unitdir}/openqa-enqueue-needle-ref-cleanup.service
+%{_unitdir}/openqa-enqueue-needle-ref-cleanup.timer
 %{_tmpfilesdir}/openqa-webui.conf
 # web libs
 %dir %{_datadir}/openqa
@@ -648,6 +665,7 @@ fi
 %{_datadir}/openqa/script/openqa-webui-daemon
 %{_datadir}/openqa/script/upgradedb
 %{_datadir}/openqa/script/modify_needle
+%{_datadir}/openqa/script/openqa-enqueue-needle-ref-cleanup
 # TODO: define final user
 %defattr(-,geekotest,root)
 # attention: never package subdirectories owned by a user other
@@ -674,6 +692,11 @@ fi
 %endif
 
 %files common
+%if 0%{?suse_version} < 1550
+%dir %{_distconfdir}
+%endif
+%dir %{_datadir}/doc/openqa
+%dir %{_datadir}/doc/openqa/examples
 %dir %{_datadir}/openqa
 %{_datadir}/openqa/lib
 %exclude %{_datadir}/openqa/lib/OpenQA/CacheService/
@@ -694,6 +717,7 @@ fi
 %{_localstatedir}/lib/openqa/script
 %{_localstatedir}/lib/openqa/tests
 %{_datadir}/openqa/script/openqa-check-devel-repo
+%{_datadir}/openqa/script/openqa-clean-repo-cache
 %{_unitdir}/openqa-minion-restart.service
 %{_unitdir}/openqa-minion-restart.path
 
@@ -703,8 +727,14 @@ fi
 %{_sbindir}/rcopenqa-slirpvde
 %{_sbindir}/rcopenqa-vde_switch
 %{_sbindir}/rcopenqa-worker
-%config(noreplace) %{_sysconfdir}/openqa/workers.ini
-%config(noreplace) %attr(0400,_openqa-worker,root) %{_sysconfdir}/openqa/client.conf
+%ghost %config(noreplace) %{_sysconfdir}/openqa/workers.ini
+%ghost %config(noreplace) %attr(0400,_openqa-worker,root) %{_sysconfdir}/openqa/client.conf
+%dir %{_sysconfdir}/openqa/workers.ini.d
+%dir %{_sysconfdir}/openqa/client.conf.d
+%dir %{_distconfdir}/openqa/workers.ini.d
+%dir %{_distconfdir}/openqa/client.conf.d
+%{_datadir}/doc/openqa/examples/workers.ini
+%{_datadir}/doc/openqa/examples/client.conf
 # apparmor profile
 %dir %{_sysconfdir}/apparmor.d
 %config %{_sysconfdir}/apparmor.d/usr.share.openqa.script.worker
@@ -743,6 +773,9 @@ fi
 %dir %{_localstatedir}/lib/openqa/pool/1
 %if 0%{?suse_version} > 1500
 %{_sysusersdir}/%{name}-worker.conf
+%endif
+%if 0%{?suse_version} <= 1560
+%{_prefix}/lib/sysctl.d/01-openqa-reload-worker-auto-restart.conf
 %endif
 
 %files client
@@ -785,7 +818,9 @@ fi
 %{_unitdir}/openqa-scheduler.service.requires/postgresql.service
 %{_unitdir}/openqa-websockets.service.requires/postgresql.service
 %{_datadir}/openqa/script/setup-db
+%{_datadir}/openqa/script/dump-db
 %{_bindir}/openqa-setup-db
+%{_bindir}/openqa-dump-db
 
 %files single-instance
 

@@ -3,6 +3,7 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 use Test::Most;
+use Mojo::Base -signatures;
 
 use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
@@ -10,11 +11,13 @@ use File::Path qw(remove_tree);
 use Test::Warnings ':report_warnings';
 use Test::MockModule;
 use Test::Mojo;
+use Time::HiRes 'sleep';
 use OpenQA::Jobs::Constants;
 use OpenQA::Resource::Jobs 'job_restart';
 use OpenQA::WebAPI::Controller::API::V1::Worker;
 use OpenQA::Constants 'WEBSOCKET_API_VERSION';
 require OpenQA::Test::Database;
+use OpenQA::Test::Client 'client';
 use OpenQA::Test::Utils 'embed_server_for_testing';
 use OpenQA::Test::TimeLimit '10';
 use OpenQA::WebSockets::Client;
@@ -22,7 +25,7 @@ use OpenQA::Scheduler::Model::Jobs;
 use OpenQA::Schema::ResultSet::Assets;
 use OpenQA::Utils qw(:DEFAULT assetdir);
 use Mojo::File 'path';
-use Mojo::Util 'monkey_patch';
+use Mojo::Util 'scope_guard';
 
 # mock worker websocket send and record what was sent
 my $mock = Test::MockModule->new('OpenQA::Schema::Result::Jobs');
@@ -40,10 +43,10 @@ $mock->redefine(
     });
 
 my $schema;
-ok($schema = OpenQA::Test::Database->new->create, 'create database')
+ok($schema = OpenQA::Test::Database->new->create(fixtures_glob => '03-users.pl'), 'create database')
   || BAIL_OUT('failed to create database');
 
-my $t = Test::Mojo->new('OpenQA::WebAPI');
+my $t = client(Test::Mojo->new('OpenQA::WebAPI'));
 my $cfg = $t->app->config;
 $cfg->{global}->{hide_asset_types} = 'repo  foo ';
 $cfg->{'scm git'}->{git_auto_update} = 'no';
@@ -57,7 +60,7 @@ my $jobs = $schema->resultset('Jobs');
 my $job_without_assets
   = $jobs->create_from_settings({map { $_ => 1 } qw(TEST DISTRI VERSION FLAVOR BUILD UEFI_PFLASH_VARS)});
 my $missing_assets = $job_without_assets->missing_assets;
-is_deeply $missing_assets, [], 'no assets missing if job has no relevant assets' or diag explain $missing_assets;
+is_deeply $missing_assets, [], 'no assets missing if job has no relevant assets' or always_explain $missing_assets;
 
 my $assets = $schema->resultset('Assets');
 my $not_actually_fixed_asset = $assets->create({type => 'iso', name => 'not actually fixed', fixed => 1});
@@ -92,9 +95,9 @@ my $workercaps = {
 
 my $jobA = $jobs->create_from_settings(\%settings);
 my @assets = map { $_->asset->name } $jobA->jobs_assets->all;
-is_deeply \@assets, ['whatever.iso'], 'one asset assigned before grabbing (1)' or diag explain \@assets;
+is_deeply \@assets, ['whatever.iso'], 'one asset assigned before grabbing (1)' or always_explain \@assets;
 $missing_assets = $jobA->missing_assets;
-is_deeply $missing_assets, [], 'all assets present' or diag explain $missing_assets;
+is_deeply $missing_assets, [], 'all assets present' or always_explain $missing_assets;
 my $theasset = $assets[0];
 $jobA->set_prio(1);
 
@@ -102,14 +105,13 @@ $jobA->set_prio(1);
 # register worker
 my $c = OpenQA::WebAPI::Controller::API::V1::Worker->new;
 my $w;
-eval { $w = $c->_register($schema, 'host', '1', $workercaps); };
-like($@, qr/Incompatible websocket API version/, 'Worker no version - incompatible version exception');
+throws_ok { $w = $c->_register($schema, 'host', '1', $workercaps) } qr/Incompatible websocket API version/,
+  'Worker no version - incompatible version exception';
 $workercaps->{websocket_api_version} = 999999;
-eval { $w = $c->_register($schema, 'host', '1', $workercaps); };
-like($@, qr/Incompatible websocket API version/, 'Worker different version - incompatible version exception');
+throws_ok { $w = $c->_register($schema, 'host', '1', $workercaps) } qr/Incompatible websocket API version/,
+  'Worker different version - incompatible version exception';
 $workercaps->{websocket_api_version} = WEBSOCKET_API_VERSION;
-eval { $w = $c->_register($schema, 'host', '1', $workercaps); };
-ok(!$@, 'Worker correct version');
+lives_ok { $w = $c->_register($schema, 'host', '1', $workercaps) } 'Worker correct version';
 
 my $worker = $schema->resultset('Workers')->find($w);
 is($worker->websocket_api_version(), WEBSOCKET_API_VERSION, 'Worker version set correctly');
@@ -119,7 +121,7 @@ OpenQA::Scheduler::Model::Jobs->singleton->schedule();
 my $job = $sent->{$w}->{job}->to_hash;
 is($job->{id}, $jobA->id, 'jobA grabbed');
 @assets = map { $_->asset->name } $jobA->jobs_assets->all;
-is(scalar @assets, 1, 'job still has only one asset assigned after grabbing') or diag explain \@assets;
+is(scalar @assets, 1, 'job still has only one asset assigned after grabbing') or always_explain \@assets;
 is($assets[0], $theasset, 'the assigned asset is the same');
 
 note 'assume worker picked up the job';
@@ -129,13 +131,13 @@ $jobA->update({state => SETUP});
 my $jobA_id = $jobA->id;
 my $res = job_restart([$jobA_id]);
 is(@{$res->{duplicates}}, 1, 'one duplicate');
-is(@{$res->{errors}}, 0, 'no errors') or diag explain $res->{errors};
-is(@{$res->{warnings}}, 0, 'no warnings') or diag explain $res->{warnings};
+is(@{$res->{errors}}, 0, 'no errors') or always_explain $res->{errors};
+is(@{$res->{warnings}}, 0, 'no warnings') or always_explain $res->{warnings};
 
 my $duplicate_id = $res->{duplicates}->[0]->{$jobA_id} or BAIL_OUT "unable to restart $jobA_id";
 my $cloneA = $schema->resultset('Jobs')->find($duplicate_id);
 @assets = map { $_->asset->name } $cloneA->jobs_assets->all;
-is $assets[0], $theasset, 'clone has the same asset assigned' or diag explain \@assets;
+is $assets[0], $theasset, 'clone has the same asset assigned' or always_explain \@assets;
 
 my $jabasename = 'jobasset.raw';
 my $janame = sprintf('%08d-%s', $cloneA->id, $jabasename);
@@ -150,7 +152,7 @@ $settings{TEST} = 'testB';
 my $jobB = $schema->resultset('Jobs')->create_from_settings(\%settings);
 @assets = sort map { $_->asset->name } $jobB->jobs_assets->all;
 is_deeply \@assets, [$jabasename, $theasset], 'both assets are assigned, jobasset.raw assumed to be public asset'
-  or diag explain \@assets;
+  or always_explain \@assets;
 # set jobA (normally this is done by worker after abort) and cloneA to done
 # needed for job grab to fulfill dependencies
 $jobA->discard_changes;
@@ -168,7 +170,7 @@ OpenQA::Scheduler::Model::Jobs->singleton->schedule();
 $job = $sent->{$w}->{job}->to_hash;
 is($job->{id}, $jobB->id, 'jobB grabbed');
 @assets = sort map { $_->asset->name } $jobB->jobs_assets->all;
-is_deeply \@assets, [$janame, $theasset], 'using correct assets after grabbing' or diag explain \@assets;
+is_deeply \@assets, [$janame, $theasset], 'using correct assets after grabbing' or always_explain \@assets;
 
 ## test job is duped when depends on asset created by duping job
 # clone cloneA
@@ -291,10 +293,10 @@ subtest 'check for missing assets' => sub {
         @assets = sort map { $_->asset->name } $job_with_2_assets->jobs_assets;
         is_deeply \@assets, [qw(not_existent whatever.iso whatever.sha256)],
           'two existing and one missing assets assigned'
-          or diag explain \@assets;
+          or always_explain \@assets;
         is_deeply $job_with_2_assets->missing_assets,
           ['hdd/not_existent'], 'assets are considered missing if at least one is missing'
-          or diag explain $job_with_2_assets->missing_assets;
+          or always_explain $job_with_2_assets->missing_assets;
     };
     subtest 'repo assets are ignored' => sub {
         $settings{REPO_0} = delete $settings{HDD_1};
@@ -321,7 +323,7 @@ subtest 'check for missing assets' => sub {
           ->create({type => 'hdd', name => sprintf("%08d-disk_from_parent", $parent_job->id), size => 0});
         $missing_assets = $job_with_2_assets->missing_assets;
         is_deeply $missing_assets, [], 'private asset created by parent so no asset missing'
-          or diag explain $missing_assets;
+          or always_explain $missing_assets;
     };
     subtest 'private assets not reported besides others missing' => sub {
         my $parent_job = $jobs->create_from_settings(\%settings);
@@ -339,7 +341,105 @@ subtest 'check for missing assets' => sub {
         $missing_assets = $job_with_2_assets->missing_assets;
         is_deeply $missing_assets, ['hdd/non_existent'],
           'private assets correctly detected also when other asset is missing'
-          or diag explain $missing_assets;
+          or always_explain $missing_assets;
+    };
+};
+
+subtest 'concurrent asset creation' => sub {
+    my $minion = $t->app->minion;
+    $minion->reset({all => 1});
+
+    # allow configuring a delay so this test will always trigger the deadlock case
+    my $delay = $ENV{OPENQA_ASSET_TESTS_DELAY} // 1;
+    my $jobs_mock = Test::MockModule->new('OpenQA::Schema::ResultSet::Jobs');
+    $jobs_mock->redefine(
+        create_from_settings => sub ($self, $settings, @args) {
+            explain "create from settings called from PID $$: ", $settings;
+            my $res = $jobs_mock->original('create_from_settings')->($self, $settings, @args);
+            sleep $delay;
+            return $res;
+        });
+
+    # define settings for jobs and assets to be created/registered
+    my %base_settings
+      = (DISTRI => 'sle', VERSION => '12-SP5', FLAVOR => 'Server-DVD-Updates', ARCH => 'x86_64', TEST => 'base');
+    my $asset_name_1 = 'SLES-12-SP5-x86_64-mru-install-desktop-with-addons-Build20250211-1.qcow2';
+    my $asset_name_2 = 'SLES-12-SP5-x86_64-mru-install-desktop-with-addons-Build20250211-2.qcow2';
+    my %settings_1 = (%base_settings, TEST => 'job1', HDD_1 => $asset_name_1, HDD_1_URL => "http://foo/$asset_name_1");
+    my %settings_2 = (%base_settings, TEST => 'job2', HDD_1 => $asset_name_2, HDD_1_URL => "http://foo/$asset_name_2");
+
+    # define functions to create jobs using the web API
+    my $post_job = sub ($delay, @settings) {
+        sleep $delay / 2;
+        my %combined_settings;
+        my $index = 0;
+        for my $settings (@settings) {
+            $combined_settings{"$_:$index"} = $settings->{$_} for keys %$settings;
+            ++$index;
+        }
+        note "starting job post, $settings[0]->{TEST} first";
+        $t->post_ok('/api/v1/jobs', form => \%combined_settings)
+          ->status_is(200, "posted jobs, $settings[0]->{TEST} first");
+        ok my @job_ids = values %{$t->tx->res->json->{ids}}, 'IDs returned for jobs'
+          or always_explain $t->tx->res->body;
+        note "concluded job post, $settings[0]->{TEST} first";
+        return \@job_ids;
+    };
+    my $schedule_product = sub ($delay, @settings) {
+        sleep $delay / 2;
+        my $scheduling_mock = Test::MockModule->new('OpenQA::Schema::Result::ScheduledProducts');
+        $scheduling_mock->mock(_generate_jobs => {settings_result => [@settings]});
+        note "starting isos post, $settings[0]->{TEST} first";
+        $t->post_ok('/api/v1/isos', form => \%base_settings)
+          ->status_is(200, "scheduled jobs, $settings[0]->{TEST} first");
+        my $job_ids = $t->tx->res->json->{ids};
+        is @$job_ids, @settings, 'one job ID per setting returned' or always_explain $t->tx->res->body;
+        note "concluded isos post, $settings[0]->{TEST} first";
+        return $job_ids;
+    };
+    my $post_jobs_1 = sub { $post_job->(0, \%settings_1, \%settings_2) };
+    my $post_jobs_2 = sub { $post_job->($delay, \%settings_2, \%settings_1) };
+    my $schedule_product_1 = sub { $schedule_product->(0, \%settings_1, \%settings_2) };
+    my $schedule_product_2 = sub { $schedule_product->($delay, \%settings_2, \%settings_1) };
+
+    # define function to test the job creation in parallel using the specified creation functions
+    my $loop = Mojo::IOLoop->singleton;
+    my $create_jobs = sub (@fn) {
+        # clean up the assets from the previous subtests
+        # note: The assets must not exist as this test would otherwise not provoke a deadlock.
+        $assets->search({type => 'hdd', name => {-in => [$asset_name_1, $asset_name_2]}})->delete;
+
+        my @all_job_ids;
+        my @promises = map {
+            $loop->subprocess->run_p($_)->then(sub ($job_ids) { push @all_job_ids, @$job_ids })
+        } @fn;
+
+        # wait for results and check
+        $_->wait for @promises;
+        is @all_job_ids, 4, "expected number of jobs created with IDs @all_job_ids";
+        ok $assets->find({type => 'hdd', name => $asset_name_1}), 'asset 1 exists';
+        ok $assets->find({type => 'hdd', name => $asset_name_2}), 'asset 2 exists';
+        is $jobs->find($_)->assets->count, 1, "job $_ with asset associated" for @all_job_ids;
+    };
+
+    subtest 'posting a single set of jobs' => sub { $create_jobs->($post_jobs_1, $post_jobs_2) };
+    subtest 'scheduling a product' => sub { $create_jobs->($schedule_product_1, $schedule_product_2) };
+    subtest 'track coverage of helpers' => sub { $_->(0, \%base_settings) for $post_job, $schedule_product };
+
+    subtest 'no leftover Minion jobs after handling deadlocks' => sub {
+        my $jobs = $minion->jobs;
+        my $count = 0;
+        my $gru_tasks = $schema->resultset('GruTasks');
+        while (my $info = $jobs->next) {
+            next if $info->{notes}->{obsolete};
+            my $job_id = $info->{id};
+            my $gru_id = $info->{notes}->{gru_id};
+            ++$count;
+            is $info->{task}, 'download_asset', "Minion job $job_id is of expected task";
+            ok $gru_tasks->find($gru_id), "Minion job $job_id refers to Gru task with valid ID $gru_id"
+              or always_explain $info;
+        }
+        is $count, 8, 'one Minion job per openQA job, excluding obsolete jobs';
     };
 };
 

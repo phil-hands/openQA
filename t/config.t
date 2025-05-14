@@ -8,7 +8,12 @@ use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 
 use Test::Warnings ':report_warnings';
 use Test::Output 'combined_like';
+use Test::MockModule;
 use Mojolicious;
+use Mojo::Base -signatures;
+use Mojo::Log;
+use OpenQA::App;
+use OpenQA::Config;
 use OpenQA::Constants qw(DEFAULT_WORKER_TIMEOUT MAX_TIMER);
 use OpenQA::Test::TimeLimit '4';
 use OpenQA::Setup;
@@ -16,6 +21,8 @@ use OpenQA::JobGroupDefaults;
 use OpenQA::Task::Job::Limit;
 use Mojo::File 'tempdir';
 use Time::Seconds;
+
+my $quiet_log = Mojo::Log->new(level => 'warn');
 
 sub read_config {
     my ($app, $msg) = @_;
@@ -26,9 +33,13 @@ sub read_config {
 }
 
 subtest 'Test configuration default modes' => sub {
-    local $ENV{OPENQA_CONFIG} = undef;
+    # test with a completely empty config file to check defaults
+    # note: We cannot use no config file at all because then the lookup would fallback to a system configuration.
+    my $t_dir = tempdir;
+    $t_dir->child('openqa.ini')->touch;
+    local $ENV{OPENQA_CONFIG} = $t_dir;
 
-    my $app = Mojolicious->new();
+    OpenQA::App->set_singleton(my $app = Mojolicious->new(log => $quiet_log));
     $app->mode("test");
     my $config = read_config($app, 'reading config from default with mode test');
     is(length($config->{_openid_secret}), 16, "config has openid_secret");
@@ -59,6 +70,7 @@ subtest 'Test configuration default modes' => sub {
         },
         auth => {
             method => 'Fake',
+            require_for_assets => 0,
         },
         'scm git' => {
             update_remote => '',
@@ -66,8 +78,11 @@ subtest 'Test configuration default modes' => sub {
             do_push => 'no',
             do_cleanup => 'no',
             git_auto_clone => 'yes',
-            git_auto_update => 'no',
+            git_auto_update => 'yes',
             git_auto_update_method => 'best-effort',
+            checkout_needles_sha => 'no',
+            allow_arbitrary_url_fetch => 'no',
+            temp_needle_refs_retention => 2 * ONE_MINUTE,
         },
         'scheduler' => {
             max_job_scheduled_time => 7,
@@ -86,6 +101,7 @@ subtest 'Test configuration default modes' => sub {
             user_url => '',
             token_scope => '',
             token_label => '',
+            id_from => 'id',
             nickname_from => '',
             unique_name => '',
         },
@@ -164,6 +180,7 @@ subtest 'Test configuration default modes' => sub {
             assets_default_limit => 100000,
             assets_max_limit => 200000,
             max_online_workers => 1000,
+            wait_for_grutask_retries => 6,
             worker_limit_retry_delay => ONE_HOUR / 4,
         },
         archiving => {
@@ -192,8 +209,7 @@ subtest 'Test configuration default modes' => sub {
     is_deeply $config, $test_config, '"test" configuration';
 
     # Test configuration generation with "development" mode
-    $app = Mojolicious->new();
-    $app->mode("development");
+    $app = Mojolicious->new(mode => 'development');
     $config = read_config($app, 'reading config from default with mode development');
     $test_config->{_openid_secret} = $config->{_openid_secret};
     $test_config->{global}->{service_port_delta} = 2;
@@ -202,8 +218,7 @@ subtest 'Test configuration default modes' => sub {
     is_deeply $config, $test_config, 'right "development" configuration';
 
     # Test configuration generation with an unknown mode (should fallback to default)
-    $app = Mojolicious->new();
-    $app->mode("foo_bar");
+    $app = Mojolicious->new(mode => 'foo_bar');
     $config = read_config($app, 'reading config from default with mode foo_bar');
     $test_config->{_openid_secret} = $config->{_openid_secret};
     $test_config->{auth}->{method} = "OpenID";
@@ -217,7 +232,7 @@ subtest 'Test configuration default modes' => sub {
 subtest 'Test configuration override from file' => sub {
     my $t_dir = tempdir;
     local $ENV{OPENQA_CONFIG} = $t_dir;
-    my $app = Mojolicious->new();
+    OpenQA::App->set_singleton(my $app = Mojolicious->new(log => $quiet_log));
     my @data = (
         "[global]\n",
         "suse_mirror=http://blah/\n",
@@ -255,7 +270,7 @@ subtest 'Test configuration override from file' => sub {
 subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
     my $t_dir = tempdir;
     local $ENV{OPENQA_CONFIG} = $t_dir;
-    my $app = Mojolicious->new();
+    OpenQA::App->set_singleton(my $app = Mojolicious->new(log => $quiet_log));
     my $data = '
         [global]
         appname =  openQA  
@@ -263,19 +278,18 @@ subtest 'trim whitespace characters from both ends of openqa.ini value' => sub {
         recognized_referers =   bugzilla.suse.com   progress.opensuse.org github.com
     ';
     $t_dir->child('openqa.ini')->spew($data);
-    OpenQA::Setup::read_config($app);
-    ok($app->config->{global}->{appname} eq 'openQA', 'appname');
-    ok($app->config->{global}->{hide_asset_types} eq 'repo iso', 'hide_asset_types');
-    is_deeply(
-        $app->config->{global}->{recognized_referers},
-        [qw(bugzilla.suse.com progress.opensuse.org github.com)],
-        'recognized_referers'
-    );
+    my $global_config = OpenQA::Setup::read_config($app)->{global};
+    is $global_config->{appname}, 'openQA', 'appname';
+    is $global_config->{hide_asset_types}, 'repo iso', 'hide_asset_types';
+    is_deeply $global_config->{recognized_referers},
+      [qw(bugzilla.suse.com progress.opensuse.org github.com)],
+      'recognized_referers';
 };
 
 subtest 'Validation of worker timeout' => sub {
-    my $app = Mojolicious->new(config => {global => {worker_timeout => undef}});
+    my $app = Mojolicious->new(config => {global => {worker_timeout => undef}}, log => $quiet_log);
     my $configured_timeout = \$app->config->{global}->{worker_timeout};
+    OpenQA::App->set_singleton($app);
     subtest 'too low worker_timeout' => sub {
         $$configured_timeout = MAX_TIMER - 1;
         combined_like { OpenQA::Setup::_validate_worker_timeout($app) } qr/worker_timeout.*invalid/, 'warning logged';
@@ -291,6 +305,54 @@ subtest 'Validation of worker timeout' => sub {
         combined_like { OpenQA::Setup::_validate_worker_timeout($app) } qr/worker_timeout.*invalid/, 'warning logged';
         is $$configured_timeout, DEFAULT_WORKER_TIMEOUT, 'rejected';
     };
+};
+
+subtest 'Multiple config files' => sub {
+    my $t_dir = tempdir;
+    my $openqa_d = $t_dir->child('openqa.ini.d')->make_path;
+    local $ENV{OPENQA_CONFIG} = $t_dir;
+    OpenQA::App->set_singleton(my $app = Mojolicious->new(log => $quiet_log));
+    my $data_main = "[global]\nappname =  openQA main config\nhide_asset_types = repo iso\n";
+    my $data_01 = "[global]\nappname =  openQA override 1\nscm = bazel";
+    my $data_02 = "[global]\nappname =  openQA override 2";
+    $t_dir->child('openqa.ini')->spew($data_main);
+    $openqa_d->child('01-appname-and-scm.ini')->spew($data_01);
+    $openqa_d->child('02-appname.ini')->spew($data_02);
+    my $global_config = OpenQA::Setup::read_config($app)->{global};
+    is $global_config->{appname}, 'openQA override 2', 'appname overriden by config from openqa.ini.d, last one wins';
+    is $global_config->{scm}, 'bazel', 'scm set by config from openqa.ini.d, not overriden';
+    is $global_config->{hide_asset_types}, 'repo iso', 'types set from main config, not overriden';
+};
+
+subtest 'Lookup precedence/hiding' => sub {
+    my $t_dir = tempdir;
+    my @args = (undef, 'openqa.ini');
+    my $config_mock = Test::MockModule->new('OpenQA::Config');
+    $config_mock->redefine(_config_dirs => [["$t_dir/override"], ["$t_dir/home"], ["$t_dir/admin", "$t_dir/package"]]);
+
+    my @expected;
+    is_deeply lookup_config_files(@args), \@expected, 'no config files found';
+
+    @expected = ("$t_dir/package/openqa.ini", "$t_dir/package/openqa.ini.d/packager-drop-in.ini");
+    $t_dir->child('package')->make_path->child('openqa.ini')->touch->sibling('openqa.ini.d')
+      ->make_path->child('packager-drop-in.ini')->touch;
+    is_deeply lookup_config_files(@args), \@expected, 'found config from package';
+
+    splice @expected, 0, 0, "$t_dir/admin/openqa.ini.d/admin-drop-in.ini";
+    $t_dir->child('admin')->make_path->child('openqa.ini.d')->make_path->child('admin-drop-in.ini')->touch;
+    is_deeply lookup_config_files(@args), \@expected, 'additional config from admin does not hide config from packager';
+
+    @expected = ("$t_dir/admin/openqa.ini", "$t_dir/admin/openqa.ini.d/admin-drop-in.ini");
+    $t_dir->child('admin')->child('openqa.ini')->touch;
+    is_deeply lookup_config_files(@args), \@expected, 'main config from admin hides config from packager';
+
+    @expected = ("$t_dir/home/openqa.ini.d/home-drop-in.ini");
+    $t_dir->child('home')->child('openqa.ini.d')->make_path->child('home-drop-in.ini')->touch;
+    is_deeply lookup_config_files(@args), \@expected, 'drop-in in home hides all other config';
+
+    @expected = ("$t_dir/override/openqa.ini.d/override-drop-in.ini");
+    $t_dir->child('override')->child('openqa.ini.d')->make_path->child('override-drop-in.ini')->touch;
+    is_deeply lookup_config_files(@args), \@expected, 'drop-in in overriden dir hides all other config';
 };
 
 done_testing();

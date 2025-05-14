@@ -147,7 +147,7 @@ subtest 'mark job with taken over bugref as done' => sub {
             reason => undef,
         },
         'carried over bugref and resolved URL present in AMQP event'
-    ) or diag explain $job_event;
+    ) or always_explain $job_event;
     ok delete $comment_event->{created}, 'carryover comment creation date present';
     ok delete $comment_event->{updated}, 'carryover comment update date present';
     is_deeply(
@@ -163,7 +163,7 @@ subtest 'mark job with taken over bugref as done' => sub {
             taken_over_from_job_id => 99962,
         },
         'AMQP event for carry-over comment'
-    ) or diag explain $comment_event;
+    ) or always_explain $comment_event;
 };
 
 subtest 'duplicate and cancel job' => sub {
@@ -301,17 +301,20 @@ subtest 'amqp_publish call with headers' => sub {
 };
 
 subtest 'promise handlers' => sub {
-    combined_like { $amqp->publish_amqp('some.topic', {}) } qr/Sending.*some\.topic/, 'publishing logged (1)';
+    my %event_data = (id => 'foo', job_id => 'bar');
+    combined_like { $amqp->publish_amqp('some.topic', \%event_data) } qr/Sending.*some\.topic/, 'publishing logged (1)';
     combined_like { $last_promise->resolve(1); $last_promise->wait } qr/some\.topic published/, 'success logged';
-    combined_like { $amqp->publish_amqp('some.topic', {}) } qr/Sending.*some\.topic/, 'publishing logged (2)';
+    combined_like { $amqp->publish_amqp('some.topic', \%event_data) } qr/Sending.*some\.topic/, 'publishing logged (2)';
     my $previous_promise = $last_promise;
     combined_like { $last_promise->reject('some error'); $last_promise->wait }
-    qr/Publishing some\.topic failed: some error \(1 attempts left\)/, 'failure logged, 1 attempt remaining';
+    qr/info.*Publishing some\.topic failed: some error \(event ID: foo, job ID: bar, 1 attempts left\)/,
+      'failure logged, 1 attempt remaining';
     combined_like { Mojo::IOLoop->one_tick } qr/Sending.*some\.topic/, 'trying to publish the event again';
     isnt $last_promise, $previous_promise, 'another promise has been made (to re-try)';
     $previous_promise = $last_promise;
     combined_like { $last_promise->reject('some error'); $last_promise->wait }
-    qr/Publishing some\.topic failed: some error \(0 attempts left\)/, 'failure logged, no attempts remaining';
+    qr/error.*Publishing some\.topic failed: some error \(event ID: foo, job ID: bar, 0 attempts left\)/,
+      'failure logged, no attempts remaining';
     combined_unlike { Mojo::IOLoop->one_tick } qr/Sending.*some\.topic/, 'no further retry logged';
     is $last_promise, $previous_promise, 'no further promise has been made (running out of retries)';
 };

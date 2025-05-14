@@ -16,7 +16,7 @@ use OpenQA::Scheduler::Client;
 use OpenQA::Log qw(log_error log_info);
 use List::Util qw(min);
 use Scalar::Util qw(looks_like_number);
-use Try::Tiny;
+use Feature::Compat::Try;
 use DBIx::Class::Timestamps 'now';
 use Mojo::Asset::Memory;
 use Mojo::File 'path';
@@ -316,7 +316,7 @@ be merged ($job_specific_params takes precedence).
 
 =cut
 
-sub _create_job ($self, $global_params, $job_suffix = undef, $job_specific_params = {}) {
+sub _create_job ($self, $global_params, $job_suffix, $job_specific_params, $minion_ids) {
     # job_create expects upper case keys
     my %up_params = map { uc $_ => $global_params->{$_} } keys %$global_params;
     $up_params{uc $_} = $job_specific_params->{$_} for keys %$job_specific_params;
@@ -344,9 +344,9 @@ sub _create_job ($self, $global_params, $job_suffix = undef, $job_specific_param
 
     # enqueue gru jobs and calculate blocked by
     push @{$downloads->{$_}}, [$job_id] for keys %$downloads;
-    $self->gru->enqueue_download_jobs($downloads);
+    $self->gru->enqueue_download_jobs($downloads, $minion_ids);
     my $clones = create_git_clone_list($job_settings);
-    $self->gru->enqueue_git_clones($clones, [$job_id]) if keys %$clones;
+    $self->gru->enqueue_git_clones($clones, [$job_id], $minion_ids) if keys %$clones;
     return $job_id;
 }
 
@@ -391,14 +391,14 @@ if $grouped_params is empty.
 
 =cut
 
-sub _create_jobs ($self, $global_params, $grouped_params) {
+sub _create_jobs ($self, $global_params, $grouped_params, $minion_ids) {
     if (keys %$grouped_params) {
         # create as many jobs as unique ":"-suffixes exist
-        $self->_create_job($global_params, $_, $grouped_params->{$_}) for keys %$grouped_params;
+        $self->_create_job($global_params, $_, $grouped_params->{$_}, $minion_ids) for keys %$grouped_params;
     }
     else {
         # create a single job if there are no job-specific parameters
-        $self->_create_job($global_params);
+        $self->_create_job($global_params, undef, {}, $minion_ids);
     }
     $self->_create_dependencies;
 }
@@ -421,17 +421,21 @@ sub create ($self) {
     my $json = $self->{_json} = {};
     my $event_data = $self->{_event_data} = [];
     my $dependencies = $self->{_dependencies} = [];
+    my @minion_ids;
+    my $gru = OpenQA::App->singleton->gru;
     try {
-        $self->schema->txn_do(sub { $self->_create_jobs($global_params, $grouped_params) });
+        $self->schema->txn_do_retry_on_deadlock(
+            sub { $self->_create_jobs($global_params, $grouped_params, \@minion_ids) },
+            sub { $gru->obsolete_minion_jobs(\@minion_ids) });
         OpenQA::Scheduler::Client->singleton->wakeup;
     }
-    catch {
-        my $error = $_;
-        chomp $error;
-        $json->{error} = $error;
+    catch ($e) {
+        chomp $e;
+        $json->{error} = $e;
         delete $json->{id};
         delete $json->{ids};
-    };
+        $gru->obsolete_minion_jobs(\@minion_ids);
+    }
 
     $self->emit_event(openqa_job_create => $_) for @$event_data;
     $self->render(json => $json, status => ($json->{error} ? 400 : 200));
@@ -444,6 +448,7 @@ sub create ($self) {
 Shows details for a specific job, such as the assets associated, assigned worker id,
 children and parents, job id, group id, name, parent group id and name, priority, result,
 settings, state and times of startup and finish of the job.
+Pass follow=1 as query param to follow job clones and report most recent result for given id.
 
 =back
 
@@ -453,9 +458,11 @@ sub show ($self) {
     my $job_id = int($self->stash('jobid'));
     my $details = $self->stash('details') || 0;
     my $check_assets = !!$self->param('check_assets');
-    my $job = $self->schema->resultset('Jobs')->find($job_id, {prefetch => 'settings'});
-    return $self->reply->not_found unless $job;
+    my $follow = $self->param('follow');
+    return unless my $job = $self->find_job_or_render_not_found($job_id, $follow ? {prefetch => 'settings'} : {});
+    $job = $job->latest_job if $follow;
     $job = $job->to_hash(assets => 1, check_assets => $check_assets, deps => 1, details => $details, parent_group => 1);
+    $job->{followed_id} = $job_id if ($job_id != $job->{id});
     $self->render(json => {job => $job});
 }
 
@@ -565,16 +572,14 @@ sub update_status ($self) {
         $worker->seen;
         $ret = $job->update_status($status);
     }
-    catch {
-        # uncoverable statement
-        my $error_message = $_;
+    catch ($e) {
         # uncoverable statement
         my $worker_name = $worker->name;
         # uncoverable statement
-        $ret = {error => $error_message};
+        $ret = {error => $e};
         # uncoverable statement
-        log_error("Unexpected error when updating job $job_id executed by worker $worker_name: $error_message");
-    };
+        log_error("Unexpected error when updating job $job_id executed by worker $worker_name: $e");
+    }
     if (!$ret || $ret->{error} || $ret->{error_status}) {
         $ret = {} unless $ret;
         $ret->{error} //= 'Unable to update status';
@@ -591,15 +596,21 @@ sub update_status ($self) {
 Retrieve status of a job. Returns id, state, result, blocked_by_id.
 Preferable over /job/<id> for performance and payload size, if you are only
 interested in the status.
+Pass follow=1 as query param to follow job clones and report most recent result for given id.
 
 =back
 
 =cut
 
 sub get_status ($self) {
+    my $follow = $self->param('follow');    # follow job clones and report most recent result for given id
     my @fields = qw(id state result blocked_by_id);
-    return unless my $job = $self->find_job_or_render_not_found($self->stash('jobid'));
-    $self->render(json => {map { $_ => $job->$_ } @fields});
+    my $jobid = $self->stash('jobid');
+    return unless my $job = $self->find_job_or_render_not_found($jobid);
+    $job = $job->latest_job if $follow;
+    my $json = {map { $_ => $job->$_ } @fields};
+    $json->{followed_id} = $jobid if $jobid != $job->id;
+    $self->render(json => $json);
 }
 
 =over 4
@@ -796,9 +807,9 @@ sub done ($self) {
     try {
         $res = $job->done(result => $result, reason => $reason, newbuild => $newbuild);
     }
-    catch {
-        $self->render(status => 400, json => {error => $_});
-    };
+    catch ($e) {
+        $self->render(status => 400, json => {error => $e});
+    }
     return undef unless $res;
 
     # use $res as a result, it is recomputed result by scheduler

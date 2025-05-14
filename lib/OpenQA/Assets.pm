@@ -11,6 +11,7 @@ use Mojo::File qw(path);
 use Mojo::Home;
 use Mojolicious::Plugin::AssetPack;
 use YAML::PP qw(LoadFile);
+use Feature::Compat::Try;
 
 sub setup ($server) {
     # setup asset pack, note that the config file is shared with tools/generate-packed-assets
@@ -20,14 +21,15 @@ sub setup ($server) {
     $server->asset->store->retries(5) if $Mojolicious::Plugin::AssetPack::VERSION > 2.13;
 
     # -> read assets/assetpack.def
-    eval { $server->asset->process };
-    if (my $assetpack_error = $@) {    # uncoverable statement
-        $assetpack_error    # uncoverable statement
+    local $SIG{CHLD};
+    try { $server->asset->process }
+    catch ($e) {
+        $e    # uncoverable statement
           .= 'If you invoked this service for development (from a Git checkout) you probably just need to'
           . ' invoke "make node_modules" before running this service. If you invoked this service via a packaged binary/service'
           . " then there is probably a problem with the packaging.\n"
-          if $assetpack_error =~ qr/could not find input asset.*node_modules/i;    # uncoverable statement
-        die $assetpack_error;    # uncoverable statement
+          if $e =~ qr/could not find input asset.*node_modules/i;    # uncoverable statement
+        die $e;    # uncoverable statement
     }
 }
 

@@ -248,7 +248,7 @@ the system service. E.g.
 
 [source,sh]
 ----
-t/test_postgresql /dev/shm/tpg
+t/test_postgresql
 ----
 
 To check the coverage by individual test files easily call e.g.
@@ -266,6 +266,18 @@ We use annotations in some places to mark "uncoverable" code such as this:
     # uncoverable subroutine
 
 See the docs for details https://metacpan.org/pod/Devel::Cover
+
+To run the tests with a different command than `prove` you can set the
+`PROVE` variable in the Makefile. For example, in our CircleCI tests we
+use `tools/prove_wrapper` to run the tests. This wrapper is a simple script that
+will run `prove` and fail the test if there is unhandled output. This is useful
+to avoid having unhandled output in tests. To run the tests with
+`tools/prove_wrapper` you can do:
+
+[source,sh]
+----
+PROVE=tools/prove_wrapper make test TESTS=t/foo.t
+----
 
 There are some ways to save some time when executing local tests:
 
@@ -294,6 +306,10 @@ assets can need a big amount of disk space.
 WARNING: Be sure to *clear* that variable when running unit tests locally.
 
 === Customize configuration directory
+When running openQA from a Git checkout it will find configuration files from
+that checkout under `etc/openqa` and not use any system provided config files
+under e.g. `/etc/openqa`.
+
 It can be necessary during development to change the configuration.
 For example you have to edit `etc/openqa/database.ini` to use another database.
 It can also be useful to set the authentication method to `Fake` and increase
@@ -388,7 +404,7 @@ test database setup and data directory:
 
 [source,sh]
 ----
-t/test_postgresql /dev/shm/tpg
+t/test_postgresql
 TEST_PG='DBI:Pg:dbname=openqa_test;host=/dev/shm/tpg' OPENQA_DATABASE=test OPENQA_BASEDIR=t/data script/openqa daemon
 ----
 
@@ -550,9 +566,10 @@ openQA comes with two authentication modules providing authentication methods:
 OpenID and Fake (see <<Installing.asciidoc#authentication,User authentication>>).
 
 All authentication modules reside in `lib/OpenQA/Auth` directory. During
-openQA start, the `[auth]/method` section of `/etc/openqa/openqa.ini` is read
-and according to its value (or default OpenID) openQA tries to require
-OpenQA::WebAPI::Auth::$method.  If successful, the module for the given method
+openQA start, the `[auth]/method` section of
+<<GettingStarted.asciidoc#_configuration,the web UI configuration>> is read and
+according to its value (or default OpenID) openQA tries to require
+`OpenQA::WebAPI::Auth::$method`. If successful, the module for the given method
 is imported or openQA ends with error.
 
 
@@ -594,8 +611,7 @@ install chromedriver and either chrome or chromium for the UI tests.
 
 To execute the testsuite use `make test`. This will also initialize a
 temporary PostgreSQL database used for testing. To do this step manually run
-`t/test_postgresql /dev/shm/tpg` to initialize a temporary PostgreSQL database
-and export the environment variable as instructed by that script.
+`t/test_postgresql` to initialize a temporary PostgreSQL database.
 It is also possible to run a particular test, for example
 `prove t/api/01-workers.t`. When using `prove` directly, make sure an English
 locale is set (e.g. `export LC_ALL=C.utf8 LANGUAGE=` before initializing the database
@@ -940,7 +956,7 @@ After changing documentation, consider generating documentation locally to
 verify it is rendered correctly using `tools/generate-docs`. It is possible to
 do that inside the provided development container by invoking:
 
-  podman run --rm -v OPENQA_LOCAL_CODE:/opt/openqa openqa_devel:latest make generate-docs
+  podman run --rm -v OPENQA_LOCAL_CODE:/opt/openqa registry.opensuse.org/devel/openqa/containers/opensuse/openqa_devel:latest make generate-docs
 
 Replace `OPENQA_LOCAL_CODE` with the location where you have the openQA code.
 The documentation will be built inside the container and put into `docs/build/`

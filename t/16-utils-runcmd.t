@@ -17,10 +17,12 @@ use Mojo::File 'tempdir';
 use Test::MockModule;
 use Test::Mojo;
 use Test::Warnings ':report_warnings';
-use Test::Output 'stdout_like';
+use Test::Output qw(stdout_like stdout_unlike combined_like);
 
 # allow catching log messages via stdout_like
 delete $ENV{OPENQA_LOGFILE};
+# Avoid using tester's ~/.gitconfig
+delete $ENV{HOME};
 
 my $fixtures = '01-jobs.pl 03-users.pl 05-job_modules.pl 07-needles.pl';
 my $schema = OpenQA::Test::Database->new->create(fixtures_glob => $fixtures);
@@ -32,29 +34,96 @@ subtest 'run (arbitrary) command' => sub {
     stdout_like { is(run_cmd_with_log([qw(false)]), '') } qr/[WARN].*[ERROR]/i;
 
     my $res = run_cmd_with_log_return_error([qw(echo Hallo Welt)]);
-    ok($res->{status}, 'status ok');
-    is($res->{stdout}, "Hallo Welt\n", 'cmd output returned');
+    is $res->{return_code}, 0, 'correct zero exit code returned ($? >> 8)';
+    ok $res->{status}, 'status ok';
+    is $res->{stdout}, "Hallo Welt\n", 'cmd output returned';
 
     stdout_like { $res = run_cmd_with_log_return_error([qw(false)]) } qr/.*\[error\].*cmd returned [1-9][0-9]*/i;
-    ok(!$res->{status}, 'status not ok (non-zero status returned)');
+    is $res->{return_code}, 1, 'correct non-zero exit code returned ($? >> 8)';
+    ok !$res->{status}, 'status not ok (non-zero status returned)';
+
+    stdout_unlike { $res = run_cmd_with_log_return_error([qw(falße)]) } qr/.*cmd returned [1-9][0-9]*/i;
+    is $res->{return_code}, undef, 'no exit code returned if command cannot be executed';
+    is $res->{stderr}, 'an internal error occurred', 'error message returned as stderr';
+    ok !$res->{status}, 'status not ok if command cannot be executed';
+
+    stdout_like { $res = run_cmd_with_log_return_error(['bash', '-c', 'kill -s KILL $$']) }
+    qr/.*cmd died with signal 9\n.*/i;
+    is $res->{return_code}, undef, 'no exit code returned if command dies with a signal';
+    ok !$res->{status}, 'status not ok if command dies with a signal';
 };
 
-subtest 'make git commit (error handling)' => sub {
-    throws_ok(
-        sub {
-            OpenQA::Git->new({app => $t->app, dir => 'foo/bar'})->commit();
-        },
-        qr/no user specified/,
-        'OpenQA::Git throws an exception if parameter missing'
-    );
+subtest 'invoke Git commands for real testing error handling' => sub {
+    throws_ok { OpenQA::Git->new({app => $t->app, dir => 'foo/bar'})->commit } qr/no user specified/,
+      'exception if user missing';
 
-    my $empty_tmp_dir = tempdir();
+    my $empty_tmp_dir = tempdir;
     my $git = OpenQA::Git->new({app => $t->app, dir => $empty_tmp_dir, user => $first_user});
     my $res;
-    stdout_like { $res = $git->commit({cmd => 'status', message => 'test'}) }
-    qr/.*\[warn\].*fatal: Not a git repository/i, 'git message found';
-    like $res, qr"^Unable to commit via Git \($empty_tmp_dir\): fatal: (N|n)ot a git repository \(or any",
-      'Git error message returned';
+
+    subtest 'invoking Git command outside of a Git repo' => sub {
+        stdout_like { $res = $git->commit({cmd => 'status', message => 'test'}) }
+        qr/.*\[warn\].*fatal: Not a git repository/i, 'Git error logged';
+        like $res, qr"^Unable to commit via Git \($empty_tmp_dir\): fatal: (N|n)ot a git repository \(or any",
+          'Git error returned';
+        combined_like {
+            throws_ok { $git->check_sha('this-sha-does-not-exist') } qr/internal Git error/i,
+            'check throws an exception'
+        } qr/\[error\].*cmd returned [1-9][0-9]*/, 'Git error logged for check as well';
+    };
+
+    combined_like {
+        $git->invoke_command($_) for ['init'], ['config', 'user.email', 'foo@bar'], ['config', 'user.name', 'Foo'];
+    }
+    qr/\[info\].*cmd returned 0\n/, 'initialized Git repo; successful command exit logged as info';
+
+    subtest 'error handling when checking sha' => sub {
+        stdout_like { ok !$git->check_sha('this-sha-does-not-exist'), 'return code 1 interpreted correctly' }
+          qr/\[info\].*cmd returned 1\n/i,
+          'no error logged if check returns false (despite Git returning 1)';
+    };
+
+    subtest 'error handling when checking whether working directory is clean' => sub {
+        my $test_file = $empty_tmp_dir->child('foo')->touch;
+        combined_like { $git->commit({add => ['foo'], message => 'test'}) } qr/commit.*foo.*cmd returned 0/is,
+          'commit created';
+        stdout_like { ok $git->is_workdir_clean, 'return code 0 interpreted correctly' }
+        qr/\[info\].*cmd returned 0\n/i, 'no error (only info) logged if check returns true';
+        $test_file->spew('test');
+        stdout_like { ok !$git->is_workdir_clean, 'return code 1 interpreted correctly' }
+          qr/\[info\].*cmd returned 1\n/i,
+          'no error (only info) logged if check returns false (despite Git returning 1)';
+    };
+
+    subtest 'cache_ref' => sub {
+        my $test_file = $empty_tmp_dir->child('foo')->touch;
+        my $test_file_2 = "$empty_tmp_dir/bar";
+        is $git->cache_ref('HEAD', undef, 'foo', $test_file),
+          undef, 'return undef if output file already exists and could be touched';
+        is $git->cache_ref('HEAD', undef, 'foo', $test_file_2), undef, 'checkout file with ref';
+        ok -f $test_file_2, 'checkout succeeded';
+
+        # and now with remote other than origin
+        my $git_remote_dir = tempdir;
+        note qx{rmdir "$git_remote_dir"};
+        note qx{cp -a "$empty_tmp_dir/" "$git_remote_dir"};
+        note qx{rm "$empty_tmp_dir/.git" -rf};
+        note qx{git -C "$empty_tmp_dir" init -q};
+        my $test_file_3 = "$empty_tmp_dir/baz";
+        my $ref = qx{git -C "$git_remote_dir" rev-parse HEAD};
+        chomp $ref;
+        is($git->cache_ref($ref, "file://$git_remote_dir/.git", 'foo', $test_file_3),
+            undef, 'checkout file from remote origin with ref');
+        ok -f $test_file_3, 'checkout succeeded';
+
+        my $test_file_4 = "$empty_tmp_dir/barinus";
+        like(
+            $git->cache_ref($ref, "file://$git_remote_dir/.git", 'bar', $test_file_4),
+            qr"Unable to cache Git ref .* 'bar' exists on disk, but not in",
+            'checking out non existing file fails'
+        );
+        ok !-f $test_file_4, 'task failed successfuly';
+    };
 };
 
 # setup mocking
@@ -62,9 +131,10 @@ my @executed_commands;
 my %mock_return_value = (
     status => 1,
     stderr => undef,
+    return_code => 0,
 );
 
-sub _run_cmd_mock ($cmd) {
+sub _run_cmd_mock ($cmd, %args) {
     push @executed_commands, $cmd;
     return \%mock_return_value;
 }
@@ -92,7 +162,7 @@ subtest 'git commands with mocked run_cmd_with_log_return_error' => sub {
     # test set_to_latest_master effectively being a no-op because no update remote and branch have been configured
     is($git->set_to_latest_master, undef, 'no error if no update remote and branch configured');
     is_deeply(\@executed_commands, [], 'no commands executed if no update remote and branch configured')
-      or diag explain \@executed_commands;
+      or always_explain \@executed_commands;
 
     # configure update branch and remote
     $git->config->{update_remote} = 'origin';
@@ -109,20 +179,20 @@ subtest 'git commands with mocked run_cmd_with_log_return_error' => sub {
             [qw(git -C foo/bar rebase origin/master)],
         ],
         'git remote update and rebase executed',
-    ) or diag explain \@executed_commands;
+    ) or always_explain \@executed_commands;
 
     # test set_to_latest_master (error case)
     @executed_commands = ();
     $mock_return_value{status} = 0;
     $mock_return_value{stderr} = 'mocked error';
     $mock_return_value{stdout} = '';
-    is(
-        $git->set_to_latest_master,
-        'Unable to fetch from origin master (foo/bar): mocked error',
-        'an error occurred on remote update'
-    );
-    is_deeply(\@executed_commands, [[qw(git -C foo/bar remote update origin)],], 'git reset not attempted',)
-      or diag explain \@executed_commands;
+    combined_like {
+        is $git->set_to_latest_master, 'Unable to fetch from origin master (foo/bar): mocked error',
+          'an error occurred on remote update';
+    }
+    qr/Error: mocked error/, 'error logged';
+    is_deeply \@executed_commands, [[qw(git -C foo/bar remote update origin)]], 'git reset not attempted'
+      or always_explain \@executed_commands;
 
     # test commit
     @executed_commands = ();
@@ -151,7 +221,7 @@ subtest 'git commands with mocked run_cmd_with_log_return_error' => sub {
             ],
         ],
         'changes staged and committed',
-    ) or diag explain \@executed_commands;
+    ) or always_explain \@executed_commands;
 
     $git->config->{do_push} = 'yes';
 
@@ -160,14 +230,17 @@ subtest 'git commands with mocked run_cmd_with_log_return_error' => sub {
     local $mock_return_value{stdout} = '';
 
     $utils_mock->redefine(
-        run_cmd_with_log_return_error => sub ($cmd) {
+        run_cmd_with_log_return_error => sub ($cmd, %args) {
             push @executed_commands, $cmd;
-            if ($cmd->[3] eq 'push') {
+            if ($cmd->[7] eq 'push') {
                 $mock_return_value{status} = 0;
             }
             return \%mock_return_value;
         });
-    like $git->commit({message => 'failed push test'}), qr/Unable to push Git commit/, 'error handled during push';
+    combined_like {
+        like $git->commit({message => 'failed push test'}), qr/Unable to push Git commit/, 'error handled during push';
+    }
+    qr/Error: mocked push error/, 'push error logged';
     $git->config->{do_push} = '';
 };
 
@@ -217,7 +290,7 @@ subtest 'saving needle via Git' => sub {
             ],
         ],
         'commands executed as expected'
-    ) or diag explain \@executed_commands;
+    ) or always_explain \@executed_commands;
 
     # note: Saving needles is already tested in t/ui/12-needle-edit.t. However, Git is disabled in that UI test so
     #       it is tested here explicitly.

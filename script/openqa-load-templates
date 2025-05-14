@@ -54,7 +54,7 @@ use Mojo::Base -strict, -signatures;
 use FindBin;
 use lib "$FindBin::RealBin/../lib";
 use File::Basename qw(dirname);
-use Try::Tiny;
+use Feature::Compat::Try;
 use Data::Dump 'dd';
 use Mojo::Util qw(decamelize);
 use Mojo::URL;
@@ -69,10 +69,7 @@ Getopt::Long::Configure("no_ignore_case");
 
 my %options;
 
-sub usage ($r) {
-    eval "use Pod::Usage; pod2usage($r);";
-    die "cannot display help, install perl(Pod::Usage)\n" if $@;    # uncoverable statement
-}
+sub usage ($r) { require Pod::Usage; Pod::Usage::pod2usage($r) }
 
 GetOptions(\%options, "apibase=s", "apikey=s", "apisecret=s", "clean", "host=s", "update", "help|h",) or usage(1);
 
@@ -89,10 +86,10 @@ try {
     $info = Cpanel::JSON::XS->new->relaxed->decode($datafile);
     dd $info;
 }
-catch {
+catch ($e) {
     $info = eval $datafile;
     if (my $error = $@) { die "Error in data file: $error\n" }
-};
+}
 
 $options{'host'} ||= 'localhost';
 $options{apibase} ||= '/api/v1';
@@ -120,16 +117,29 @@ sub post_entry ($table, $entry) {
     if ($table eq 'JobGroups') {
         # Create the group first
         my $job_groups_url = $url->clone->path($options{apibase} . '/job_groups');
-        my $res = $client->post($job_groups_url, form => {name => $entry->{group_name}})->res;
-        print_error $res unless $res->is_success;
-
+        my $existing_group_res = $client->get($job_groups_url, form => {name => $entry->{group_name}})->res;
+        print_error $existing_group_res unless $existing_group_res->is_success;
+        my $group_exists = 0;
+        for my $group (@{$existing_group_res->json}) {
+            next unless $group->{name} eq $entry->{group_name};
+            $group_exists = 1
+              if $options{update}
+              or die "Job group '$entry->{group_name}' already exists. Use --update to modify existing entries.";
+        }
+        unless ($group_exists) {
+            my $create_res = $client->post($job_groups_url, form => {name => $entry->{group_name}})->res;
+            print_error($create_res) unless $create_res->is_success;
+        }
         # Post the job template YAML
         my $job_templates_url = $url->clone->path($options{apibase} . '/job_templates_scheduling');
-        $res
-          = $client->post($job_templates_url,
-            form => {name => $entry->{group_name}, template => $entry->{template}, schema => 'JobTemplates-01.yaml'})
-          ->res;
-        print_error $res unless $res->is_success;
+        my $yaml_res = $client->post(
+            $job_templates_url,
+            form => {
+                name => $entry->{group_name},
+                template => $entry->{template},
+                schema => 'JobTemplates-01.yaml'
+            })->res;
+        print_error($yaml_res) unless $yaml_res->is_success;
         return 1;
     }
 

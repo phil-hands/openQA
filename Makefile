@@ -16,6 +16,8 @@ HELM_TEST ?= 1
 TESTS ?=
 # EXTRA_PROVE_ARGS: Additional prove arguments to pass
 EXTRA_PROVE_ARGS ?=
+# PROVE: Test application for Perl tests
+PROVE ?= prove
 ifeq ($(TESTS),)
 PROVE_ARGS ?= --trap -r ${EXTRA_PROVE_ARGS} t
 else
@@ -48,6 +50,9 @@ OPENQA_CONFIG =
 OPENQA_SCHEDULER_HOST =
 OPENQA_WEB_SOCKETS_HOST =
 OPENQA_SCHEDULER_STARVATION_PROTECTION_PRIORITY_OFFSET =
+
+# change if os-autoinst project root is different from '../os-autoinst'
+OS_AUTOINST_BASEDIR =
 
 .PHONY: help
 help:
@@ -91,10 +96,17 @@ install-generic:
 		install -m 644 etc/nginx/vhosts.d/$$i "$(DESTDIR)"/etc/nginx/vhosts.d ;\
 	done
 
-	install -D -m 640 etc/openqa/client.conf "$(DESTDIR)"/etc/openqa/client.conf
-	install -D -m 644 etc/openqa/workers.ini "$(DESTDIR)"/etc/openqa/workers.ini
-	install -D -m 644 etc/openqa/openqa.ini "$(DESTDIR)"/etc/openqa/openqa.ini
-	install -D -m 640 etc/openqa/database.ini "$(DESTDIR)"/etc/openqa/database.ini
+	for prefix in usr/etc etc; do \
+		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa ;\
+		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa/client.conf.d ;\
+		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa/workers.ini.d ;\
+		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa/openqa.ini.d ;\
+		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa/database.ini.d ;\
+	done
+	install -D -m 644 etc/openqa/client.conf "$(DESTDIR)"/usr/share/doc/openqa/examples/client.conf
+	install -D -m 644 etc/openqa/workers.ini "$(DESTDIR)"/usr/share/doc/openqa/examples/workers.ini
+	install -D -m 644 etc/openqa/openqa.ini "$(DESTDIR)"/usr/share/doc/openqa/examples/openqa.ini
+	install -D -m 644 etc/openqa/database.ini "$(DESTDIR)"/usr/share/doc/openqa/examples/database.ini
 
 	install -D -m 644 etc/logrotate.d/openqa "$(DESTDIR)"/etc/logrotate.d/openqa
 #
@@ -125,6 +137,7 @@ install-generic:
 	ln -s ../postgresql.service "$(DESTDIR)"/usr/lib/systemd/system/openqa-scheduler.service.requires/postgresql.service
 	install -d -m 755 "$(DESTDIR)"/usr/lib/systemd/system/openqa-websockets.service.requires
 	ln -s ../postgresql.service "$(DESTDIR)"/usr/lib/systemd/system/openqa-websockets.service.requires/postgresql.service
+	install -D -m 644 usr/lib/sysctl.d/01-openqa-reload-worker-auto-restart.conf "$(DESTDIR)"/usr/lib/sysctl.d/01-openqa-reload-worker-auto-restart.conf
 #
 # install openQA apparmor profile
 	install -d -m 755 "$(DESTDIR)"/etc/apparmor.d
@@ -229,7 +242,7 @@ test-unit-and-integration: node_modules
 	export GLOBIGNORE="$(GLOBIGNORE)";\
 	export DEVEL_COVER_DB_FORMAT=JSON;\
 	export PERL5OPT="$(COVEROPT)$(PERL5OPT) -It/lib -I$(PWD)/t/lib -I$(PWD)/external/os-autoinst-common/lib -MOpenQA::Test::PatchDeparse";\
-	RETRY=${RETRY} HOOK=./tools/delete-coverdb-folder timeout -s SIGINT -k 5 -v ${TIMEOUT_RETRIES} tools/retry prove ${PROVE_LIB_ARGS} ${PROVE_ARGS}
+	RETRY=${RETRY} HOOK=./tools/delete-coverdb-folder timeout -s SIGINT -k 5 -v ${TIMEOUT_RETRIES} tools/retry "${PROVE}" ${PROVE_LIB_ARGS} ${PROVE_ARGS}
 
 .PHONY: setup-database
 setup-database:
@@ -248,7 +261,14 @@ COVERDB_SUFFIX ?=
 # We use JSON::PP because there is a bug producing a (harmless) 'redefined'
 # warning when using Devel::Cover and Cpanel::JSON::XS
 # https://progress.opensuse.org/issues/90371
-COVEROPT ?= -mJSON::PP -MDevel::Cover=-select_re,'^/lib',+ignore_re,lib/perlcritic/Perl/Critic/Policy,-coverage,statement,-db,cover_db$(COVERDB_SUFFIX),
+#
+# CoverageWorkaround: We use a workaround with Syntax::Keyword::Try::Deparse
+# because we would get warnings:
+#     unexpected OP_CUSTOM (catch) at .../B/Deparse.pm line 1667.
+# because Feature::Compat::Try uses OP_CUSTOM for perl < 5.40
+# https://metacpan.org/pod/Feature::Compat::Try#COMPATIBILITY-NOTES
+# https://rt.cpan.org/Transaction/Display.html?id=1992941
+COVEROPT ?= -mJSON::PP -It/lib -MCoverageWorkaround -MDevel::Cover=-select_re,'^/lib',+ignore_re,lib/perlcritic/Perl/Critic/Policy|t/lib/CoverageWorkaround,-coverage,statement,-db,cover_db$(COVERDB_SUFFIX),
 endif
 
 .PHONY: coverage

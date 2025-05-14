@@ -5,20 +5,33 @@ package OpenQA::Shared::GruJob;
 use Mojo::Base 'Minion::Job', -signatures;
 
 use Mojo::Util qw(dumper);
+use OpenQA::Log qw(log_debug);
+
+sub _grutasks ($self) { $self->minion->app->schema->resultset('GruTasks'); }
 
 sub execute ($self) {
-    my $gru_id = $self->info->{notes}{gru_id};
+    my $notes = $self->info->{notes};
+    return $self->finish if $notes->{obsolete};
+    my $gru_id = $notes->{gru_id};
     if ($gru_id and not $self->info->{finished}) {
         # We have a gru_id and this is the first run of the job
-        my $gru = $self->minion->app->schema->resultset('GruTasks')->find($gru_id);
+        my $gru = $self->_grutasks->find($gru_id);
         # GruTask might not yet have landed in database due to open transaction
-        return $self->retry({delay => 2}) unless $gru;
+        unless ($gru) {
+            my $max_retries = $self->app->config->{misc_limits}->{wait_for_grutask_retries};
+            my $retried = $self->info->{retries};
+            my $delay = 2**(1 + $retried);
+            my $msg = "Could not find GruTask '$gru_id' after $retried retries";
+            if ($retried > $max_retries) {
+                $self->note(stop_reason => "$msg, giving up");
+                return undef;
+            }
+            log_debug("$msg, delaying ${delay}s");
+            return $self->retry({delay => $delay});
+        }
     }
     my $err = $self->SUPER::execute;
-
-    # Non-Gru tasks
-    return $err unless $gru_id;
-
+    return $err unless $gru_id;    # Non-Gru tasks
     my $info = $self->info;
     my $state = $info->{state};
     my $user_error = $info->{notes}->{user_error};
@@ -43,13 +56,10 @@ sub execute ($self) {
     return undef;
 }
 
-sub _delete_gru ($self, $id) {
-    $self->minion->app->schema->resultset('GruTasks')->search({id => $id})->delete;
-}
+sub _delete_gru ($self, $id) { $self->_grutasks->search({id => $id})->delete; }
 
 sub _fail_gru ($self, $id, $reason) {
-    my $gru = $self->minion->app->schema->resultset('GruTasks')->find($id);
-    $gru->fail($reason) if $gru;
+    if (my $gru = $self->_grutasks->find($id)) { $gru->fail($reason) }
 }
 
 sub user_fail ($self, $result) {

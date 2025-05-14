@@ -10,11 +10,15 @@ use parent 'DBIx::Class::Schema';
 use DBIx::Class::DeploymentHandler;
 use Config::IniFiles;
 use Cwd 'abs_path';
-use Try::Tiny;
+use Feature::Compat::Try;
 use FindBin '$Bin';
 use Fcntl ':flock';
 use File::Spec::Functions 'catfile';
+use OpenQA::App;
+use OpenQA::Config;
 use OpenQA::Utils qw(:DEFAULT prjdir);
+use Mojo::File qw(path);
+use Feature::Compat::Try;
 
 # after bumping the version please look at the instructions in the docs/Contributing.asciidoc file
 # on what scripts should be run and how
@@ -24,6 +28,9 @@ __PACKAGE__->load_namespaces;
 
 my $SINGLETON;
 
+use constant DEADLOCK_RETRIES => $ENV{OPENQA_DEADLOCK_RETRIES} // 3;
+use constant DEADLOCK_REGEX => qr/deadlock detected/;
+
 sub connect_db (%args) {
     my $check_deploy = $args{deploy};
     $check_deploy //= 1;
@@ -31,15 +38,16 @@ sub connect_db (%args) {
 
     my $mode = $args{mode} || $ENV{OPENQA_DATABASE} || 'production';
     if ($mode eq 'test') {
-        $SINGLETON = __PACKAGE__->connect($ENV{TEST_PG});
+        $SINGLETON = __PACKAGE__->connect($ENV{TEST_PG} // 'DBI:Pg:dbname=openqa_test;host=/dev/shm/tpg');
     }
     else {
-        my %ini;
-        my $cfgpath = $ENV{OPENQA_CONFIG} || "$Bin/../etc/openqa";
-        my $database_file = $cfgpath . '/database.ini';
-        tie %ini, 'Config::IniFiles', (-file => $database_file);
-        die 'Could not find database section \'' . $mode . '\' in ' . $database_file unless $ini{$mode};
-        $SINGLETON = __PACKAGE__->connect($ini{$mode});
+        my $home_dir = $args{from_script} ? path($Bin, '..') : OpenQA::App->singleton->home;
+        my $home_config_dir = config_dir_within_app_home($home_dir);
+        my $database_config_paths = lookup_config_files($home_config_dir, 'database.ini', $args{silent});
+        my $database_config = parse_config_files_as_hash($database_config_paths);
+        my $database_config_for_mode = $database_config ? $database_config->{$mode} : {dsn => 'DBI:Pg:dbname=openqa'};
+        die "Could not find database section '$mode' in @$database_config_paths\n" unless $database_config_for_mode;
+        $SINGLETON = __PACKAGE__->connect($database_config_for_mode);
     }
     deploy $SINGLETON if $check_deploy;
     return $SINGLETON;
@@ -100,16 +108,16 @@ sub _try_deploy_db ($dh) {
     try {
         $version = $dh->version_storage->database_version;
     }
-    catch {
+    catch ($e) {
         # If the table does not exist, we want to deploy, and the error
         # is expected. If we get other errors like "Permission denied" in case
         # the database is not readable by the current user, we print the
         # error message
-        warn "Error when trying to get the database version: $_"
-          unless m/relation "dbix_class_deploymenthandler_versions" does not exist/;
+        warn "Error when trying to get the database version: $e"
+          unless $e =~ m/relation "dbix_class_deploymenthandler_versions" does not exist/;
         $dh->install;
         $schema->create_system_user;    # create system user right away
-    };
+    }
 
     return !$version;
 }
@@ -146,6 +154,18 @@ sub read_application_secrets ($self) {
     die "couldn't create secrets\n" unless @secrets;
 
     return [map { $_->secret } @secrets];
+}
+
+sub is_deadlock ($self, $error) { $error =~ DEADLOCK_REGEX }
+
+sub txn_do_retry_on_deadlock ($self, $sub, $deadlock_cb = undef) {
+    for (my $tries = 0;; ++$tries) {
+        try { return $self->txn_do($sub) }
+        catch ($e) {
+            die $e if $tries >= DEADLOCK_RETRIES || !$self->is_deadlock($e);    # uncoverable statement
+            $deadlock_cb->($e) if $deadlock_cb;    # uncoverable statement
+        }
+    }
 }
 
 1;

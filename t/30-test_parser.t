@@ -24,11 +24,11 @@ subtest 'Result base class object' => sub {
     my $res = OpenQA::Parser::Result->new();
     $res->{foo} = 2;
     $res->{bar} = 4;
-    is_deeply($res->to_hash(), {bar => 4, foo => 2}, 'to_hash maps correctly') or die diag explain $res;
+    is_deeply($res->to_hash(), {bar => 4, foo => 2}, 'to_hash maps correctly') or die always_explain $res;
 
     my $j = $res->to_json;
     my $res2 = OpenQA::Parser::Result->new()->from_json($j);
-    is_deeply($res2->to_hash(), {bar => 4, foo => 2}, 'to_hash maps correctly') or die diag explain $res2;
+    is_deeply($res2->to_hash(), {bar => 4, foo => 2}, 'to_hash maps correctly') or die always_explain $res2;
 };
 
 subtest 'Results base class object' => sub {
@@ -40,7 +40,7 @@ subtest 'Results base class object' => sub {
     my $json_encode = $res->to_json;
 
     my $deserialized = OpenQA::Parser::Results->from_json($json_encode);
-    is $deserialized->first->{foo}, 'bar' or diag explain $deserialized;
+    is $deserialized->first->{foo}, 'bar' or always_explain $deserialized;
 
     $res = OpenQA::Parser::Results->new();
 
@@ -49,7 +49,7 @@ subtest 'Results base class object' => sub {
     my $serialized = $res->serialize;
 
     $deserialized = OpenQA::Parser::Results->new->deserialize($serialized);
-    is $deserialized->first->{bar}, 'baz' or diag explain $deserialized;
+    is $deserialized->first->{bar}, 'baz' or always_explain $deserialized;
 };
 
 {
@@ -137,38 +137,25 @@ subtest 'Parser base class object' => sub {
     is $res->include_content, 1;
     is $res->generated_tests->first->name, 'foo';
     $res->reset();
-    is $res->include_content, undef or diag explain $res;
-    is $res->content, undef or diag explain $res;
+    is $res->include_content, undef or always_explain $res;
+    is $res->content, undef or always_explain $res;
     is $res->generated_tests->size, 0, '0 tests';
 
     my $meant_to_fail = OpenQA::Parser->new;
-    eval { $meant_to_fail->parse() };
-    ok $@;
-    like $@, qr/parse\(\) not implemented by base class/, 'Base class does not parse data';
-
-    eval { $meant_to_fail->load() };
-    ok $@;
-    like $@, qr/You need to specify a file/, 'load croaks if no file is specified';
-
-    eval { $meant_to_fail->load('thiswontexist') };
-    ok $@;
-    like $@, qr/Can't open file \"thiswontexist\"/, 'load confesses if file is invalid';
+    throws_ok { $meant_to_fail->parse() } qr/parse\(\) not implemented by base class/, 'Base class does not parse data';
+    throws_ok { $meant_to_fail->load() } qr/You need to specify a file/, 'load croaks if no file is specified';
+    throws_ok { $meant_to_fail->load('thiswontexist') } qr/Can't open file \"thiswontexist\"/,
+      'load confesses if file is invalid';
 
     use Mojo::File 'tempfile';
     my $tmp = tempfile;
-    eval { $meant_to_fail->load($tmp) };
-    ok $@;
-    like $@, qr/Failed reading file $tmp/, 'load confesses if file is invalid';
+    throws_ok { $meant_to_fail->load($tmp) } qr/Failed reading file $tmp/, 'load confesses if file is invalid';
 
     my $good_parser = parser('Base');
-
-    eval { $good_parser->write_output() };
-    ok $@;
-    like $@, qr/You need to specify a directory/, 'write_output needs a directory as argument';
-
-    eval { $good_parser->write_test_result() };
-    ok $@;
-    like $@, qr/You need to specify a directory/, 'write_test_result needs a directory as argument';
+    throws_ok { $good_parser->write_output() } qr/You need to specify a directory/,
+      'write_output needs a directory as argument';
+    throws_ok { $good_parser->write_test_result() } qr/You need to specify a directory/,
+      'write_test_result needs a directory as argument';
 
     $good_parser->results->add({foo => 1});
     is $good_parser->results->size, 1;
@@ -219,13 +206,13 @@ subtest 'Parser base class object' => sub {
       'serialization support warns';
     like warning {
         is_deeply $copy->_build_tree->{generated_tests_results}->[0]->{OpenQA::Parser::DATA_FIELD()}, [qw(1 2 3)]
-          or diag explain $copy->_build_tree->{generated_tests_results}
+          or always_explain $copy->_build_tree->{generated_tests_results}
     },
       qr/Serialization is officially supported only if object can be turned into an array with \-\>to_array\(\)/,
       'serialization support warns';
     like warning {
         is_deeply $copy->_build_tree->{generated_tests_results}->[1]->{OpenQA::Parser::DATA_FIELD()}, {test => 'bar'}
-          or die diag explain $good_parser->_build_tree
+          or die always_explain $good_parser->_build_tree
     },
       qr/Serialization is officially supported only if object can be turned into an array with \-\>to_array\(\)/,
       'serialization support warns';
@@ -238,11 +225,11 @@ subtest 'Parser base class object' => sub {
     $good_parser->results->add(Dummy2to->new);
 
     is_deeply $good_parser->_build_tree->{generated_tests_results}->[0]->{OpenQA::Parser::DATA_FIELD()}, [qw(a b c)]
-      or diag explain $good_parser->_build_tree->{generated_tests_results};
+      or always_explain $good_parser->_build_tree->{generated_tests_results};
 
     $copy = parser("Base")->_load_tree($good_parser->_build_tree);
     is_deeply $copy->_build_tree->{generated_tests_results}->[0]->{OpenQA::Parser::DATA_FIELD()}, [qw(a b c)]
-      or diag explain $copy->_build_tree->{generated_tests_results};
+      or always_explain $copy->_build_tree->{generated_tests_results};
 
 
     my $alt_parser = parser("Base");
@@ -285,7 +272,7 @@ subtest 'Nested results' => sub {
         '__type__' => 'NestedResult'
       },
       'gen_tree_el is working correctly'
-      or die diag explain $r->gen_tree_el;
+      or die always_explain $r->gen_tree_el;
 
     $deep_p->results->add(
         NestedResult->new(
@@ -301,7 +288,7 @@ subtest 'Nested results' => sub {
       ->{OpenQA::Parser::TYPE_FIELD()}, 'NestedResult';
     is $deep_p->_build_tree->{generated_tests_results}->[0]->{OpenQA::Parser::DATA_FIELD()}->{result1}
       ->{OpenQA::Parser::DATA_FIELD()}->{result1}->{OpenQA::Parser::TYPE_FIELD()}, 'NestedResult'
-      or diag explain $deep_p->_build_tree->{generated_tests_results}->[0];
+      or always_explain $deep_p->_build_tree->{generated_tests_results}->[0];
 
     my $parser_nested = parser('Base');
     $parser_nested->{from_nothing} = NestedResult->new(val => 'from nothing!');
@@ -338,16 +325,16 @@ subtest 'Nested results' => sub {
     my $serialized = parser("Base")->deserialize($parser_nested->serialize());
     my $serialized_tree = $serialized->_build_tree();
     is_deeply $serialized->_build_tree(), $parser_nested->_build_tree(), 'Tree are matching'
-      or die diag explain $serialized;
+      or die always_explain $serialized;
 
     is $serialized->{from_nothing}->val(), 'from nothing!', 'Capable of serializing the whole object'
-      or die diag explain $serialized;
+      or die always_explain $serialized;
 
     is_deeply $serialized->{from_nothing2}, [qw(1 2 3)], 'Capable of serializing the whole object'
-      or die diag explain $serialized;
+      or die always_explain $serialized;
 
     is_deeply $serialized->{from_nothing3}, {1 => 2}, 'Capable of serializing the whole object'
-      or die diag explain $serialized;
+      or die always_explain $serialized;
 
     ok "$serialized" ne "$parser_nested";
     is $serialized->results->get(2)->first->first->result1->val, '2_0_0_result1_val', 'Can use the objects normally';
@@ -417,13 +404,13 @@ sub test_junit_file {
 
     my $testdir = tempdir;
     $parser->write_test_result($testdir);
-    is $testdir->list_tree->size, 9, '9 test results were written' or diag explain $parser->generated_tests_results;
+    is $testdir->list_tree->size, 9, '9 test results were written' or always_explain $parser->generated_tests_results;
     $testdir->list_tree->each(
         sub {
             fail 'json result: filename expected to be like result-\d_.*\.json but is ' . $_
               unless $_ =~ qr/result-\d_.*\.json/;
             my $res = decode_json $_->slurp;
-            is ref $res, 'HASH', 'json result: can be decoded' or diag explain $_->slurp;
+            is ref $res, 'HASH', 'json result: can be decoded' or always_explain $_->slurp;
             fail 'json result: exists $res->{result}' unless exists $res->{result};
             fail 'json result: !exists $res->{name}' unless !exists $res->{name};
         });
@@ -432,7 +419,7 @@ sub test_junit_file {
 
     is_deeply $parser->results->last->TO_JSON(), $expected_test_result,
       'Expected test result match - with no include_results'
-      or diag explain $parser->results->last->TO_JSON();
+      or always_explain $parser->results->last->TO_JSON();
     return $expected_test_result;
 }
 
@@ -455,6 +442,9 @@ sub test_xunit_file {
     is $parser->generated_tests_results->first()->properties->last->value, 'd';
 
     ok $parser->generated_tests_results->first()->time;
+    ok $parser->generated_tests_results->first()->softfailures;
+    is $parser->results->first->softfailures, 555, 'The test suite header says 555 softfailures';
+
     ok $parser->generated_tests_results->first()->errors;
     ok $parser->generated_tests_results->first()->failures;
     ok $parser->generated_tests_results->first()->tests;
@@ -463,15 +453,15 @@ sub test_xunit_file {
       'Generated 11 openQA tests results';    # 9 testsuites with all cumulative results for openQA
     is $parser->generated_tests_results->size, 11, 'Object contains 11 testsuites';
 
-    is $parser->results->search_in_details("title", qr/bacon/)->size, 13,
+    is $parser->results->search_in_details("title", qr/bacon/)->size, 14,
       'Overall 11 testsuites, 2 tests does not have title containing bacon';
-    is $parser->results->search_in_details("text", qr/bacon/)->size, 15,
+    is $parser->results->search_in_details("text", qr/bacon/)->size, 16,
       'Overall 11 testsuites, 15 tests are for bacon';
-    is $parser->generated_tests_output->size, 23, "23 Outputs";
+    is $parser->generated_tests_output->size, 24, "24 Outputs";
 
     my $resultsdir = tempdir;
     $parser->write_output($resultsdir);
-    is $resultsdir->list_tree->size, 23, '23 test outputs were written';
+    is $resultsdir->list_tree->size, 24, '24 test outputs were written';
     $resultsdir->list_tree->each(
         sub {
             fail('Output result was written correctly') unless ($_->slurp =~ /^# Test messages /);
@@ -493,17 +483,17 @@ sub test_xunit_file {
     };
 
     is_deeply $parser->generated_tests_results->last->TO_JSON, $expected_test_result, 'TO_JSON matches'
-      or diag explain $parser->generated_tests_results->last->TO_JSON;
+      or always_explain $parser->generated_tests_results->last->TO_JSON;
 
     my $testdir = tempdir;
     $parser->write_test_result($testdir);
-    is $testdir->list_tree->size, 11, '11 test results were written' or diag explain $parser->generated_tests_results;
+    is $testdir->list_tree->size, 11, '11 test results were written' or always_explain $parser->generated_tests_results;
     $testdir->list_tree->each(
         sub {
             fail 'json result: filename expected to be like result-.*\.json but is ' . $_
               unless $_ =~ qr/result-.*\.json/;
             my $res = decode_json $_->slurp;
-            is ref $res, 'HASH', 'json result: can be decoded' or diag explain $_->slurp;
+            is ref $res, 'HASH', 'json result: can be decoded' or always_explain $_->slurp;
             fail 'json result: exists $res->{result}' unless exists $res->{result};
             fail 'json result: result can be ok or fail but is ' . $res->{result} unless $res->{result} =~ qr/ok|fail/;
             fail 'json result: !exists $res->{name}' unless !exists $res->{name};
@@ -514,7 +504,7 @@ sub test_xunit_file {
 
     is_deeply $parser->results->last->TO_JSON(), $expected_test_result,
       'Expected test result match - with no include_results'
-      or diag explain $parser->results->last->TO_JSON();
+      or always_explain $parser->results->last->TO_JSON();
     return $expected_test_result;
 }
 
@@ -580,7 +570,7 @@ sub test_tap_file {
     is $p->results->size, 1, 'Expected 1 results';
     $p->results->each(
         sub {
-            is $_->details->[0]->{result}, 'ok', "Test has passed" or diag explain $_;
+            is $_->details->[0]->{result}, 'ok', "Test has passed" or always_explain $_;
         });
 }
 
@@ -625,10 +615,7 @@ subtest tap_parse_invalid => sub {
 
     my $parser = OpenQA::Parser::Format::TAP->new;
 
-    eval { $parser->load($tap_test_file) };
-    my $error = $@;
-
-    like $error, qr{A valid TAP starts with filename.tap}, "Invalid TAP example";
+    throws_ok { $parser->load($tap_test_file) } qr{A valid TAP starts with filename.tap}, "Invalid TAP example";
 };
 
 sub test_ltp_file {
@@ -638,12 +625,12 @@ sub test_ltp_file {
     $p->results->each(
         sub {
             is $_->details->[0]->{_source}, 'parser';
-            is $_->result, 'ok', 'Tests passed' or diag explain $_;
+            is $_->result, 'ok', 'Tests passed' or always_explain $_;
             ok !!$_->environment, 'Environment is present';
             ok !!$_->test, 'Test information is present';
             is $_->environment->gcc, 'gcc (SUSE Linux) 7.2.1 20170927 [gcc-7-branch revision 253227]',
               'Environment information matches';
-            is $_->test->result, 'TPASS', 'subtest result is TPASS' or diag explain $_;
+            is $_->test->result, 'TPASS', 'subtest result is TPASS' or always_explain $_;
             is $_->test_fqn, "LTP:cpuhotplug:cpuhotplug0$i", "test_fqn matches and are different";
             $i++;
         });
@@ -654,8 +641,8 @@ sub test_ltp_file {
 sub test_ipa_file {
     my $p = shift;
     my %names;
-    is $p->results->size, 18, 'Expected 18 results' or die diag explain $p->results;
-    is $p->tests->size, 18, 'Expected 18 tests' or die diag explain $p->results;
+    is $p->results->size, 18, 'Expected 18 results' or die always_explain $p->results;
+    is $p->tests->size, 18, 'Expected 18 tests' or die always_explain $p->results;
 
     $p->results->each(
         sub {
@@ -670,7 +657,7 @@ sub test_ipa_file {
                 is $_->result, 'skip' or die;
             }
             else {
-                is $_->result, 'ok' or die diag explain $_;
+                is $_->result, 'ok' or die always_explain $_;
             }
         });
     is $p->extra->first->distro, 'sles', 'Sys info parsed correctly';
@@ -752,9 +739,9 @@ sub serialize_test {
         $test_function->($deserialized);
 
         is $parser->content, $test_result_file->slurp, 'Content was kept intact for original obj'
-          or diag explain $deserialized->content;
+          or always_explain $deserialized->content;
         is $deserialized->content, $test_result_file->slurp, 'Content was kept intact'
-          or die diag explain $deserialized->content;
+          or die always_explain $deserialized->content;
 
         $parser = $parser_name->new(include_content => 1);
         my $saved = tempfile;
@@ -768,9 +755,9 @@ sub serialize_test {
         $test_function->($parser);
         $test_function->($deserialized);
         is $parser->content, $test_result_file->slurp, 'Content was kept intact for original obj'
-          or diag explain $deserialized->content;
+          or always_explain $deserialized->content;
         is $deserialized->content, $test_result_file->slurp, 'Content was kept intact'
-          or diag explain $deserialized->content;
+          or always_explain $deserialized->content;
 
         # No content saved
         $parser = $parser_name->new();
@@ -780,8 +767,8 @@ sub serialize_test {
         ok "$deserialized" ne "$parser", "Different objects";
         $test_function->($parser);
         $test_function->($deserialized);
-        is $parser->content, undef, 'Content is not there' or diag explain $deserialized->content;
-        is $deserialized->content, undef, 'Content is not there' or diag explain $deserialized->content;
+        is $parser->content, undef, 'Content is not there' or always_explain $deserialized->content;
+        is $deserialized->content, undef, 'Content is not there' or always_explain $deserialized->content;
 
         $parser = $parser_name->new();
         $parser->load($test_result_file);
@@ -794,8 +781,8 @@ sub serialize_test {
         ok "$deserialized" ne "$parser", "Different objects";
         $test_function->($parser);
         $test_function->($deserialized);
-        is $parser->content, undef, 'Content is not there' or diag explain $deserialized->content;
-        is $deserialized->content, undef, 'Content is not there' or diag explain $deserialized->content;
+        is $parser->content, undef, 'Content is not there' or always_explain $deserialized->content;
+        is $deserialized->content, undef, 'Content is not there' or always_explain $deserialized->content;
 
         # Json
         $parser = $parser_name->new();
@@ -828,9 +815,9 @@ sub serialize_test {
         $test_function->($parser);
         $test_function->($deserialized);
         is $parser->content, $test_result_file->slurp, 'Content was kept intact for original obj'
-          or diag explain $deserialized->content;
+          or always_explain $deserialized->content;
         is $deserialized->content, $test_result_file->slurp, 'Content was kept intact'
-          or diag explain $deserialized->content;
+          or always_explain $deserialized->content;
     };
 }
 
@@ -875,11 +862,11 @@ subtest 'Unstructured data' => sub {
     isa_ok($init_params, 'OpenQA::Parser::Result::Node');
     isa_ok($init_params->get('mailHost'), 'OpenQA::Parser::Result::Node');
     isa_ok($init_params->get('mailHost')->get('override'), 'OpenQA::Parser::Result::Node');
-    is($init_params->get('mailHost')->get('override')->get('always')->val, 'yes') or die diag explain $init_params;
-    is($init_params->mailHost->override->always->val, 'yes') or die diag explain $init_params;
+    is($init_params->get('mailHost')->get('override')->get('always')->val, 'yes') or die always_explain $init_params;
+    is($init_params->mailHost->override->always->val, 'yes') or die always_explain $init_params;
 
     my $n = $deserialized->results->last->get('init-param');
-    is $n->dataLogLocation()->val(), "/usr/local/tomcat/logs/dataLog.log", or die diag explain $n;
+    is $n->dataLogLocation()->val(), "/usr/local/tomcat/logs/dataLog.log", or die always_explain $n;
 
     #bool are decoded '1'/1 or '0'/0 between perl 5.18 and 5.26
     $n->val->{'betaServer'} = $n->val->{'betaServer'} ? 1 : 0;
@@ -901,7 +888,7 @@ subtest 'Unstructured data' => sub {
         "betaServer" => 1
       },
       'Last servlet matches',
-      or die diag explain $n;
+      or die always_explain $n;
 };
 
 subtest functional_interface => sub {
@@ -911,17 +898,12 @@ subtest functional_interface => sub {
     my $ltp = parser("LTP");
     is ref($ltp), 'OpenQA::Parser::Format::LTP', 'Parser found';
 
-    eval { p("Doesn'tExist!"); };
-    ok $@;
-    like $@, qr/Parser not found!/, 'Croaked correctly';
+    throws_ok { p("Doesn'tExist!") } qr/Parser not found!/, 'Croaked correctly';
     {
         package OpenQA::Parser::Format::Broken;    # uncoverable statement
         sub new { die 'boo' }
-    }
-
-    eval { p("Broken"); };
-    ok $@;
-    like $@, qr/Invalid parser supplied: boo/, 'Croaked correctly';
+    };
+    throws_ok { p("Broken") } qr/Invalid parser supplied: boo/, 'Croaked correctly';
 
     my $default = p();
     ok $default->isa('OpenQA::Parser::Format::Base');

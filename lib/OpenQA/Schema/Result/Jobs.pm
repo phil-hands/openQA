@@ -4,14 +4,13 @@
 package OpenQA::Schema::Result::Jobs;
 
 use Mojo::Base 'DBIx::Class::Core', -signatures;
-use Try::Tiny;
 use Mojo::JSON 'encode_json';
 use Fcntl;
 use DateTime;
 use OpenQA::Constants qw(WORKER_COMMAND_ABORT WORKER_COMMAND_CANCEL);
 use OpenQA::Log qw(log_trace log_debug log_info log_warning log_error);
 use OpenQA::Utils (
-    qw(parse_assets_from_settings locate_asset),
+    qw(create_git_clone_list parse_assets_from_settings locate_asset),
     qw(resultdir assetdir read_test_modules find_bugref random_string),
     qw(run_cmd_with_log_return_error needledir testcasedir gitrepodir find_video_files)
 );
@@ -24,6 +23,7 @@ use OpenQA::ScreenshotDeletion;
 use File::Basename qw(basename dirname);
 use File::Copy::Recursive qw();
 use File::Spec::Functions 'catfile';
+use Feature::Compat::Try;
 use DBI qw(:sql_types);
 use File::Path ();
 use DBIx::Class::Timestamps 'now';
@@ -693,19 +693,26 @@ sub _create_clones ($self, $jobs, $comments, $comment_text, $comment_user_id, @c
         $res->register_assets_from_settings;
     }
 
-    # calculate blocked_by
-    $clones{$_}->calculate_blocked_by for @original_job_ids;
-
-    # add a reference to the clone within $jobs
-    for my $job (@original_job_ids) {
-        my $clone = $clones{$job};
-        $jobs->{$job}->{clone} = $clone->id if $clone;
+    my $app = OpenQA::App->singleton;
+    my %git_clones;
+    my @clone_ids;
+    for my $original_job_id (@original_job_ids) {
+        my $cloned_job = $clones{$original_job_id};
+        # calculate blocked_by
+        $cloned_job->calculate_blocked_by;
+        # add a reference to the clone within $jobs
+        push @clone_ids, $jobs->{$original_job_id}->{clone} = $cloned_job->id;
+        # add Git repositories to clone
+        create_git_clone_list($cloned_job->settings_hash, \%git_clones) if $app;
     }
 
     # create comments on original jobs
     $result_source->schema->resultset('Comments')
       ->create_for_jobs(\@original_job_ids, $comment_text, $comment_user_id, $comments)
       if defined $comment_text;
+
+    # enqueue Minion jobs to clone required Git repositories
+    $app->gru->enqueue_git_clones(\%git_clones, \@clone_ids) if $app;
 }
 
 # internal (recursive) function for duplicate - returns hash of all jobs in the
@@ -796,7 +803,7 @@ sub cluster_jobs ($self, @args) {
             my $cwset = $settings->{PARALLEL_CANCEL_WHOLE_CLUSTER};
             $job->{one_host_only} = 1 if $settings->{PARALLEL_ONE_HOST_ONLY};
             $cancelwhole = 0 if (defined $cwset && !$cwset);
-            if ($args{cancelmode} && !$cancelwhole) {
+            if ($cancelmode && !$cancelwhole) {
                 # skip calling cluster_jobs (so cancelling it and its other
                 # related jobs) if job has pending children we are not
                 # cancelling
@@ -904,17 +911,19 @@ sub duplicate ($self, $args = {}) {
     return "Job $orig_id is still $state" if grep { $state eq $_ } PRISTINE_STATES;
     return "Specified job $orig_id has already been cloned as $clone_id" if defined $clone_id;
 
-    my $jobs = eval {
-        $self->cluster_jobs(
+    my $jobs;
+    try {
+        $jobs = $self->cluster_jobs(
             skip_parents => $args->{skip_parents},
             skip_children => $args->{skip_children},
             no_directly_chained_parent => $args->{no_directly_chained_parent});
-    };
-    if (my $error = $@) {
-        return "An internal error occurred when computing cluster of $orig_id" if $error =~ qr/ at .* line \d*$/;
-        chomp $error;
-        return $error;
     }
+    catch ($e) {
+        return "An internal error occurred when computing cluster of $orig_id" if $e =~ qr/ at .* line \d*$/;
+        chomp $e;
+        return $e;
+    }
+
     log_debug('Duplicating jobs: ' . dump($jobs));
     my @args = (
         $jobs, $args->{comments} //= [],
@@ -924,21 +933,21 @@ sub duplicate ($self, $args = {}) {
         $args->{prio},
         $args->{skip_ok_result_children},
         $args->{settings} // {});
-    eval {
-        $self->result_source->schema->txn_do(sub { $self->_create_clones(@args) });
-    };
-    if (my $error = $@) {
-        chomp $error;
-        $error =~ s/ at .* line \d*$// if $error =~ s/^\{UNKNOWN\}\: //;
-        if ($error =~ /Rollback failed/) {
-            log_error("Unable to roll back after duplication error: $error");
+    try {
+        $self->result_source->schema->txn_do(sub { $self->_create_clones(@args) })
+    }
+    catch ($e) {
+        chomp $e;
+        $e =~ s/ at .* line \d*$// if $e =~ s/^\{UNKNOWN\}\: //;
+        if ($e =~ /Rollback failed/) {
+            log_error("Unable to roll back after duplication error: $e");
             return "Rollback failed after failure to clone cluster of job $orig_id";
         }
-        elsif ($error =~ /Comment creation on job .* failed/) {
-            return $error;
+        elsif ($e =~ /Comment creation on job .* failed/) {
+            return $e;
         }
-        return $error if $error =~ /already has clone/;
-        log_warning("Duplication rolled back after error: $error");
+        return $e if $e =~ /already has clone/;
+        log_warning("Duplication rolled back after error: $e");
         return "An internal error occurred when cloning cluster of job $orig_id";
     }
 
@@ -1315,9 +1324,7 @@ sub parse_extra_tests ($self, $asset, $type, $script = undef) {
         || $type eq 'LTP'
         || $type eq 'IPA');
 
-
-    local ($@);
-    eval {
+    try {
         my $parser = parser($type);
 
         $parser->include_results(1) if $parser->can('include_results');
@@ -1335,10 +1342,10 @@ sub parse_extra_tests ($self, $asset, $type, $script = undef) {
             });
 
         $self->account_result_size("$type results", $parser->write_output($self->result_dir));
-    };
+    }
 
-    if ($@) {
-        log_error("Failed parsing data $type for job " . $self->id . ': ' . $@);
+    catch ($e) {
+        log_error("Failed parsing data $type for job " . $self->id . ': ' . $e);
         return;
     }
     return 1;
@@ -1391,8 +1398,7 @@ sub create_asset ($self, $asset, $scope, $local = undef) {
     # IF we are receiving simultaneously uploads
     my $last = 0;
 
-    local $@;
-    eval {
+    try {
         my $chunk = OpenQA::File->deserialize($asset->slurp);
         $chunk->decode_content;
         $chunk->write_content($temp_final_file);
@@ -1430,9 +1436,11 @@ sub create_asset ($self, $asset, $scope, $local = undef) {
             $temp_chunk_folder->remove_tree;
         }
         $chunk->content(\undef);
-    };
-    # $temp_chunk_folder->remove_tree if $@; # XXX: Don't! as worker will try again to upload.
-    return $@ if $@;
+    }
+    catch ($e) {
+        # $temp_chunk_folder->remove_tree; # XXX: Don't! as worker will try again to upload.
+        return $e;
+    }
     return 0, $fname, $type, $last;
 }
 
@@ -1606,8 +1614,8 @@ sub allocate_network ($self, $name) {
     for ($vlan = 1;; ++$vlan) {
         log_debug "at vlan $name:$vlan";
         next if $used{$vlan};
-        eval { $sth->execute($job_id, $name, $vlan) };
-        die "Failed to create new vlan tag '$vlan' for job $job_id: $@\n" if $@;
+        try { $sth->execute($job_id, $name, $vlan) }
+        catch ($e) { die "Failed to create new vlan tag '$vlan' for job $job_id: $e\n" }
         die "Unable to allocate network for job $job_id: network '$name' already exists" unless $sth->rows;
         log_debug "Created network for $job_id: $vlan";
         for my $cluster_job_id (keys %{$self->cluster_jobs}) {
@@ -1764,8 +1772,8 @@ sub carry_over_bugrefs ($self) {
         $text .= "\n" unless substr($text, -1, 1) eq "\n";
         my %newone = (text => $text, user_id => $comment->user_id);
         my $comment = $self->comments->create_with_event(\%newone, {taken_over_from_job_id => $prev_id});
-        eval { $comment->handle_special_contents };
-        log_info "Unable to evaluate contents of taken-over comment: $@" if $@;
+        try { $comment->handle_special_contents }
+        catch ($e) { log_info "Unable to evaluate contents of taken-over comment: $e" }
         return 1;
     }
     return undef;
@@ -2129,6 +2137,7 @@ sub done ($self, %args) {
     my $reason = $args{reason};
     my $restart = 0;
     $self->_compute_result_and_reason(\%new_val, $result, $reason, \$restart);
+    my $state = $self->state;
     $self->update(\%new_val);
     $self->unblock;
     my %finalize_opts = (lax => 1);
@@ -2146,7 +2155,7 @@ sub done ($self, %args) {
 
     # enqueue the finalize job only after stopping the cluster so in case the job should be restarted the cluster
     # appears cancelled and thus its jobs in (pre-)execution are not set to PARALLEL_RESTARTED by `auto_duplicate`
-    $self->enqueue_finalize_job_results([$carried_over], \%finalize_opts);
+    $self->enqueue_finalize_job_results([$carried_over, $state], \%finalize_opts);
 
     return $new_val{result} // $self->result;
 }

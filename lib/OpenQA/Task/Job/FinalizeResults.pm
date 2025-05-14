@@ -3,15 +3,16 @@
 
 package OpenQA::Task::Job::FinalizeResults;
 use Mojo::Base 'Mojolicious::Plugin', -signatures;
-use OpenQA::Jobs::Constants 'CANCELLED';
+use OpenQA::Jobs::Constants qw(CANCELLED DONE);
 use OpenQA::Task::SignalGuard;
 use Time::Seconds;
+use Feature::Compat::Try;
 
 sub register ($self, $app, @) {
     $app->minion->add_task(finalize_job_results => \&_finalize_results);
 }
 
-sub _finalize_results ($minion_job, $openqa_job_id = undef, $carried_over = undef) {
+sub _finalize_results ($minion_job, $openqa_job_id = undef, $carried_over = undef, $initial_state = undef) {
     my $ensure_task_retry_on_termination_signal_guard = OpenQA::Task::SignalGuard->new($minion_job);
     my $app = $minion_job->app;
     return $minion_job->fail('No job ID specified.') unless defined $openqa_job_id;
@@ -24,8 +25,8 @@ sub _finalize_results ($minion_job, $openqa_job_id = undef, $carried_over = unde
     # try to finalize each
     my %failed_to_finalize;
     for my $module ($openqa_job->modules_with_job_prefetched) {
-        eval { $module->finalize_results; };
-        if (my $error = $@) { $failed_to_finalize{$module->name} = $error; }
+        try { $module->finalize_results }
+        catch ($e) { $failed_to_finalize{$module->name} = $e }
     }
 
     # record failed modules
@@ -36,7 +37,7 @@ sub _finalize_results ($minion_job, $openqa_job_id = undef, $carried_over = unde
     }
 
     # invoke hook script
-    if ($openqa_job->state ne CANCELLED && !$carried_over) {
+    if ($openqa_job->state ne CANCELLED && ($initial_state // '') ne DONE && !$carried_over) {
         _run_hook_script($minion_job, $openqa_job, $app, $ensure_task_retry_on_termination_signal_guard);
         $app->minion->enqueue($_ => []) for @{$app->config->{minion_task_triggers}->{on_job_done}};
     }

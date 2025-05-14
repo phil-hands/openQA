@@ -16,7 +16,7 @@ use OpenQA::Jobs::Constants;
 use OpenQA::JobDependencies::Constants qw(PARALLEL);
 
 my $test_case = OpenQA::Test::Case->new;
-my $schema_name = OpenQA::Test::Database->generate_schema_name;
+my $schema_name = OpenQA::Test::Database::generate_schema_name;
 my $schema = $test_case->init_data(
     schema_name => $schema_name,
     fixtures_glob => '01-jobs.pl 02-workers.pl 04-products.pl 05-job_modules.pl 06-job_dependencies.pl'
@@ -132,7 +132,7 @@ $driver->find_element('#filter-panel .card-header')->click();
 $driver->find_element_by_id('filter-todo')->click();
 $driver->find_element_by_id('filter-passed')->click();
 $driver->find_element_by_id('filter-failed')->click();
-$driver->find_element('#filter-form button')->click();
+apply_filter('failed');    # failed selected, passed and todo unselected
 $driver->find_element_by_id('res_DVD_x86_64_doc');
 my @filtered_out = $driver->find_elements('#res_DVD_x86_64_kde', 'css');
 is(scalar @filtered_out, 0, 'result filter correctly applied');
@@ -144,7 +144,10 @@ my $url_with_escaped_parameters
 $driver->get($url_with_escaped_parameters);
 $driver->find_element('#filter-panel .card-header')->click();
 $driver->find_element('#filter-form button')->click();
-is($driver->get_current_url(), $url_with_escaped_parameters . '#', 'escaped URL parameters are passed correctly');
+my $url_after_filter = "$url_with_escaped_parameters#";
+my $desc = 'escaped URL parameters are passed correctly';
+wait_until sub { $driver->get_current_url eq $url_after_filter }, $desc, 10;
+is $driver->get_current_url, $url_after_filter, $desc;
 
 # Test failed module info async update
 $driver->get($baseurl . 'tests/overview?distri=opensuse&version=13.1&build=0091&groupid=1001');
@@ -157,7 +160,7 @@ like($driver->find_elements('.failedmodule', 'css')->[1]->get_attribute('href'),
 my @descriptions = $driver->find_elements('td.name a', 'css');
 is(scalar @descriptions, 2, 'only test suites with description content are shown as links');
 $descriptions[0]->click();
-is($driver->find_element('.popover-header')->get_text, 'kde', 'description popover shows content');
+is wait_for_element(selector => '.popover-header')->get_text, 'kde', 'description popover shows content';
 
 # Test bug status
 my @closed_bugs = $driver->find_elements('#bug-99937 .bug_closed', 'css');
@@ -239,6 +242,16 @@ subtest 'stacking of cyclic parallel jobs' => sub {
 
 $jobs->find(99961)->update({FLAVOR => 'NET', TEST => 'kde'});
 
+sub apply_filter ($filter) {
+    # submit the filter form and wait via a single XPath query until the page has been reloaded with the filter present
+    # note: Using a single selector (instead of a selector and then querying the element text/visibility) avoids
+    #       possible race conditions where querying the element text/visibility would run into an error because the
+    #       element got stale.
+    $driver->find_element('#filter-panel button[type="submit"]')->click();
+    my $s = "//*[\@id='filter-panel']/*[\@class='card-header']/span[text()='current: $filter']";
+    wait_for_element(selector => $s, method => 'xpath', desc => "filter '$filter' visible on form header");
+}
+
 subtest 'filtering by architecture' => sub {
     $driver->get('/tests/overview?distri=opensuse&version=13.1&build=0091');
 
@@ -249,7 +262,7 @@ subtest 'filtering by architecture' => sub {
     subtest 'filter for specific archs' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-arch')->send_keys('i586,i686');
-        $driver->find_element('#filter-panel button[type="submit"]')->click();
+        apply_filter('i586,i686');
 
         element_visible('#flavor_DVD_arch_i586', qr/i586/);
         element_not_present('#flavor_DVD_arch_x86_64');
@@ -268,7 +281,7 @@ subtest 'filtering by flavor' => sub {
     subtest 'filter for specific flavors' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-flavor')->send_keys('DVD');
-        $driver->find_element('#filter-panel button[type="submit"]')->click();
+        apply_filter('DVD');
 
         element_visible('#flavor_DVD_arch_i586', qr/i586/);
         element_visible('#flavor_DVD_arch_x86_64', qr/x86_64/);
@@ -280,7 +293,7 @@ subtest 'filtering by flavor' => sub {
 sub check_textmode_test ($test_row) {
     wait_for_element selector => '#flavor_DVD_arch_i586', like => qr/i586/;
     my @job_rows = map { $_->get_text } @{$driver->find_elements('#content tbody tr')};
-    is_deeply \@job_rows, [$test_row], 'only the textmode job is present' or diag explain \@job_rows;
+    is_deeply \@job_rows, [$test_row], 'only the textmode job is present' or always_explain \@job_rows;
 }
 
 subtest 'filtering by test' => sub {
@@ -300,7 +313,7 @@ subtest 'filtering by test' => sub {
     subtest 'filter for specific test' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-test')->send_keys('textmode');
-        $driver->find_element('#filter-panel button[type="submit"]')->click();
+        apply_filter 'textmode';
         check_textmode_test 'textmode zypper_up';
     };
 };
@@ -443,22 +456,22 @@ subtest "filtering by machine" => sub {
     subtest 'filter for specific machine' => sub {
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-machine')->send_keys('uefi');
-        $driver->find_element('#filter-panel button[type="submit"]')->click();
+        apply_filter('uefi');
 
-        like wait_for_element(selector => '#flavor_DVD_arch_x86_64')->get_text, qr/x86_64/, 'DVD/x86_64 present';
+        wait_for_element(selector => '#flavor_DVD_arch_x86_64', like => qr/x86_64/, desc => 'DVD/x86_64 present');
         element_not_present("#$_") for qw(flavor_DVD_arch_i586 flavor_GNOME-Live_arch_i686 flavor_NET_arch_x86_64);
         is element_prop('filter-machine'), 'uefi', 'machine filter still visible in form';
 
         my @job_rows = map { $_->get_text } @{$driver->find_elements('#content tbody tr')};
-        is_deeply \@job_rows, ['kde@uefi'], 'only the job with machine uefi is shown' or diag explain \@job_rows;
+        is_deeply \@job_rows, ['kde@uefi'], 'only the job with machine uefi is shown' or always_explain \@job_rows;
 
         $driver->find_element('#filter-panel .card-header')->click();
         $driver->find_element('#filter-machine')->clear();
         $driver->find_element('#filter-machine')->send_keys('64bit,uefi');
-        $driver->find_element('#filter-panel button[type="submit"]')->click();
+        apply_filter('64bit,uefi');
 
-        like wait_for_element(selector => '#flavor_DVD_arch_x86_64')->get_text, qr/x86_64/, 'DVD/x86_64 still present';
-        like wait_for_element(selector => '#flavor_NET_arch_x86_64')->get_text, qr/x86_64/, 'NET/x86_64 present';
+        wait_for_element(selector => '#flavor_NET_arch_x86_64', like => qr/x86_64/, desc => 'NET/x86_64 present');
+        wait_for_element(selector => '#flavor_DVD_arch_x86_64', like => qr/x86_64/, desc => 'DVD/x86_64 still present');
         element_not_present("#$_") for qw(flavor_DVD_arch_i586 flavor_GNOME-Live_arch_i686);
     };
 };

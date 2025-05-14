@@ -32,6 +32,7 @@ requires 'DateTime::Format::Pg';
 requires 'Digest::MD5';
 requires 'Exporter';
 requires 'Fcntl';
+requires 'Feature::Compat::Try';
 requires 'File::Basename';
 requires 'File::Copy';
 requires 'File::Copy::Recursive';
@@ -85,7 +86,6 @@ requires 'Time::Moment';
 requires 'Time::ParseDate';
 requires 'Time::Piece';
 requires 'Time::Seconds';
-requires 'Try::Tiny';
 requires 'URI::Escape';
 requires 'YAML::PP', '>= 0.026';
 requires 'YAML::XS';
@@ -116,8 +116,8 @@ on 'test' => sub {
 on 'develop' => sub {
     requires 'Code::TidyAll';
     requires 'Perl::Critic';
-    requires 'Perl::Critic::Freenode';
-    requires 'Perl::Tidy', '== 20240511.0.0';
+    requires 'Perl::Critic::Community';
+    requires 'Perl::Tidy', '== 20250311.0.0';
 
 };
 

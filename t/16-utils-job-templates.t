@@ -28,9 +28,8 @@ my $template = {
 };
 my $errors = validate_data(%default_args, data => $template,);
 is scalar @$errors, 0, "Empty template - no errors";
-
-eval { my $errors = validate_data(schema_file => $invalid_schema, data => $template); };
-like($@, qr{JSON::Validator}, "Invalid schema file");
+throws_ok { validate_data(schema_file => $invalid_schema, data => $template) } qr{JSON::Validator},
+  "Invalid schema file";
 
 $errors = validate_data(schema_file => 'does-not-exist', data => $template);
 is scalar @$errors, 1, "non-existent schema file error" or diag "Error: $_" for @$errors;
@@ -61,18 +60,14 @@ is scalar @$errors, 1, "Invalid toplevel key detected" or diag "Error: $_" for @
 like($errors->[0], qr{/: Properties not allowed: invalid.}, 'Invalid toplevel key error message');
 
 subtest load_yaml => sub {
-    eval { load_yaml(file => $template_openqa_dupkey) };
-    my $err = $@;
-    like($err, qr{Duplicate key 'foo'}, 'Duplicate key detected');
+    throws_ok { load_yaml(file => $template_openqa_dupkey) } qr{Duplicate key 'foo'}, 'Duplicate key detected';
 
     my $cyclic = <<"EOM";
     - &ALIAS
       foo: *ALIAS
 EOM
 
-    eval { my $data = load_yaml(string => $cyclic) };
-    $err = $@;
-    like $err, qr{Found cyclic ref}, "cyclic refs are fatal";
+    throws_ok { my $data = load_yaml(string => $cyclic) } qr{Found cyclic ref}, "cyclic refs are fatal";
 };
 
 done_testing;
