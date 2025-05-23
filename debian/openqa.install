@@ -22,6 +22,8 @@ usr/lib/systemd/system/openqa-enqueue-asset-cleanup.service
 usr/lib/systemd/system/openqa-enqueue-asset-cleanup.timer
 usr/lib/systemd/system/openqa-enqueue-git-auto-update.service
 usr/lib/systemd/system/openqa-enqueue-git-auto-update.timer
+usr/lib/systemd/system/openqa-enqueue-needle-ref-cleanup.service
+usr/lib/systemd/system/openqa-enqueue-needle-ref-cleanup.timer
 usr/lib/systemd/system/openqa-enqueue-result-cleanup.service
 usr/lib/systemd/system/openqa-enqueue-result-cleanup.timer
 usr/lib/systemd/system/openqa-enqueue-bug-cleanup.service
@@ -50,12 +52,15 @@ usr/share/openqa/assets
 usr/share/openqa/dbicdh
 usr/share/openqa/script/configure-web-proxy
 usr/share/openqa/script/create_admin
+usr/share/openqa/script/dump-db
 usr/share/openqa/script/initdb
 usr/share/openqa/script/openqa
+usr/share/openqa/script/openqa-clean-repo-cache
 usr/share/openqa/script/openqa-enqueue-asset-cleanup
 usr/share/openqa/script/openqa-enqueue-audit-event-cleanup
 usr/share/openqa/script/openqa-enqueue-bug-cleanup
 usr/share/openqa/script/openqa-enqueue-git-auto-update
+usr/share/openqa/script/openqa-enqueue-needle-ref-cleanup
 usr/share/openqa/script/openqa-enqueue-result-cleanup
 usr/share/openqa/script/openqa-gru
 usr/share/openqa/script/openqa-livehandler
