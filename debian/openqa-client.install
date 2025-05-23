@@ -1,4 +1,5 @@
-debian/tmp/etc/openqa/client.conf
+etc/openqa/client.conf.d/README
+usr/share/doc/openqa/examples/client.conf
 usr/share/openqa/script/client
 usr/share/openqa/script/clone_job.pl
 usr/share/openqa/script/openqa-dump-templates

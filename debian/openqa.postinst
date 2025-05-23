@@ -4,7 +4,6 @@ set -e
 
 case "$1" in
     configure)
-    chown geekotest:root /etc/openqa/database.ini /etc/openqa/openqa.ini
     if [ -d "/var/lib/openqa" ]; then
         chown geekotest \
             /var/lib/openqa/db \

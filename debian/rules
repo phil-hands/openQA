@@ -30,6 +30,19 @@ override_dh_auto_build:
 	! grep http assets/assetpack.def
 
 override_dh_auto_install: setup_node_modules
+	# install READMEs in /etc/.../*.d/ dirs
+	for cfg in openqa.ini workers.ini database.ini client.conf; do \
+		ext=$${cfg#*.}; \
+		dst_dir=debian/tmp/etc/openqa/$$cfg.d; \
+		R_cfg=debian/README.$$cfg; \
+		mkdir -p $$dst_dir; \
+		if [ -e "$$R_cfg" ]; then \
+			cp "$$R_cfg" $$dst_dir/README; \
+		else \
+			sed -E "s/<CONFNAME>/$$cfg/" debian/README.drop-in_configs.in > $$dst_dir/README; \
+		fi; \
+	done
+
 	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
 override_dh_installdocs:

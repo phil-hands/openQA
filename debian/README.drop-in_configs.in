@@ -1,0 +1,8 @@
+# openqa will use any files here that have a '.ini' extension, as part of its configuration.
+# They are read in lexical order (after ../<CONFNAME> if it exists),
+# with later files overwriting values from earlier files.
+#
+# If you include any sensitive data (such as security tokens) in these files, they should
+# have read access restricted, and have their owner set to 'geekotest'.  e.g.:
+#
+#   chown geekotest:root *.ini && chmod 0640 *.ini

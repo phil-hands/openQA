@@ -1,6 +1,7 @@
-debian/tmp/etc/openqa/workers.ini
 etc/apparmor.d/usr.share.openqa.script.worker
 etc/apparmor.d/local/usr.share.openqa.script.worker
+etc/openqa/workers.ini.d/README
+debian/tmp/usr/lib/sysctl.d/01-openqa-reload-worker-auto-restart.conf
 usr/lib/systemd/system-generators/systemd-openqa-generator
 usr/lib/systemd/system/openqa-worker.target
 usr/lib/systemd/system/openqa-worker.slice
@@ -14,6 +15,7 @@ usr/lib/systemd/system/openqa-slirpvde.service
 usr/lib/systemd/system/openqa-vde_switch.service
 debian/tmp/usr/lib/sysusers.d/openQA-worker.conf
 usr/lib/tmpfiles.d/openqa.conf
+usr/share/doc/openqa/examples/workers.ini
 usr/share/openqa/lib/OpenQA/CacheService
 usr/share/openqa/lib/OpenQA/Worker
 usr/share/openqa/script/openqa-slirpvde

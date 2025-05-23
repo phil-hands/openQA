@@ -1,11 +1,11 @@
 #! /usr/bin/dh-exec
 
-debian/tmp/etc/openqa/openqa.ini
-debian/tmp/etc/openqa/database.ini
 debian/tmp/etc/logrotate.d/openqa
 etc/apache2/vhosts.d/openqa.conf.template => etc/apache2/sites-available/openqa.conf.template
 etc/apache2/vhosts.d/openqa-common.inc => etc/apache2/sites-available/openqa-common.inc
 etc/apache2/vhosts.d/openqa-ssl.conf.template => etc/apache2/sites-available/openqa-ssl.conf.template
+etc/openqa/openqa.ini.d/README
+etc/openqa/database.ini.d/README
 etc/nginx/vhosts.d/openqa-locations.inc => etc/nginx/sites-available/openqa-locations.inc
 etc/nginx/vhosts.d/openqa-upstreams.inc => etc/nginx/sites-available/openqa-upstreams.inc
 etc/nginx/vhosts.d/openqa.conf.template => etc/nginx/sites-available/openqa.conf.template
@@ -33,6 +33,8 @@ usr/lib/systemd/system/openqa-reload-worker-auto-restart@.path
 usr/lib/systemd/system/openqa-reload-worker-auto-restart@.service
 debian/tmp/usr/lib/sysusers.d/geekotest.conf
 usr/lib/tmpfiles.d/openqa-webui.conf
+usr/share/doc/openqa/examples/openqa.ini
+usr/share/doc/openqa/examples/database.ini
 usr/share/openqa/lib/DBIx/
 usr/share/openqa/lib/OpenQA/Assets.pm
 usr/share/openqa/lib/OpenQA/LiveHandler.pm
