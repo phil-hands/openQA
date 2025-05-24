@@ -1,3 +1,9 @@
+openqa (4.6.1745831108.e60c89e32-1~fto12+1) UNRELEASED; urgency=medium
+
+  * Rebuild for bookworm-fasttrack.
+
+ -- Philip Hands <phil@hands.com>  Sat, 24 May 2025 10:37:05 +0200
+
 openqa (4.6.1745831108.e60c89e32-1) UNRELEASED; urgency=medium
 
   * Update to new upstream version 4.6.1745831108.e60c89e32.
