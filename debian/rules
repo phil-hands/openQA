@@ -68,7 +68,8 @@ execute_after_dh_fixperms:
 EXTRA_UNSTABLES := t/03-auth.t t/09-job_clone.t t/24-worker-engine.t t/37-limit_assets.t t/40-script_load_dump_templates.t t/ui/27-plugin_obs_rsync.t t/ui/27-plugin_obs_rsync_gru.t t/ui/27-plugin_obs_rsync_obs_status.t t/api/02-iso-yaml.t t/api/08-jobtemplates.t t/api/14-plugin_obs_rsync.t t/api/14-plugin_obs_rsync_async.t t/api/16-webhooks.t
 # when building with unshare, these attempts to nest unshare fail
 EXTRA_UNSTABLES += t/32-openqa_client-script.t t/40-openqa-clone-job.t t/40-script_openqa-clone-custom-git-refspec.t
-
+# silence tests that don't backport to fastrack
+EXTRA_UNSTABLES += t/14-grutasks-git.t t/10-jobs.t t/api/16-webhooks.t t/api/04-jobs.t t/api/09-comments.t
 
 
 override_dh_auto_test: setup_node_modules
