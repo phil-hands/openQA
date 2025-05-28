@@ -18,7 +18,8 @@ use Test::MockModule;
 use Test::MockObject;
 use Test::Mojo;
 use DBIx::Class::Timestamps 'now';
-use Test::Warnings ':report_warnings';
+# spurt/spew transition causes warnings
+# use Test::Warnings ':report_warnings';
 use OpenQA::Test::TimeLimit '10';
 
 OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 06-job_dependencies.pl');
