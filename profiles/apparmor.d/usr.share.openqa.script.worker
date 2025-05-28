@@ -175,6 +175,7 @@
   /usr/share/{AA,O}VMF/* rk,
   /var/lib/apt/** r,
   /var/lib/dpkg/status r,
+  /var/lib/dpkg/arch r,
   /var/lib/openqa/cache/ r,
   /var/lib/openqa/cache/** rwk,
   /var/lib/openqa/pool/ r,
