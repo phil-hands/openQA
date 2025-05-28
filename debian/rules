@@ -45,6 +45,9 @@ override_dh_auto_install: setup_node_modules
 
 	dh_auto_install -- SHELL="/bin/bash" GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS=1
 
+	dh_apparmor --profile-name=usr.share.openqa.script.openqa -p openqa
+	dh_apparmor --profile-name=usr.share.openqa.script.worker -p openqa-worker
+
 override_dh_installdocs:
 	dh_installdocs -X .gitignore
 
