@@ -50,8 +50,6 @@ execute_after_dh_fixperms:
 
 # add some tests that fail on Debian to the unstables list
 EXTRA_UNSTABLES := t/03-auth.t t/09-job_clone.t t/24-worker-engine.t t/37-limit_assets.t t/40-script_load_dump_templates.t t/ui/27-plugin_obs_rsync.t t/ui/27-plugin_obs_rsync_gru.t t/ui/27-plugin_obs_rsync_obs_status.t t/api/02-iso-yaml.t t/api/08-jobtemplates.t t/api/14-plugin_obs_rsync.t t/api/14-plugin_obs_rsync_async.t t/api/16-webhooks.t
-# this seems not to access the database properly
-#EXTRA_UNSTABLES += t/42-screenshots.t
 # when building with unshare, these attempts to nest unshare fail
 EXTRA_UNSTABLES += t/32-openqa_client-script.t t/40-openqa-clone-job.t t/40-script_openqa-clone-custom-git-refspec.t
 
