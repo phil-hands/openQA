@@ -1,14 +1,11 @@
-openqa (4.6.1745831108.e60c89e32-1~fto12+1) UNRELEASED; urgency=medium
-
-  * Rebuild for bookworm-fasttrack.
-
- -- Philip Hands <phil@hands.com>  Sat, 24 May 2025 10:37:05 +0200
-
-openqa (4.6.1745831108.e60c89e32-1) UNRELEASED; urgency=medium
+openqa (4.6.1745831108.e60c89e32-1~fto12+1) bookworm-fasttrack; urgency=medium
 
   * Update to new upstream version 4.6.1745831108.e60c89e32.
+  * Build for bookworm-fasttrack.
+  * salsa CI: build in a backport environment
+  * fasttrack: ignore backport related test warnings
 
- -- Philip Hands <phil@hands.com>  Wed, 14 May 2025 18:56:34 +0200
+ -- Philip Hands <phil@hands.com>  Sat, 31 May 2025 20:04:18 +0200
 
 openqa (4.6.1732034221.ae34b08ff-2) unstable; urgency=medium
 
