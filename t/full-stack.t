@@ -53,7 +53,6 @@ use OpenQA::Test::Utils
 use OpenQA::Test::FullstackUtils;
 
 plan skip_all => 'set FULLSTACK=1 (be careful)' unless $ENV{FULLSTACK};
-plan skip_all => 'set TEST_PG to e.g. "DBI:Pg:dbname=test" to enable this test' unless $ENV{TEST_PG};
 
 my $worker;
 my $ws;
@@ -226,7 +225,7 @@ subtest 'schedule job' => sub {
     client_call('jobs/1', qr/group_id.+$group_id/, 'group has been altered correctly');
   }
   or bail_with_log 1,
-  'Job 1 produced the wrong results';
+  'not all checks for job 1 have passed';
 
 subtest 'clone job that crashes' => sub {
     client_call('-X POST jobs/1/restart', qr|test_url.+1.+tests.+2|, 'client returned new test_url for test 2');
@@ -244,7 +243,7 @@ subtest 'clone job that crashes' => sub {
     like status_text, qr/Cloned as 3/, 'test 2 is restarted by killing worker';
   }
   or bail_with_log 2,
-  'Job 1 produced the wrong results';
+  'not all checks for job 2 have passed';
 
 subtest 'cancel a scheduled job' => sub {
     client_call(
@@ -263,7 +262,7 @@ subtest 'cancel a scheduled job' => sub {
     $cancel_button[0]->click();
   }
   or bail_with_log 3,
-  'Job 3 produced the wrong results';
+  'not all checks for job 3 have passed';
 
 $driver->click_element_ok('All Tests', 'link_text', 'Clicked All Tests to go to test 4');
 wait_for_ajax(msg => 'wait for All Tests displayed before looking for 3');
@@ -287,7 +286,7 @@ subtest 'incomplete job because of setup failure' => sub {
     stop_worker;    # Ensure that the worker can be killed with TERM signal
   }
   or bail_with_log 4,
-  'Job 4 produced the wrong results';
+  'not all checks for job 4 have passed';
 
 my $cache_location = path($ENV{OPENQA_BASEDIR}, 'cache')->make_path;
 ok -e $cache_location, 'Setting up Cache directory';
@@ -297,6 +296,9 @@ path($ENV{OPENQA_CONFIG})->child("workers.ini")->spew(<<EOC);
 CACHEDIRECTORY = $cache_location
 CACHELIMIT = 50
 LOCAL_UPLOAD = 0
+
+# Ensure fullstack tests run even under high load.
+CRITICAL_LOAD_AVG_THRESHOLD = 0
 
 [1]
 WORKER_CLASS = qemu_i386,qemu_x86_64

@@ -15,23 +15,19 @@
 # Please submit bugfixes or comments via http://bugs.opensuse.org/
 #
 
-# define _distconfdir for openSUSE Leap 15 and SLE 15 (like other packages such as libvpl do)
-%if 0%{?suse_version} < 1550
-%define _distconfdir %{_prefix}%{_sysconfdir}
-%endif
-
 # can't use linebreaks here!
 %define openqa_main_service openqa-webui.service
 %define openqa_extra_services openqa-gru.service openqa-websockets.service openqa-scheduler.service openqa-enqueue-audit-event-cleanup.service openqa-enqueue-audit-event-cleanup.timer openqa-enqueue-asset-cleanup.service openqa-enqueue-git-auto-update.service openqa-enqueue-asset-cleanup.timer openqa-enqueue-result-cleanup.service openqa-enqueue-result-cleanup.timer openqa-enqueue-bug-cleanup.service openqa-enqueue-bug-cleanup.timer openqa-enqueue-git-auto-update.timer openqa-enqueue-needle-ref-cleanup.service openqa-enqueue-needle-ref-cleanup.timer
 %define openqa_services %{openqa_main_service} %{openqa_extra_services}
 %define openqa_worker_services openqa-worker.target openqa-slirpvde.service openqa-vde_switch.service openqa-worker-cacheservice.service openqa-worker-cacheservice-minion.service
+%define openqa_localdb_services openqa-setup-db.service openqa-dump-db.service openqa-dump-db.timer
 %if %{undefined tmpfiles_create}
 %define tmpfiles_create() \
 %{_bindir}/systemd-tmpfiles --create %{?*} || : \
 %{nil}
 %endif
 # Run tests on openSUSE Tumbleweed and supported openSUSE Leap versions
-%if 0%{?suse_version} >= 1550 || ( 0%{?is_opensuse} && 0%{?sle_version} >= 150100 )
+%if 0%{?is_opensuse} && 0%{?suse_version} >= 1500
 %ifarch x86_64
 %bcond_without tests
 %else
@@ -41,13 +37,13 @@
 %bcond_with tests
 %endif
 # SLE < 15 does not provide many of the dependencies for the python sub-package
-%if 0%{?sle_version} < 150000 && !0%{?is_opensuse}
+%if 0%{?suse_version} < 1500 && !0%{?is_opensuse}
 %bcond_with python_scripts
 %else
 %bcond_without python_scripts
 %endif
 # exclude additional sub packages that would pull in a lot of extra dependencies on SLE
-%if 0%{?sle_version} && !0%{?is_opensuse}
+%if 0%{?suse_version} && !0%{?is_opensuse}
 %bcond_with devel_package
 %bcond_with munin_package
 %else
@@ -108,7 +104,7 @@ BuildRequires:  fdupes
 %if 0%{?is_opensuse}
 BuildRequires:  openSUSE-release
 %endif
-%if 0%{?sle_version} && !0%{?is_opensuse}
+%if 0%{?suse_version} && !0%{?is_opensuse}
 BuildRequires:  sles-release
 %endif
 BuildRequires:  %{build_requires}
@@ -427,11 +423,6 @@ done
 install -D -m 644 /dev/null %{buildroot}%{_localstatedir}/log/openqa
 install -m 0644 %{_sourcedir}/openQA.changes %{buildroot}%{_datadir}/openqa/public/Changelog
 #
-mkdir %{buildroot}%{_localstatedir}/lib/openqa/pool/1
-mkdir %{buildroot}%{_localstatedir}/lib/openqa/cache
-mkdir %{buildroot}%{_localstatedir}/lib/openqa/webui
-mkdir %{buildroot}%{_localstatedir}/lib/openqa/webui/cache
-#
 %fdupes %{buildroot}/%{_prefix}
 
 %if 0%{?suse_version} > 1500
@@ -563,13 +554,13 @@ fi
 %service_del_postun openqa-continuous-update.timer
 
 %post local-db
-%service_add_post openqa-setup-db.service
+%service_add_post %{openqa_localdb_services}
 
 %preun local-db
-%service_del_preun openqa-setup-db.service
+%service_del_preun %{openqa_localdb_services}
 
 %postun local-db
-%service_del_postun openqa-setup-db.service
+%service_del_postun %{openqa_localdb_services}
 
 %files
 %doc README.asciidoc
@@ -583,9 +574,6 @@ fi
 %dir %{_sysconfdir}/openqa
 %dir %{_sysconfdir}/openqa/openqa.ini.d
 %dir %{_sysconfdir}/openqa/database.ini.d
-%dir %{_distconfdir}/openqa
-%dir %{_distconfdir}/openqa/openqa.ini.d
-%dir %{_distconfdir}/openqa/database.ini.d
 %{_datadir}/doc/openqa/examples/openqa.ini
 %{_datadir}/doc/openqa/examples/database.ini
 %dir %{_datadir}/openqa
@@ -693,7 +681,6 @@ fi
 
 %files common
 %if 0%{?suse_version} < 1550
-%dir %{_distconfdir}
 %endif
 %dir %{_datadir}/doc/openqa
 %dir %{_datadir}/doc/openqa/examples
@@ -731,8 +718,6 @@ fi
 %ghost %config(noreplace) %attr(0400,_openqa-worker,root) %{_sysconfdir}/openqa/client.conf
 %dir %{_sysconfdir}/openqa/workers.ini.d
 %dir %{_sysconfdir}/openqa/client.conf.d
-%dir %{_distconfdir}/openqa/workers.ini.d
-%dir %{_distconfdir}/openqa/client.conf.d
 %{_datadir}/doc/openqa/examples/workers.ini
 %{_datadir}/doc/openqa/examples/client.conf
 # apparmor profile
@@ -814,6 +799,8 @@ fi
 
 %files local-db
 %{_unitdir}/openqa-setup-db.service
+%{_unitdir}/openqa-dump-db.service
+%{_unitdir}/openqa-dump-db.timer
 %{_unitdir}/openqa-gru.service.requires/postgresql.service
 %{_unitdir}/openqa-scheduler.service.requires/postgresql.service
 %{_unitdir}/openqa-websockets.service.requires/postgresql.service
@@ -821,6 +808,7 @@ fi
 %{_datadir}/openqa/script/dump-db
 %{_bindir}/openqa-setup-db
 %{_bindir}/openqa-dump-db
+%dir %attr(0755,postgres,root) %{_localstatedir}/lib/openqa/backup
 
 %files single-instance
 

@@ -71,7 +71,7 @@ install-generic:
 		install -m 644 -D --target-directory="$(DESTDIR)/usr/share/openqa/$${f%/*}" "$$f";\
 	done
 
-	for i in db images testresults pool ; do \
+	for i in db images testresults pool/1 cache webui/cache backup; do \
 		mkdir -p "$(DESTDIR)"/var/lib/openqa/$$i ;\
 	done
 # shared dirs between openQA web and workers + compatibility links
@@ -96,7 +96,7 @@ install-generic:
 		install -m 644 etc/nginx/vhosts.d/$$i "$(DESTDIR)"/etc/nginx/vhosts.d ;\
 	done
 
-	for prefix in usr/etc etc; do \
+	for prefix in etc; do \
 		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa ;\
 		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa/client.conf.d ;\
 		install -d -m 755 "$(DESTDIR)"/$$prefix/openqa/workers.ini.d ;\
@@ -177,9 +177,6 @@ node_modules: package-lock.json
 	@touch node_modules
 
 .PHONY: test
-ifeq ($(TRAVIS),true)
-test: run-tests-within-container
-else
 ifeq ($(CHECKSTYLE),0)
 checkstyle_tests =
 else
@@ -194,7 +191,6 @@ endif
 ifeq ($(HELM_TEST),1)
 ifeq ($(TESTS),)
 test: test-helm-chart
-endif
 endif
 endif
 
