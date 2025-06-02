@@ -16,6 +16,8 @@ usr/lib/systemd/system/openqa-livehandler.service
 usr/lib/systemd/system/openqa-gru.service
 usr/lib/systemd/system/openqa-scheduler.service
 usr/lib/systemd/system/openqa-websockets.service
+usr/lib/systemd/system/openqa-dump-db.service
+usr/lib/systemd/system/openqa-dump-db.timer
 usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.service
 usr/lib/systemd/system/openqa-enqueue-audit-event-cleanup.timer
 usr/lib/systemd/system/openqa-enqueue-asset-cleanup.service
