@@ -169,6 +169,7 @@
   /usr/share/git-core/templates/ r,
   /usr/share/git-core/templates/** r,
   /usr/share/tessdata/* r,
+  /usr/share/tesseract-ocr/*/tessdata/* r,
   /usr/share/qemu/* rk,
   /usr/share/seabios/* r,
   /usr/share/qemu/keymaps/* r,
