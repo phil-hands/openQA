@@ -1,8 +1,10 @@
-openqa (4.6.1748615746.d50d8e243-1~fto12+1) UNRELEASED; urgency=medium
+openqa (4.6.1748615746.d50d8e243-1~fto12+1) bookworm-fasttrack; urgency=medium
 
   * Update to new upstream version 4.6.1748615746.d50d8e243.
+  * openqa.install: add systemd/*/openqa-dump-db.*
+  * apparmor: add Debian path for tesseract data
 
- -- Philip Hands <phil@hands.com>  Mon, 02 Jun 2025 16:57:29 +0200
+ -- Philip Hands <phil@hands.com>  Sat, 14 Jun 2025 16:30:19 +0200
 
 openqa (4.6.1745831108.e60c89e32-1~fto12+1) bookworm-fasttrack; urgency=medium
 
