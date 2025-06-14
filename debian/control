@@ -86,6 +86,7 @@ Build-Depends: debhelper-compat (= 13),
                node-d3,
                node-dagre-d3-renderer,
                node-anser,
+               libfeature-compat-try-perl,
 ### for testcases
                libperl-critic-perl <!nocheck>,
                libperl-critic-community-perl <!nocheck>,
@@ -118,7 +119,6 @@ Build-Depends: debhelper-compat (= 13),
                libtext-glob-perl <!nocheck>,
                libaliased-perl <!nocheck>,
                libarchive-tools <!nocheck>,
-               libfeature-compat-try-perl <!nocheck>,
 #              for avoiding assetpack downloads
                fonts-fork-awesome,
                fonts-roboto-fontface,
@@ -239,6 +239,7 @@ Depends: ${misc:Depends},
          libtime-moment-perl,
          libcpanel-json-xs-perl,
          libmoose-perl,
+         libfeature-compat-try-perl,
 Recommends:
          git-lfs,
 Description: automatic Operating System testing framework (common files)
