@@ -49,7 +49,7 @@ or https://localhost:1443.
 
 ==== How to run a test with single-instance container in 5 minutes
 
-image::images/openqa-in-5-minutes.gif[Running openQA job within 5 minutes]
+video::images/openqa-in-5-minutes.webm[opts="autoplay,loop,muted",title="Running openQA job within 5 minutes"]
 
 ==== Triggering and cloning existing jobs within single-instance container
 
@@ -633,6 +633,23 @@ The openQA web UI should be available on http://localhost/ now. To simply
 start openQA without enabling it permanently one can simply use `systemctl
 start` instead.
 
+=== Additional considerations for zero-downtime upgrades
+The main openQA web UI service (the `openqa-webui-daemon` script which is
+usually started via the systemd unit `openqa-webui.service`) supports
+https://docs.mojolicious.org/Mojolicious/Guides/Cookbook#Zero-downtime-software-upgrades[zero-downtime upgrades]
+with the help of
+https://lwn.net/Articles/542629[the `SO_REUSEPORT` socket option].
+
+A zero-downtime restart is triggered by sending `SIGHUP` to the script/service
+(which can be done by reloading `openqa-webui.service` when using systemd which
+is also what the official rpm packaging does on upgrades).
+
+The use of `SO_REUSEPORT` can cause unintended connection failures which can be
+circumvented via `sysctl net.ipv4.tcp_migrate_req=1`, see
+https://lwn.net/Articles/853637[the according article on LWN.net]. Note that
+there is no corresponding setting for IPv6 but the setting for IPv4 seems to
+help with IPv6 connections as well.
+
 == Run openQA workers
 
 Workers are services running backends to perform the actual testing. The
@@ -725,17 +742,39 @@ section.
 
 === Setting up git support
 
-Editing needles from web can optionally commit new or changed needles
-automatically to git. To do so, you need to enable git support by setting
+If your tests and needles are stored in git, openQA can perform various operations:
+
+* Automatically commit needles created in the web UI editor back to the repository
+* Automatically update the repository when scheduling tests
+* Update the server's tests and needles from git repos specified in a job's `CASEDIR` and
+`NEEDLES_DIR` variables
+* Attempt to have the web UI display the correct needles each job was executed with via
+temporary git checkouts, based on its variables
+
+By default, cloning based on `CASEDIR` and `NEEDLES_DIR` is enabled, but the other
+features are disabled. To control these features, you can use these config settings:
 
 [source,ini]
 --------------------------------------------------------------------------------
-[global]
-scm = git
+[scm git]
+git_auto_commit = yes|no|''
+git_auto_clone = yes|no
+git_auto_update = yes|no
+checkout_needles_sha = yes|no
 --------------------------------------------------------------------------------
-in <<GettingStarted.asciidoc#_configuration,the web UI configuration>>.
-Once you do so and restart the web interface, openQA will automatically commit
-new needles to the git repository.
+
+* `git_auto_commit` controls whether needles saved in the web UI editor are automatically
+committed. For backwards compatibility, setting `scm` in the `[global]` section to 'git'
+also enables this feature, if `git_auto_commit` is not set exactly to 'no' (its default
+value is the empty string '').
+* `git_auto_update` controls automatic test/needle updating when scheduling tests.
+* `git_auto_clone` controls the automatic cloning of repos referenced by `CASEDIR` and
+`NEEDLES_DIR`, at job schedule time.
+* `checkout_needles_sha` controls the feature whereby, when a job viewed in the web UI has
+variables indicating the needles came from a specific git repository and ref, openQA will
+attempt to clone that ref and display the needles from it.
+
+==== Configuration of automatic needle commit feature
 
 You may want to add some description to automatic commits coming from the web
 UI.

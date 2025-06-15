@@ -9,10 +9,11 @@ use FindBin;
 use lib "$FindBin::Bin/lib", "$FindBin::Bin/../external/os-autoinst-common/lib";
 use Data::Dumper;
 use OpenQA::Git;
-use OpenQA::Utils;
 use OpenQA::Task::Needle::Save;
+use OpenQA::Task::SignalGuard;
 use OpenQA::Test::Case;
 use OpenQA::Test::TimeLimit '10';
+use OpenQA::Utils;
 use Mojo::File 'tempdir';
 use Test::MockModule;
 use Test::Mojo;
@@ -28,6 +29,17 @@ my $fixtures = '01-jobs.pl 03-users.pl 05-job_modules.pl 07-needles.pl';
 my $schema = OpenQA::Test::Database->new->create(fixtures_glob => $fixtures);
 my $first_user = $schema->resultset('Users')->first;
 my $t = Test::Mojo->new('OpenQA::WebAPI');
+
+my $empty_tmp_dir = tempdir();
+my $fake_needle = {
+    job_id => 99926,
+    user_id => 99903,
+    needle_json => '{"area":[{"xpos":0,"ypos":0,"width":0,"height":0,"type":"match"}],"tags":["foo"]}',
+    needlename => 'foo',
+    needledir => $empty_tmp_dir,
+    imagedir => 't/data/openqa/share/tests/archlinux/needles',
+    imagename => 'test-rootneedle.png',
+};
 
 subtest 'run (arbitrary) command' => sub {
     ok(run_cmd_with_log([qw(echo Hallo Welt)]), 'run simple command');
@@ -147,17 +159,27 @@ subtest 'git commands with mocked run_cmd_with_log_return_error' => sub {
     is($git->app, $t->app, 'app is set');
     is($git->dir, 'foo/bar', 'dir is set');
     is($git->user, $first_user, 'user is set');
-    ok(!$git->enabled, 'git is not enabled by default');
+    ok(!$git->autocommit_enabled, 'git autocommit is not enabled by default');
     my $git_config = $t->app->config->{'scm git'};
     is($git->config, $git_config, 'global git config is mirrored');
     is($git->config->{update_remote}, '', 'by default no remote configured');
     is($git->config->{update_branch}, '', 'by default no branch configured');
 
     # read-only getters
-    $git->enabled(1);
-    ok(!$git->enabled, 'enabled is read-only');
+    $git->autocommit_enabled(1);
+    ok(!$git->autocommit_enabled, 'autocommit_enabled is read-only');
     $git->config({});
     is($git->config, $git_config, 'config is read-only');
+
+    # enable git auto-commit a few different ways and check it
+    $git->config->{git_auto_commit} = 'yes';
+    ok($git->autocommit_enabled, 'git_auto_commit = yes enables autocommit');
+    $git->config->{git_auto_commit} = '';
+    ok(!$git->autocommit_enabled, 'git_auto_commit empty disables autocommit');
+    $t->app->config->{global}->{scm} = 'git';
+    ok($git->autocommit_enabled, 'git_auto_commit empty and scm = git enables autocommit');
+    $git->config->{git_auto_commit} = 'no';
+    ok(!$git->autocommit_enabled, 'git_auto_commit = no disables autocommit even with scm = git');
 
     # test set_to_latest_master effectively being a no-op because no update remote and branch have been configured
     is($git->set_to_latest_master, undef, 'no error if no update remote and branch configured');
@@ -247,33 +269,20 @@ subtest 'git commands with mocked run_cmd_with_log_return_error' => sub {
 subtest 'saving needle via Git' => sub {
     my $utils_mock = Test::MockModule->new('OpenQA::Git');
     $utils_mock->redefine(run_cmd_with_log_return_error => \&_run_cmd_mock);
-    {
-        package Test::FakeMinionJob;    # uncoverable statement
+    package Test::FakeMinionJob {
         sub finish { }
         sub fail {
             Test::Most::fail("Minion job shouldn't have failed.");    # uncoverable statement
             Test::Most::note(Data::Dumper::Dumper(\@_));    # uncoverable statement
         }
-    }
+    }    # uncoverable statement
 
-    # configure use of Git
-    $t->app->config->{global}->{scm} = 'git';
-    my $empty_tmp_dir = tempdir();
+    # enable git auto-commit
+    $t->app->config->{'scm git'}->{git_auto_commit} = 'yes';
 
     # trigger saving needles like Minion would do
     @executed_commands = ();
-    OpenQA::Task::Needle::Save::_save_needle(
-        $t->app,
-        bless({} => 'Test::FakeMinionJob'),
-        {
-            job_id => 99926,
-            user_id => 99903,
-            needle_json => '{"area":[{"xpos":0,"ypos":0,"width":0,"height":0,"type":"match"}],"tags":["foo"]}',
-            needlename => 'foo',
-            needledir => $empty_tmp_dir,
-            imagedir => 't/data/openqa/share/tests/archlinux/needles',
-            imagename => 'test-rootneedle.png',
-        });
+    OpenQA::Task::Needle::Save::_save_needle($t->app, bless({} => 'Test::FakeMinionJob'), $fake_needle);
     is_deeply(
         \@executed_commands,
         [
@@ -294,6 +303,60 @@ subtest 'saving needle via Git' => sub {
 
     # note: Saving needles is already tested in t/ui/12-needle-edit.t. However, Git is disabled in that UI test so
     #       it is tested here explicitly.
+};
+
+subtest 'signal guard aborts when git is disabled and do_cleanup is "no"' => sub {
+    package My::FakeSignalGuard {
+        use Mojo::Base -base, -signatures;
+        has 'abort' => sub { 0 };
+    }    # uncoverable statement
+    my $signal_guard;
+    my $signal_guard_mock = Test::MockModule->new('OpenQA::Task::SignalGuard');
+    $signal_guard_mock->redefine(new => sub { $signal_guard = My::FakeSignalGuard->new() });
+
+    $t->app->config->{'scm git'}->{git_auto_commit} = 'no';    # disable autocommit
+    $t->app->config->{'scm git'}->{do_cleanup} = 'no';    # disable cleanup
+
+    # trigger saving needles like Minion would do
+    @executed_commands = ();
+    OpenQA::Task::Needle::Save::_save_needle($t->app, bless({} => 'Test::FakeMinionJob'), $fake_needle);
+
+    isa_ok $signal_guard, 'My::FakeSignalGuard', 'signal guard has been created with the right class';
+    ok $signal_guard->abort, 'signal guard is set to abort';
+};
+
+subtest 'save_needle returns and logs error when set_to_latest_master fails' => sub {
+    package Test::FailingMinionJob {
+        sub finish { }
+        sub fail($self, $args) { $self->{fail_message} = $args }
+    }    # uncoverable statement
+
+    sub _run_save_needle_test($git_mock) {
+        my @log_errors;
+        my $log_mock = Test::MockModule->new(ref $t->app->log);
+        $log_mock->redefine(error => sub ($self, $message) { push @log_errors, $message; });
+        my $job = bless({} => 'Test::FailingMinionJob');
+        OpenQA::Task::Needle::Save::_save_needle($t->app, $job, $fake_needle);
+
+        like $log_errors[0], qr/Unable to fetch.*mocked/, 'error logged on fail';
+        like $job->{fail_message}->{error},
+          qr{<strong>Failed to save.*</strong>.*<pre>Unable to fetch.*mocked.*</pre>},
+          'error message in fail';
+    }
+
+    my $git_mock = Test::MockModule->new('OpenQA::Git');
+    $t->app->config->{'scm git'}->{git_auto_commit} = 'yes';    # enable autocommit
+    $git_mock->redefine(set_to_latest_master => 'Unable to fetch from origin master: mocked error');
+
+    subtest 'fails when git_auto_commit and do_cleanup are enabled ' => sub {
+        $t->app->config->{'scm git'}->{do_cleanup} = 'yes';
+        _run_save_needle_test($git_mock);
+    };
+
+    subtest 'fails when git_auto_commit is enabled and do_cleanup is disabled ' => sub {
+        $t->app->config->{'scm git'}->{do_cleanup} = 'no';
+        _run_save_needle_test($git_mock);
+    };
 };
 
 done_testing();

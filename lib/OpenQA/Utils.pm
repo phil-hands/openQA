@@ -142,6 +142,7 @@ our @EXPORT = qw(
   is_host_local
   format_tx_error
   regex_match
+  config_autocommit_enabled
 );
 
 our @EXPORT_OK = qw(
@@ -535,20 +536,24 @@ sub create_downloads_list ($job_settings) {
 
 sub create_git_clone_list ($job_settings, $clones = {}) {
     my $distri = $job_settings->{DISTRI};
-    if (OpenQA::App->singleton->config->{'scm git'}->{git_auto_update} eq 'yes') {
+    my $config = OpenQA::App->singleton->config->{'scm git'};
+    if ($config->{git_auto_update} eq 'yes') {
         # Potential existing git clones to update without having CASEDIR or NEEDLES_DIR
         not $job_settings->{CASEDIR} and $clones->{testcasedir($distri)} = undef;
         not $job_settings->{NEEDLES_DIR} and $clones->{needledir($distri)} = undef;
     }
-    my $case_url = Mojo::URL->new($job_settings->{CASEDIR} // '');
-    my $needles_url = Mojo::URL->new($job_settings->{NEEDLES_DIR} // '');
-    if ($case_url->scheme) {
-        $case_url->fragment($job_settings->{TEST_GIT_REFSPEC}) if ($job_settings->{TEST_GIT_REFSPEC});
-        $clones->{testcasedir($distri)} = $case_url;
-    }
-    if ($needles_url->scheme) {
-        $needles_url->fragment($job_settings->{NEEDLES_GIT_REFSPEC}) if ($job_settings->{NEEDLES_GIT_REFSPEC});
-        $clones->{needledir($distri)} = $needles_url;
+    if ($config->{git_auto_clone} eq 'yes') {
+        # Check CASEDIR and NEEDLES_DIR
+        my $case_url = Mojo::URL->new($job_settings->{CASEDIR} // '');
+        my $needles_url = Mojo::URL->new($job_settings->{NEEDLES_DIR} // '');
+        if ($case_url->scheme) {
+            $case_url->fragment($job_settings->{TEST_GIT_REFSPEC}) if ($job_settings->{TEST_GIT_REFSPEC});
+            $clones->{testcasedir($distri)} = $case_url;
+        }
+        if ($needles_url->scheme) {
+            $needles_url->fragment($job_settings->{NEEDLES_GIT_REFSPEC}) if ($job_settings->{NEEDLES_GIT_REFSPEC});
+            $clones->{needledir($distri)} = $needles_url;
+        }
     }
     return $clones;
 }
@@ -569,12 +574,11 @@ sub human_readable_size ($size) {
 }
 
 sub read_test_modules ($job) {
-    my $testresultdir = $job->result_dir();
-    return unless $testresultdir;
+    return undef unless my $testresultdir = $job->result_dir;
 
     my $category;
     my $has_parser_text_results = 0;
-    my @modlist;
+    my (@modlist, @errors);
 
     for my $module ($job->modules_with_job_prefetched->all) {
         my $name = $module->name();
@@ -584,7 +588,7 @@ sub read_test_modules ($job) {
         my $num = 1;
         my $has_module_parser_text_result = 0;
 
-        my $module_results = $module->results;
+        my $module_results = $module->results(errors => \@errors);
         for my $step (@{$module_results->{details}}) {
             my $text = $step->{text};
             my $source = $step->{_source};
@@ -625,10 +629,7 @@ sub read_test_modules ($job) {
 
     }
 
-    return {
-        modules => \@modlist,
-        has_parser_text_results => $has_parser_text_results,
-    };
+    return {modules => \@modlist, errors => \@errors, has_parser_text_results => $has_parser_text_results};
 }
 
 # parse comments of the specified (parent) group and store all mentioned builds in $res (hashref)
@@ -879,6 +880,13 @@ sub usleep_backoff ($iteration, $min_seconds, $max_seconds, $padding = int(rand(
 
     my $delay = (($min_seconds + $iteration - 1) * ONE_SECOND_IN_MICROSECONDS) + $padding;
     return min($max_seconds * ONE_SECOND_IN_MICROSECONDS, $delay);
+}
+
+# whether we consider git auto-commit enabled or not, handling
+# compatibility with the old 'scm = git' setting
+sub config_autocommit_enabled ($config) {
+    return 0 if $config->{'scm git'}{git_auto_commit} eq 'no';
+    return ($config->{global}->{scm} || '') eq 'git' || $config->{'scm git'}{git_auto_commit} eq 'yes';
 }
 
 1;

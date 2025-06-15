@@ -2,12 +2,13 @@
 # SPDX-License-Identifier: GPL-2.0-or-later
 
 package OpenQA::Task::Needle::Save;
-use Mojo::Base 'Mojolicious::Plugin';
+use Mojo::Base 'Mojolicious::Plugin', -signatures;
 
 use File::Copy;
 use Encode 'encode_utf8';
 use OpenQA::Git;
 use OpenQA::Jobs::Constants;
+use OpenQA::Task::SignalGuard;
 use OpenQA::Utils;
 use Mojo::JSON 'decode_json';
 use Feature::Compat::Try;
@@ -52,8 +53,8 @@ sub _format_git_error {
     return "<strong>Failed to save $name.</strong><br><pre>$error</pre>";
 }
 
-sub _save_needle {
-    my ($app, $minion_job, $args) = @_;
+sub _save_needle ($app, $minion_job, $args) {
+    my $signal_guard = OpenQA::Task::SignalGuard->new($minion_job);
 
     my $schema = $app->schema;
     my $openqa_job = $schema->resultset('Jobs')->find($args->{job_id});
@@ -101,7 +102,10 @@ sub _save_needle {
 
     # ensure needle dir is up-to-date
     my $git = OpenQA::Git->new({app => $app, dir => $needledir, user => $user});
-    if ($git->enabled) {
+    # avoid retrying if cleanup via Git is not configured (then an admin might need to
+    # manually cleanup the repo first)
+    $signal_guard->abort(1) if !$git->autocommit_enabled || $git->config->{do_cleanup} ne 'yes';
+    if ($git->autocommit_enabled) {
         my $error = $git->set_to_latest_master;
         if ($error) {
             $app->log->error($error);
@@ -136,7 +140,7 @@ sub _save_needle {
     return $minion_job->fail({error => "<strong>Error creating/updating needle:</strong><br>$!."}) unless $success;
 
     # commit needle in Git repository
-    if ($git->enabled) {
+    if ($git->autocommit_enabled) {
         my $error = $git->commit(
             {
                 add => ["$needlename.json", "$needlename.png"],
