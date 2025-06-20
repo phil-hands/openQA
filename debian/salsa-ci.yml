@@ -9,3 +9,4 @@ variables:
   SALSA_CI_DISABLE_CROSSBUILD_ARM64: 1
   # let bookworm-fasttrack package be built on salsa:
   RELEASE: bookworm-backports
+  SALSA_CI_DISABLE_PIUPARTS: 1
