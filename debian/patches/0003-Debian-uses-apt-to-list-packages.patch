@@ -1,0 +1,87 @@
+From: Philip Hands <phil@hands.com>
+Date: Mon, 22 Feb 2021 11:52:10 +0100
+Subject: Debian uses apt to list packages
+
+Forwarded: not-needed
+---
+ etc/openqa/workers.ini                             |  2 +-
+ profiles/apparmor.d/usr.share.openqa.script.worker | 10 ++++++++++
+ 2 files changed, 11 insertions(+), 1 deletion(-)
+
+diff --git a/etc/openqa/workers.ini b/etc/openqa/workers.ini
+index 36f4661..33b7c73 100644
+--- a/etc/openqa/workers.ini
++++ b/etc/openqa/workers.ini
+@@ -75,7 +75,7 @@
+ # packages against the list of packages during the previous last good job.
+ # Configuring this variable provides a command line to list the packages and
+ # their versions in plain text.
+-#PACKAGES_CMD = rpm -qa
++#PACKAGES_CMD = apt list --installed
+ 
+ # Specifies the threshold to consider the load on the machine critical. If the
+ # average load (over the last 15 minutes) exceeds the specified value the worker
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.worker b/profiles/apparmor.d/usr.share.openqa.script.worker
+index b10e579..d6fb712 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -30,8 +30,11 @@
+   /dev/ptmx rw,
+   /dev/pts/* rw,
+   /dev/tty rw,
++  /etc/apt/** r,
++  /etc/dpkg/dpkg.cfg{,.d,.d/*} r,
+   /etc/gitconfig r,
+   /etc/libnl/classid r,
++  /etc/machine-id r,
+   /etc/openqa/client.conf r,
+   /etc/openqa/client.conf.d/ r,
+   /etc/openqa/client.conf.d/** r,
+@@ -58,6 +61,7 @@
+   /dev/shm/libpod_rootless_lock_* rw,
+   /proc/*/auxv r,
+   /proc/*/cmdline r,
++  /proc/*/fd/ r,
+   /proc/*/mountinfo r,
+   /proc/*/net/psched r,
+   /proc/*/stat r,
+@@ -85,12 +89,14 @@
+   /sys/kernel/mm/transparent_hugepage/hpage_pmd_size r,
+   /tmp/** rwk,
+   /usr/bin/Xvnc rCx,
++  /usr/bin/apt rix,
+   /{usr/,}bin/cat rix,
+   /usr/bin/chattr rix,
+   /usr/bin/cksum rix,
+   /usr/bin/cp rix,
+   /usr/bin/date rix,
+   /usr/bin/dirname rix,
++  /usr/bin/dpkg rix,
+   /usr/bin/eatmydata rix,
+   /usr/bin/env rix,
+   /usr/bin/find rix,
+@@ -135,6 +141,7 @@
+   /usr/bin/x3270 cx,
+   /usr/bin/xterm-console rix,
+   /usr/bin/xz rix,
++  /var/cache/apt/** r,
+   /usr/lib*/qemu/block-curl.so rix,
+   /usr/lib*/qemu/block-iscsi.so mr,
+   /usr/lib*/qemu/block-rbd.so mr,
+@@ -149,6 +156,7 @@
+   /usr/lib/utempter/utempter rix,
+   /usr/sbin/smbd rix,
+   /usr/sbin/ipmiconsole rix,
++  /usr/share/dpkg/* r,
+   /usr/share/openqa/lib/** r,
+   /usr/share/openqa/lib/DBIx/Class/Timestamps.pm r,
+   /usr/share/openqa/lib/OpenQA/** r,
+@@ -160,6 +168,8 @@
+   /usr/share/seabios/* r,
+   /usr/share/qemu/keymaps/* r,
+   /usr/share/OVMF/* rk,
++  /var/lib/apt/** r,
++  /var/lib/dpkg/status r,
+   /var/lib/openqa/cache/ r,
+   /var/lib/openqa/cache/** rwk,
+   /var/lib/openqa/pool/ r,

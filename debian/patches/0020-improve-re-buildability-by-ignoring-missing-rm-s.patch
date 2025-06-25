@@ -1,0 +1,21 @@
+From: Philip Hands <phil@hands.com>
+Date: Mon, 12 Aug 2024 16:30:25 +0200
+Subject: improve re-buildability (by ignoring missing rm's)
+
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index 7ca7f9a..b1ea136 100644
+--- a/Makefile
++++ b/Makefile
+@@ -93,7 +93,7 @@ build-manpages: $(man_dir) $(manpages)
+ 
+ .PHONY: clean
+ clean:
+-	-rm -r build
++	-rm -rf build
+ 
+ .PHONY: install-generic
+ install-generic:

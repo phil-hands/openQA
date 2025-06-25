@@ -1,0 +1,20 @@
+From: Philip Hands <phil@hands.com>
+Date: Wed, 11 Jun 2025 08:12:40 +0200
+Subject: apparmor: add Debian path for tesseract data
+
+---
+ profiles/apparmor.d/usr.share.openqa.script.worker | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.worker b/profiles/apparmor.d/usr.share.openqa.script.worker
+index ce6efd0..7190846 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -169,6 +169,7 @@
+   /usr/share/git-core/templates/ r,
+   /usr/share/git-core/templates/** r,
+   /usr/share/tessdata/* r,
++  /usr/share/tesseract-ocr/*/tessdata/* r,
+   /usr/share/qemu/* rk,
+   /usr/share/seabios/* r,
+   /usr/share/qemu/keymaps/* r,

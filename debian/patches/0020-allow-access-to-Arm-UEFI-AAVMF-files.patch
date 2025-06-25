@@ -1,0 +1,22 @@
+From: Philip Hands <phil@hands.com>
+Date: Mon, 20 Nov 2023 14:22:13 +0100
+Subject: apparmor: allow access to Arm UEFI (AAVMF) files
+
+This is required for running aarch64 KVM
+---
+ profiles/apparmor.d/usr.share.openqa.script.worker | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.worker b/profiles/apparmor.d/usr.share.openqa.script.worker
+index 839f648..86c604c 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -168,7 +168,7 @@
+   /usr/share/qemu/* rk,
+   /usr/share/seabios/* r,
+   /usr/share/qemu/keymaps/* r,
+-  /usr/share/OVMF/* rk,
++  /usr/share/{AA,O}VMF/* rk,
+   /var/lib/apt/** r,
+   /var/lib/dpkg/status r,
+   /var/lib/openqa/cache/ r,

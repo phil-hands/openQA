@@ -1,0 +1,21 @@
+From: Philip Hands <phil@hands.com>
+Date: Wed, 26 Feb 2025 23:30:22 +0100
+Subject: use unicode '\2022' rather than bullet character
+
+---
+ assets/stylesheets/overview.scss | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/assets/stylesheets/overview.scss b/assets/stylesheets/overview.scss
+index 6c05abf..9f77614 100644
+--- a/assets/stylesheets/overview.scss
++++ b/assets/stylesheets/overview.scss
+@@ -3,7 +3,7 @@
+     tr.parallel-child td.name {
+         padding-left: 1em;
+         &:first-child:before {
+-            content: "•";
++            content: "\2022";
+         }
+     }
+     a.fa, span > a {

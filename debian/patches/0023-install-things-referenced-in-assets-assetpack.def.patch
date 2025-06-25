@@ -1,0 +1,21 @@
+From: Philip Hands <phil@hands.com>
+Date: Fri, 13 Dec 2024 22:28:24 +0100
+Subject: install things referenced in assets/assetpack.def
+
+---
+ Makefile | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/Makefile b/Makefile
+index b1ea136..1cbea7e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -102,7 +102,7 @@ install-generic:
+ 		mkdir -p "$(DESTDIR)"/usr/share/openqa/$$i ;\
+ 		cp -a $$i/* "$(DESTDIR)"/usr/share/openqa/$$i ;\
+ 	done
+-	for f in $(shell perl -Ilib -mOpenQA::Assets -e OpenQA::Assets::list); do \
++	for f in $(shell sed -nE 's%<+ \.\./(node_modules/[^_].*)%\1%p' assets/assetpack.def); do \
+ 		install -m 644 -D --target-directory="$(DESTDIR)/usr/share/openqa/$${f%/*}" "$$f";\
+ 	done
+ 

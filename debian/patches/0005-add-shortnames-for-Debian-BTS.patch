@@ -1,0 +1,115 @@
+From: Philip Hands <phil@hands.com>
+Date: Sat, 1 May 2021 06:58:11 +0200
+Subject: add shortnames for Debian BTS
+
+Forwarded: not-needed
+
+not sure if this needs to go upstream
+---
+ docs/UsersGuide.asciidoc                                  | 6 +++---
+ lib/OpenQA/Utils.pm                                       | 3 +++
+ lib/OpenQA/WebAPI/Controller/API/V1/Bug.pm                | 2 +-
+ templates/webapi/comments/add_comment_form_groups.html.ep | 4 ++--
+ templates/webapi/step/edit.html.ep                        | 2 +-
+ 5 files changed, 10 insertions(+), 7 deletions(-)
+
+diff --git a/docs/UsersGuide.asciidoc b/docs/UsersGuide.asciidoc
+index ac05470..6e407e1 100644
+--- a/docs/UsersGuide.asciidoc
++++ b/docs/UsersGuide.asciidoc
+@@ -318,7 +318,7 @@ image::images/review_badges.png[Review badges]
+ === Bug references, labels and flags
+ ==== Bug references
+ It is possible to reference a bug by writing `<bugtracker_shortname>#<bug_nr>`
+-in a comment, e.g. `bsc#1234`. It is also possible to spell out the full URL,
++in a comment, e.g. `deb#1234`. It is also possible to spell out the full URL,
+ e.g. `https://bugzilla.suse.com/show_bug.cgi?id=1234` which will then be
+ shortened automatically. A bug reference is rendered as link and a bug icon
+ is displayed for the job in various places as shown in the figure below.
+@@ -329,7 +329,7 @@ carryover.
+ 
+ WARNING: If you want to reference a bug without making it count as a bug
+ reference you need to wrap it into a label (see subsequent section), e.g.
+-`label:bsc#1234`.
++`label:deb#1234`.
+ 
+ [[bug_icon]]
+ .Bug icon for job with bug reference on test result overview
+@@ -368,7 +368,7 @@ icon is shown and the comment does *not* become subject to carry over.
+ One special label format is available which allows to forcefully overwrite the
+ result of an openQA job using a convenient openQA comment. The expected format
+ is `label:force_result:<new_result>[:<description>]`, for example
+-`label:force_result:failed` or `label:force_result:softfailed:bsc#1234`. For
++`label:force_result:failed` or `label:force_result:softfailed:deb#1234`. For
+ this command to be effective the according user needs to have at least
+ operator permissions.
+ 
+diff --git a/lib/OpenQA/Utils.pm b/lib/OpenQA/Utils.pm
+index acc443d..6ba5c83 100644
+--- a/lib/OpenQA/Utils.pm
++++ b/lib/OpenQA/Utils.pm
+@@ -39,6 +39,8 @@ my $FRAG_REGEX = FRAGMENT_REGEX;
+ my (%BUGREFS, %BUGURLS, $MARKER_REFS, $MARKER_URLS, $BUGREF_REGEX);
+ BEGIN {
+     %BUGREFS = (
++        bts => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
++        deb => 'https://bugs.debian.org/cgi-bin/bugreport.cgi?bug=',
+         bnc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
+         bsc => 'https://bugzilla.suse.com/show_bug.cgi?id=',
+         boo => 'https://bugzilla.opensuse.org/show_bug.cgi?id=',
+@@ -56,6 +58,7 @@ BEGIN {
+         gfs => 'https://gitlab.com/fedora/sigs/',
+     );
+     %BUGURLS = (
++        $BUGREFS{deb} => 'deb',
+         'https://bugzilla.novell.com/show_bug.cgi?id=' => 'bsc',
+         $BUGREFS{bsc} => 'bsc',
+         $BUGREFS{boo} => 'boo',
+diff --git a/lib/OpenQA/WebAPI/Controller/API/V1/Bug.pm b/lib/OpenQA/WebAPI/Controller/API/V1/Bug.pm
+index 8923194..98452b3 100644
+--- a/lib/OpenQA/WebAPI/Controller/API/V1/Bug.pm
++++ b/lib/OpenQA/WebAPI/Controller/API/V1/Bug.pm
+@@ -34,7 +34,7 @@ OpenQA API implementation for bug handling methods.
+ =item list()
+ 
+ Returns a dictionary of bugs reported in the system of the form { id: bug } where the key
+-is the ID in the database and the value is the external bug, eg. bsc#123 or poo#123.
++is the ID in the database and the value is the external bug, eg. deb#123 or bsc#123.
+ 
+ The optional parameter "refreshable" limits the results to bugs not updated recently.
+ Bugs that were already checked and don't actually exist in the bugtracker are not returned
+diff --git a/templates/webapi/comments/add_comment_form_groups.html.ep b/templates/webapi/comments/add_comment_form_groups.html.ep
+index bc77489..7a466d7 100644
+--- a/templates/webapi/comments/add_comment_form_groups.html.ep
++++ b/templates/webapi/comments/add_comment_form_groups.html.ep
+@@ -5,7 +5,7 @@
+     </p>
+     <ul>
+         <li>
+-            For issue references write <code><i>bugtracker_shortname</i>#<i>bug_nr</i></code> in a comment, e.g. <code>bsc#1234</code> anywhere in a sentence.
++            For issue references write <code><i>bugtracker_shortname</i>#<i>bug_nr</i></code> in a comment, e.g. <code>deb#1234</code> anywhere in a sentence.
+         </li>
+         <li>
+             For generic labels use <code>label:<i>keyword</i></code> where <i>keyword</i> can be any valid character up to the next whitespace, e.g. "false_positive".
+@@ -16,7 +16,7 @@
+         environment of one openQA instance.
+     </p>
+     <p>
+-        One special label format is available which allows to forcefully overwrite the result of a job using a comment. The expected format is <code>label:force_result:<i>new_result[:description]</i></code>, for example <code>label:force_result:failed</code> or <code>label:force_result:softfailed:bsc#1234</code>. For this command to be effective the according user needs to have at least operator permissions.
++        One special label format is available which allows to forcefully overwrite the result of a job using a comment. The expected format is <code>label:force_result:<i>new_result[:description]</i></code>, for example <code>label:force_result:failed</code> or <code>label:force_result:softfailed:deb#1234</code>. For this command to be effective the according user needs to have at least operator permissions.
+     </p>
+     <p>
+         Also GitHub pull requests and issues can be linked using the generic format <i>marker</i>[#<i>project/repo</i>]#<i>id</i>,
+diff --git a/templates/webapi/step/edit.html.ep b/templates/webapi/step/edit.html.ep
+index 6a36e7a..8f648ae 100644
+--- a/templates/webapi/step/edit.html.ep
++++ b/templates/webapi/step/edit.html.ep
+@@ -137,7 +137,7 @@
+                                 <label for="property_workaround">workaround</label>
+                                 <%= help_popover('Help for the workaround property' =>
+                                     'If a needle with the workaround property matches the match result is recorded as
+-                                    a \'soft-fail\'. It is suggested to input the reason in the \'Description\' textbox(e.g. bsc#12345 - summary of ticket).')
++                                    a \'soft-fail\'. It is suggested to input the reason in the \'Description\' textbox(e.g. deb#12345 - summary of ticket).')
+                                 %>
+                                 <span id="workaround_reason" style="display:none;">
+                                     <br>

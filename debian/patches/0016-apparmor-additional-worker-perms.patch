@@ -1,0 +1,36 @@
+From: Philip Hands <phil@hands.com>
+Date: Fri, 26 Apr 2024 16:14:50 +0200
+Subject: apparmor: additional worker perms
+
+---
+ profiles/apparmor.d/usr.share.openqa.script.worker | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.worker b/profiles/apparmor.d/usr.share.openqa.script.worker
+index 86c604c..3363939 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -57,6 +57,7 @@
+   /usr/lib/cni/portmap rix,
+   /usr/lib/cni/tuning rix,
+   /usr/lib/cni/firewall rix,
++  /proc/*/task/*/comm rw,
+   /proc/*/task/*/ns/net r,
+   /dev/shm/libpod_rootless_lock_* rw,
+   /proc/*/auxv r,
+@@ -68,6 +69,7 @@
+   /proc/*/status r,
+   /proc/[0-9]*/cgroup r,
+   /proc/filesystems r,
++  /proc/loadavg r,
+   /proc/meminfo r,
+   /proc/loadavg r,
+   /proc/sys/vm/overcommit_memory r,
+@@ -108,6 +110,7 @@
+   /{usr/,}bin/grep rix,
+   /usr/bin/gzip rix,
+   /usr/bin/head rix,
++  /usr/bin/hostname rix,
+   /usr/bin/icewm-default rix,
+   /usr/bin/ionice rix,
+   /usr/bin/ipmitool rix,

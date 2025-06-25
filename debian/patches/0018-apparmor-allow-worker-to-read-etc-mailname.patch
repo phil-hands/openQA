@@ -1,0 +1,20 @@
+From: Philip Hands <phil@hands.com>
+Date: Wed, 5 Jun 2024 10:28:36 +0200
+Subject: apparmor: allow worker to read /etc/mailname
+
+---
+ profiles/apparmor.d/usr.share.openqa.script.worker | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.worker b/profiles/apparmor.d/usr.share.openqa.script.worker
+index 3363939..8fcab60 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -35,6 +35,7 @@
+   /etc/gitconfig r,
+   /etc/libnl/classid r,
+   /etc/machine-id r,
++  /etc/mailname r,
+   /etc/openqa/client.conf r,
+   /etc/openqa/client.conf.d/ r,
+   /etc/openqa/client.conf.d/** r,

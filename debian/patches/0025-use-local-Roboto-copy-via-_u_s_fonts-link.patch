@@ -1,0 +1,40 @@
+From: Philip Hands <phil@hands.com>
+Date: Mon, 16 Dec 2024 23:25:36 +0100
+Subject: use local Roboto copy, via _u_s_fonts link
+
+---
+ assets/stylesheets/openqa.scss | 7 +++++--
+ t/25-serverstartup.t           | 2 +-
+ 2 files changed, 6 insertions(+), 3 deletions(-)
+
+diff --git a/assets/stylesheets/openqa.scss b/assets/stylesheets/openqa.scss
+index e7952a3..b65ce15 100644
+--- a/assets/stylesheets/openqa.scss
++++ b/assets/stylesheets/openqa.scss
+@@ -2,8 +2,11 @@
+ // include themes: these set variables for common values
+ @import "openqa_theme.scss";
+ 
+-// include Roboto font
+-@import url($web-font-path);
++// use Roboto font from linked build dependency on Debian
++@font-face {
++  font-family: 'Roboto';
++  src: url('../../node_modules/_u_s_fonts/truetype/roboto-fontface/roboto/Roboto-Regular.ttf') format('truetype');
++}
+ 
+ // prevent bom from disturbing rest of the CSS
+ dummy { font-size: 42px; }
+diff --git a/t/25-serverstartup.t b/t/25-serverstartup.t
+index b6f4c90..53c16a6 100644
+--- a/t/25-serverstartup.t
++++ b/t/25-serverstartup.t
+@@ -171,7 +171,7 @@ subtest 'Update configuration from Plugin requirements' => sub {
+ subtest 'listing assets (for installation/Makefile)' => sub {
+     my $app = Mojolicious->new(home => Mojo::Home->new("$FindBin::Bin/.."));
+     my $output = combined_from { OpenQA::Assets::list($app) };
+-    my @expected_extensions = qw(scss css js png svg ttf);
++    my @expected_extensions = qw(scss css js png svg);
+     like $output, qr{^(assets|node_modules)/.*\.$_$}m, "$_ file listed" for @expected_extensions;
+ };
+ 

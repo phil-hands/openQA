@@ -1,0 +1,20 @@
+From: Philip Hands <phil@hands.com>
+Date: Fri, 20 Jun 2025 18:29:02 +0200
+Subject: apparmor: +/usr/bin/env
+
+---
+ profiles/apparmor.d/usr.share.openqa.script.openqa | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.openqa b/profiles/apparmor.d/usr.share.openqa.script.openqa
+index e19e9e4..3c150a3 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.openqa
++++ b/profiles/apparmor.d/usr.share.openqa.script.openqa
+@@ -27,6 +27,7 @@
+   /usr/bin/bsdcat rix,
+   /usr/bin/bsdtar rix,
+   /usr/bin/dash ix,
++  /usr/bin/env ix,
+   /usr/bin/perl ix,
+   /usr/bin/pwd ix,
+   /usr/bin/sleep rix,

@@ -1,0 +1,126 @@
+From: Philip Hands <phil@hands.com>
+Date: Fri, 10 Sep 2021 22:20:09 +0200
+Subject: openqa-cli: add --odn option (for open.debian.net)
+
+---
+ lib/OpenQA/CLI.pm         | 5 +++--
+ lib/OpenQA/CLI/api.pm     | 5 +++--
+ lib/OpenQA/CLI/archive.pm | 5 +++--
+ lib/OpenQA/Command.pm     | 5 +++--
+ t/43-cli-api.t            | 3 +++
+ t/43-cli-archive.t        | 3 +++
+ 6 files changed, 18 insertions(+), 8 deletions(-)
+
+diff --git a/lib/OpenQA/CLI.pm b/lib/OpenQA/CLI.pm
+index ff05644..529451d 100644
+--- a/lib/OpenQA/CLI.pm
++++ b/lib/OpenQA/CLI.pm
+@@ -32,8 +32,8 @@ openqa-cli - provides command-line access to the openQA API
+     # Show details for job from arbitrary host
+     openqa-cli api --host http://openqa.example.com jobs/408
+ 
+-    # Show details for OSD job (prettified JSON)
+-    openqa-cli api --osd --pretty jobs/4160811
++    # Show details for open.debian.net job (prettified JSON)
++    openqa-cli api --odn --pretty jobs/4160811
+ 
+     # Archive job from O3
+     openqa-cli archive --o3 408 /tmp/job_408
+@@ -46,6 +46,7 @@ openqa-cli - provides command-line access to the openQA API
+     -h, --help                  Get more information on a specific command
+         --osd                   Set target host to http://openqa.suse.de
+         --o3                    Set target host to https://openqa.opensuse.org
++        --odn                   Set target host to https://openqa.debian.net
+ 
+   Configuration:
+     API key and secret are read from "client.conf" if not specified via CLI
+diff --git a/lib/OpenQA/CLI/api.pm b/lib/OpenQA/CLI/api.pm
+index 932d067..d7ce0b1 100644
+--- a/lib/OpenQA/CLI/api.pm
++++ b/lib/OpenQA/CLI/api.pm
+@@ -58,8 +58,8 @@ sub command ($self, @args) {
+     # Show details for job from arbitrary host
+     openqa-cli api --host http://openqa.example.com jobs/408
+ 
+-    # Show details for job from OSD (prettified JSON)
+-    openqa-cli api --osd --pretty jobs/4160811
++    # Show details for job from open.debian.net (prettified JSON)
++    openqa-cli api --odn --pretty jobs/4160811
+ 
+     # List all jobs (CAUTION: this might time out for a large instance)
+     openqa-cli api --host openqa.example.com jobs
+@@ -126,6 +126,7 @@ sub command ($self, @args) {
+     -j, --json                    Request content is JSON
+         --osd                     Set target host to http://openqa.suse.de
+         --o3                      Set target host to https://openqa.opensuse.org
++        --odn                     Set target host to https://openqa.debian.net
+         --param-file <param=file> Load content of params from files instead of
+                                   from command line arguments. Multiple params
+                                   may be specified by adding the option
+diff --git a/lib/OpenQA/CLI/archive.pm b/lib/OpenQA/CLI/archive.pm
+index a3cbbbc..df58d8d 100644
+--- a/lib/OpenQA/CLI/archive.pm
++++ b/lib/OpenQA/CLI/archive.pm
+@@ -36,8 +36,8 @@ sub command ($self, @args) {
+ 
+   Usage: openqa-cli archive [OPTIONS] JOB PATH
+ 
+-    # Download assets and test results from OSD to /tmp/job_416081
+-    openqa-cli archive --osd 416081 /tmp/job_416081
++    # Download assets and test results from ODN to /tmp/job_416081
++    openqa-cli archive --odn 416081 /tmp/job_416081
+ 
+     # Download assets and test results from arbitrary host
+     openqa-cli archive --host http://openqa.example.com 407 /tmp/foo
+@@ -58,6 +58,7 @@ sub command ($self, @args) {
+                                    header, defaults to "openqa-cli"
+         --osd                      Set target host to http://openqa.suse.de
+         --o3                       Set target host to https://openqa.opensuse.org
++        --odn                      Set target host to https://openqa.debian.net
+     -t, --with-thumbnails          Download thumbnails as well
+ 
+ =cut
+diff --git a/lib/OpenQA/Command.pm b/lib/OpenQA/Command.pm
+index 38f65d1..306df88 100644
+--- a/lib/OpenQA/Command.pm
++++ b/lib/OpenQA/Command.pm
+@@ -101,8 +101,9 @@ sub run ($self, @args) {
+       'apikey=s' => sub { $self->apikey($_[1]) },
+       'apisecret=s' => sub { $self->apisecret($_[1]) },
+       'host=s' => sub { $self->host($_[1] =~ m!^/|://! ? $_[1] : "https://$_[1]") },
+-      o3 => sub { $self->host('https://openqa.opensuse.org') },
+-      osd => sub { $self->host('http://openqa.suse.de') },
++      'o3' => sub { $self->host('https://openqa.opensuse.org') },
++      'osd' => sub { $self->host('http://openqa.suse.de') },
++      'odn' => sub { $self->host('https://openqa.debian.net') },
+       'L|links' => \$options{links},
+       'name=s' => sub { $self->name($_[1]) },
+       'p|pretty' => \$options{pretty},
+diff --git a/t/43-cli-api.t b/t/43-cli-api.t
+index a1ebd94..7aa1d31 100644
+--- a/t/43-cli-api.t
++++ b/t/43-cli-api.t
+@@ -95,6 +95,9 @@ subtest 'Host' => sub {
+     throws_ok { $api->run('--o3') } qr/Usage: openqa-cli api/, 'usage';
+     is $api->host, 'https://openqa.opensuse.org', 'host';
+ 
++    throws_ok { $api->run('--odn') } qr/Usage: openqa-cli api/, 'usage';
++    is $api->host, 'https://openqa.debian.net', 'host';
++
+     throws_ok { $api->run(@host) } qr/Usage: openqa-cli api/, 'usage';
+     is $api->host, $host, 'host';
+ };
+diff --git a/t/43-cli-archive.t b/t/43-cli-archive.t
+index 94766d9..9ba7e8f 100644
+--- a/t/43-cli-archive.t
++++ b/t/43-cli-archive.t
+@@ -69,6 +69,9 @@ subtest 'Host' => sub {
+     throws_ok { $archive->run('--o3') } qr/Usage: openqa-cli archive/, 'usage';
+     is $archive->host, 'https://openqa.opensuse.org', 'host';
+ 
++    throws_ok { $archive->run('--odn') } qr/Usage: openqa-cli archive/, 'usage';
++    is $archive->host, 'https://openqa.debian.net', 'host';
++
+     throws_ok { $archive->run(@host) } qr/Usage: openqa-cli archive/, 'usage';
+     is $archive->host, $host, 'host';
+ };

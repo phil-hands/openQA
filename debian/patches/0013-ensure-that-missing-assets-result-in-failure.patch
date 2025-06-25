@@ -1,0 +1,37 @@
+From: Philip Hands <phil@hands.com>
+Date: Fri, 31 Dec 2021 11:57:37 +0100
+Subject: ensure that missing assets result in failure
+
+---
+ tools/generate-packed-assets | 9 +++++++++
+ 1 file changed, 9 insertions(+)
+
+diff --git a/tools/generate-packed-assets b/tools/generate-packed-assets
+index 6bfb436..e857662 100755
+--- a/tools/generate-packed-assets
++++ b/tools/generate-packed-assets
+@@ -31,6 +31,8 @@
+ BUILD_CACHE="plugin AssetPack => LoadFile(app->home->child('assets', 'assetpack.yml')) and app->asset->process()"
+ BUILD_CACHE_OPTS='-Ilib/ -MMojolicious::Lite -MYAML::PP=LoadFile'
+ 
++MISSING=0
++
+ generate() {
+     local rc=0
+     # shellcheck disable=SC2039
+@@ -40,8 +42,15 @@ generate() {
+         rc=$?
+         sleep 1
+     done
++    MISSING=1
+     return "$rc"
+ }
+ 
+ generate "test" || exit $?
+ generate "development" || exit $?
++
++if [ "$GENERATE_PACKED_ASSETS_FAILS_ON_MISSING_ASSETS" ]; then
++    # for Debian packaging, fail at this point if any assets are missing
++    exit $MISSING
++fi
++exit 0

@@ -1,0 +1,40 @@
+From: Philip Hands <phil@hands.com>
+Date: Tue, 14 Sep 2021 08:33:47 +0200
+Subject: Add Documentation to some systemd units
+
+I'm sure there are more references that could be usefully added to these
+(it's a space-separated list. see: systemd.unit(5)), and there are
+several other units that could also use a Documentation setting where I
+don't know enough about them, and the docs, to find a URL to use, but at
+least this is a start.
+
+Forwarded: no
+---
+ systemd/openqa-webui.service         | 1 +
+ systemd/openqa-worker-plain@.service | 1 +
+ 2 files changed, 2 insertions(+)
+
+diff --git a/systemd/openqa-webui.service b/systemd/openqa-webui.service
+index fa27535..d5c9038 100644
+--- a/systemd/openqa-webui.service
++++ b/systemd/openqa-webui.service
+@@ -3,6 +3,7 @@ Description=The openQA web UI
+ Wants=openqa-setup-db.service openqa-livehandler.service openqa-websockets.service openqa-gru.service openqa-enqueue-asset-cleanup.timer openqa-enqueue-result-cleanup.timer openqa-enqueue-bug-cleanup.timer openqa-minion-restart.path
+ After=postgresql.service openqa-setup-db.service nss-lookup.target remote-fs.target apache2.service nginx.service caddy.service
+ Before=openqa-gru.service openqa-scheduler.service openqa-livehandler.service
++Documentation=https://open.qa/docs/#_run_the_web_ui
+ 
+ [Service]
+ User=geekotest
+diff --git a/systemd/openqa-worker-plain@.service b/systemd/openqa-worker-plain@.service
+index 2e1fdfb..4a4c438 100644
+--- a/systemd/openqa-worker-plain@.service
++++ b/systemd/openqa-worker-plain@.service
+@@ -6,6 +6,7 @@
+ Description=openQA Worker #%i
+ After=openqa-slirpvde.service network.target nss-lookup.target remote-fs.target time-sync.target
+ PartOf=openqa-worker.target
++Documentation=https://open.qa/docs/#_run_openqa_workers
+ 
+ [Service]
+ Type=simple

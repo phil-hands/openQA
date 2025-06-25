@@ -1,0 +1,20 @@
+From: Philip Hands <phil@hands.com>
+Date: Wed, 28 May 2025 23:20:24 +0200
+Subject: apparmor: + /var/lib/dpkg/arch
+
+---
+ profiles/apparmor.d/usr.share.openqa.script.worker | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.worker b/profiles/apparmor.d/usr.share.openqa.script.worker
+index 8fcab60..ce6efd0 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -175,6 +175,7 @@
+   /usr/share/{AA,O}VMF/* rk,
+   /var/lib/apt/** r,
+   /var/lib/dpkg/status r,
++  /var/lib/dpkg/arch r,
+   /var/lib/openqa/cache/ r,
+   /var/lib/openqa/cache/** rwk,
+   /var/lib/openqa/pool/ r,

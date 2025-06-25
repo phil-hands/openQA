@@ -1,0 +1,20 @@
+From: Philip Hands <phil@hands.com>
+Date: Wed, 31 Jul 2024 16:01:42 +0200
+Subject: stop pointless zypper stuff on debian
+
+---
+ tools/ci/build-docs | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/tools/ci/build-docs b/tools/ci/build-docs
+index 8f8048e..3a611ed 100755
+--- a/tools/ci/build-docs
++++ b/tools/ci/build-docs
+@@ -1,6 +1,6 @@
+ #!/bin/bash -e
+ # pygments requires python2
+-tools/retry sudo zypper -n install python3-base
++#tools/retry sudo zypper -n install python3-base
+ GEM_HOME=$(pwd)/.gem
+ export GEM_HOME
+ if [[ "${CIRCLE_JOB}" != *nightly ]]; then

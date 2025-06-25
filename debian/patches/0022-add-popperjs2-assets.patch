@@ -1,0 +1,21 @@
+From: Philip Hands <phil@hands.com>
+Date: Sat, 23 Nov 2024 10:32:17 +0100
+Subject: add popperjs2 assets
+
+[git-debrebase split: mixed commit: upstream part]
+---
+ assets/assetpack.def | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/assets/assetpack.def b/assets/assetpack.def
+index eecf609..ab7188c 100644
+--- a/assets/assetpack.def
++++ b/assets/assetpack.def
+@@ -124,6 +124,7 @@
+ < ../node_modules/jquery/dist/jquery.min.js
+ < javascripts/openqa.js
+ < ../node_modules/datatables.net/js/dataTables.min.js
++< ../node_modules/popperjs2/popper.min.js
+ < ../node_modules/datatables.net-bs5/js/dataTables.bootstrap5.min.js
+ < ../node_modules/timeago/jquery.timeago.js
+ < javascripts/index.js

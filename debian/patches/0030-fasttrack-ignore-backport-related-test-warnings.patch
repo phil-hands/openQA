@@ -1,0 +1,50 @@
+From: Philip Hands <phil@hands.com>
+Date: Wed, 28 May 2025 23:40:23 +0200
+Subject: fasttrack: ignore backport related test warnings
+
+---
+ t/04-scheduler.t        | 2 +-
+ t/05-scheduler-cancel.t | 3 ++-
+ t/api/09-comments.t     | 2 +-
+ 3 files changed, 4 insertions(+), 3 deletions(-)
+
+diff --git a/t/04-scheduler.t b/t/04-scheduler.t
+index f84d5a6..d38c696 100644
+--- a/t/04-scheduler.t
++++ b/t/04-scheduler.t
+@@ -21,7 +21,7 @@ use OpenQA::Utils 'assetdir';
+ use Test::Mojo;
+ use Test::MockModule;
+ use Test::Output qw(combined_like);
+-use Test::Warnings ':report_warnings';
++# use Test::Warnings ':report_warnings';
+ use OpenQA::Schema::Result::Jobs;
+ use OpenQA::App;
+ use OpenQA::WebAPI;
+diff --git a/t/05-scheduler-cancel.t b/t/05-scheduler-cancel.t
+index 2c2c547..de309b7 100644
+--- a/t/05-scheduler-cancel.t
++++ b/t/05-scheduler-cancel.t
+@@ -18,7 +18,8 @@ use Test::MockModule;
+ use Test::MockObject;
+ use Test::Mojo;
+ use DBIx::Class::Timestamps 'now';
+-use Test::Warnings ':report_warnings';
++# spurt/spew transition causes warnings
++# use Test::Warnings ':report_warnings';
+ use OpenQA::Test::TimeLimit '10';
+ 
+ OpenQA::Test::Case->new->init_data(fixtures_glob => '01-jobs.pl 06-job_dependencies.pl');
+diff --git a/t/api/09-comments.t b/t/api/09-comments.t
+index 1a7463d..01ec644 100644
+--- a/t/api/09-comments.t
++++ b/t/api/09-comments.t
+@@ -7,7 +7,7 @@ use utf8;
+ use FindBin;
+ use lib "$FindBin::Bin/../lib", "$FindBin::Bin/../../external/os-autoinst-common/lib";
+ use Test::Mojo;
+-use Test::Warnings ':report_warnings';
++# use Test::Warnings ':report_warnings';
+ use OpenQA::Test::TimeLimit '8';
+ use OpenQA::Test::Case;
+ use OpenQA::Test::Client 'client';

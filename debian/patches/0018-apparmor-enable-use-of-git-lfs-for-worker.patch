@@ -1,0 +1,28 @@
+From: Philip Hands <phil@hands.com>
+Date: Tue, 15 Nov 2022 11:59:45 +0100
+Subject: apparmor: enable use of git-lfs for worker
+
+---
+ profiles/apparmor.d/usr.share.openqa.script.worker | 2 ++
+ 1 file changed, 2 insertions(+)
+
+diff --git a/profiles/apparmor.d/usr.share.openqa.script.worker b/profiles/apparmor.d/usr.share.openqa.script.worker
+index d6fb712..839f648 100644
+--- a/profiles/apparmor.d/usr.share.openqa.script.worker
++++ b/profiles/apparmor.d/usr.share.openqa.script.worker
+@@ -104,6 +104,7 @@
+   /usr/bin/fuser rix,
+   /usr/bin/git rix,
+   /usr/bin/du rix,
++  /usr/bin/git-lfs rix,
+   /{usr/,}bin/grep rix,
+   /usr/bin/gzip rix,
+   /usr/bin/head rix,
+@@ -175,6 +176,7 @@
+   /var/lib/openqa/pool/ r,
+   /var/lib/openqa/pool/*/ r,
+   /var/lib/openqa/pool/*/** rwkl,
++  /var/lib/openqa/pool/*/*/.git/hooks/post-checkout rix,
+   /var/lib/openqa/share/* r,
+   /var/lib/openqa/share/factory/hdd/ r,
+   /var/lib/openqa/share/factory/hdd/* rk,

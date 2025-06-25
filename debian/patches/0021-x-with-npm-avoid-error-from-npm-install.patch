@@ -1,0 +1,31 @@
+From: Philip Hands <phil@hands.com>
+Date: Tue, 19 Nov 2024 10:47:17 +0100
+Subject: x-with-npm: avoid error from 'npm install'
+
+Forwarded: not-needed
+
+When building with DEB_BUILD_PROFILES=x-with-npm, which causes
+the debian/rules file to run `npm install` we get an error:
+
+  npm ERR! Invalid comparator: npm:d3
+
+unless this d3 stanza is removed from package.json.
+---
+ package.json | 5 -----
+ 1 file changed, 5 deletions(-)
+
+diff --git a/package.json b/package.json
+index 9c5ef40..30818a4 100644
+--- a/package.json
++++ b/package.json
+@@ -29,10 +29,5 @@
+     "jquery": "^3.7.1",
+     "jquery-ujs": "^1.2.3",
+     "timeago": "^1.6.7"
+-  },
+-  "overrides": {
+-    "dagre-d3": {
+-      "d3": "npm:d3"
+-    }
+   }
+ }
