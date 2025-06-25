@@ -1,3 +1,9 @@
+openqa (5.1750858025.b9f0656f0-1) UNRELEASED; urgency=medium
+
+  * Update to new upstream version 5.1750858025.b9f0656f0.
+
+ -- Philip Hands <phil@hands.com>  Wed, 25 Jun 2025 19:10:22 +0200
+
 openqa (4.6.1749835125.6b21a3a03-1~fto12+1) bookworm-fasttrack; urgency=medium
 
   * Update to new upstream version 4.6.1749835125.6b21a3a03.
