@@ -12,15 +12,15 @@
   },
   "homepage": "https://github.com/os-autoinst/openQA#readme",
   "devDependencies": {
-    "eslint": "^9.28.0",
+    "eslint": "^9.29.0",
     "eslint-config-prettier": "^10.1.5",
-    "eslint-plugin-prettier": "^5.4.1",
-    "prettier": "3.5.3"
+    "eslint-plugin-prettier": "^5.5.1",
+    "prettier": "3.6.0"
   },
   "dependencies": {
-    "ace-builds": "^1.42.0",
+    "ace-builds": "^1.43.0",
     "anser": "^2.3.2",
-    "bootstrap": "^5.3.6",
+    "bootstrap": "^5.3.7",
     "chosen-js": "^1.8.7",
     "d3": "^7.9.0",
     "dagre-d3": "^0.6.4",
