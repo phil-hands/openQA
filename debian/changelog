@@ -1,4 +1,4 @@
-openqa (5.1750858025.b9f0656f0-1) UNRELEASED; urgency=medium
+openqa (5.1750858025.b9f0656f0-1~fto12+1) bookworm-fasttrack; urgency=medium
 
   * Update to new upstream version 5.1750858025.b9f0656f0.
 
